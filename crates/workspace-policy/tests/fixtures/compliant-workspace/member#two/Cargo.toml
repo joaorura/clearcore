@@ -10,7 +10,4 @@ git-fragment = { git = "https://example.invalid/repository#revision", default-fe
 target-ok = { version = "1", default-features = false }
 
 [target.'cfg(windows)'.dev-dependencies]
-target-dev-ok = {
-    version = "1",
-    default-features = false,
-}
+target-dev-ok = { version = "1", default-features = false }

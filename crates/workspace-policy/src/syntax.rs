@@ -70,12 +70,10 @@ pub(crate) fn statements(input: &str) -> Result<Vec<String>, String> {
                     .ok_or_else(|| "unmatched closing brace".to_owned())?;
                 current.push(character);
             }
-            '\n' => finish_statement(
-                &mut statements,
-                &mut current,
-                square_depth,
-                brace_depth,
-            ),
+            '\n' if brace_depth != 0 => {
+                return Err("inline tables cannot span multiple lines".to_owned());
+            }
+            '\n' => finish_statement(&mut statements, &mut current, square_depth, brace_depth),
             _ => current.push(character),
         }
     }

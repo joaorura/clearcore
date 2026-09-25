@@ -78,6 +78,17 @@ fn malformed_dependency_declarations_fail_closed() {
 }
 
 #[test]
+fn multiline_inline_dependency_tables_fail_closed() {
+    let manifest = r#"
+        [dependencies]
+        bad = { version = "1",
+            default-features = false }
+    "#;
+
+    assert!(has_nonempty_default_features(manifest));
+}
+
+#[test]
 fn workspace_policy_accepts_all_registered_repository_manifests() -> TestResult {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let violations = check_workspace(&workspace_root)?;

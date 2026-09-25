@@ -15,10 +15,7 @@ edition = "2024"
 dev-ok = { version = "1", default-features = false }
 
 [build-dependencies]
-build-ok = {
-    version = "1",
-    "default-features" = false,
-}
+build-ok = { version = "1", "default-features" = false }
 
 [target.'cfg(unix)'.dependencies]
 target-ok = { version = "1", default-features = false }

@@ -20,6 +20,4 @@ target-ok = { version = "1", default-features = false }
 dev-bad = "1"
 
 [build-dependencies]
-build-bad = {
-    version = "1",
-}
+build-bad = { version = "1" }
