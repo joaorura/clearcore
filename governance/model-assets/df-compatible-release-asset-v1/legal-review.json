@@ -1,0 +1,10 @@
+{
+  "status": "APPROVED",
+  "reviewer_identity": "João Messias Lima Pereira",
+  "review_date": "2026-09-24",
+  "redistribution_terms": "The project owner directs that this free and open-source application may redistribute the exact upstream archive under MIT OR Apache-2.0, with clear attribution and links to the upstream MIT and Apache-2.0 licenses.",
+  "conversion_terms": "Redistributed byte-for-byte as the upstream ONNX archive under an opaque release filename; no model conversion or quantization has occurred.",
+  "legal_approval_id": "JMLP-DFN3-V056-M0-2026-09-24",
+  "weight_license": "MIT OR Apache-2.0",
+  "code_license": "MIT OR Apache-2.0"
+}

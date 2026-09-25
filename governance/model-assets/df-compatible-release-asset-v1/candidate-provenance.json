@@ -1,0 +1,9 @@
+{
+  "status": "APPROVED",
+  "asset_id": "df-compatible-release-asset-v1",
+  "source": "urn:sha256:c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+  "sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+  "weight_license": "MIT OR Apache-2.0",
+  "code_license": "MIT OR Apache-2.0",
+  "conversion_terms": "Redistributed byte-for-byte as the upstream ONNX archive under an opaque release filename; no model conversion or quantization has occurred."
+}

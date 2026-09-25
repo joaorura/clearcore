@@ -1,0 +1,15 @@
+{
+  "status": "APPROVED",
+  "asset_id": "df-compatible-release-asset-v1",
+  "approved_for_release": true,
+  "candidate_sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+  "candidate_record_sha256": "f382facf4d055a8d5387ca0102b3ff521bd9d1f3764b22ebe90c29d92dfb10ba",
+  "legal_approval_id": "JMLP-DFN3-V056-M0-2026-09-24",
+  "legal_review_record_sha256": "ea6f77e32a6b5aa80b6562e605f89bad56e860963d39f62361821af076bf9e44",
+  "approver_identity": "João Messias Lima Pereira",
+  "approval_date": "2026-09-24",
+  "redistribution_terms": "The project owner directs that this free and open-source application may redistribute the exact upstream archive under MIT OR Apache-2.0, with clear attribution and links to the upstream MIT and Apache-2.0 licenses.",
+  "conversion_terms": "Redistributed byte-for-byte as the upstream ONNX archive under an opaque release filename; no model conversion or quantization has occurred.",
+  "key_id": "sha256:cfa7e10c021031f5481775cf32093d41e5aaaad454653f3ed0022769cbbfd3f2",
+  "signature": "nWiIp2mrAjrrPAS5c5Oe3aGxDwhXMzI0Yz7ner/DdBftPkEu0O3HAcB9n7y4RXxOZymHCs02HtKt0JpQMcGMBg=="
+}
