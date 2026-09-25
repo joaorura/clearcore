@@ -17,9 +17,11 @@ create_case() {
 
 create_rustc() {
     local version="$1"
+    local status="${2:-0}"
     cat >"$case_bin/rustc" <<EOF
 #!/bin/bash
 printf '%s\n' 'rustc $version (fake)'
+exit $status
 EOF
     chmod +x "$case_bin/rustc"
 }
@@ -52,6 +54,10 @@ if [[ "\${1:-}" == "metadata" && "$metadata_result" == "missing-cache" ]]; then
     printf '%s\n' 'error: no matching package named \`missing-cache\` found' >&2
     exit 101
 fi
+if [[ "\${1:-}" == "metadata" && "$metadata_result" == "generic-failure" ]]; then
+    printf '%s\n' 'error: malformed manifest' >&2
+    exit 101
+fi
 exit 0
 EOF
     chmod +x "$case_bin/cargo"
@@ -70,6 +76,30 @@ assert_blocked() {
 
     if [[ "$status" -ne 2 ]]; then
         printf 'FAIL: %s exited %s, expected 2\n' "$case_name" "$status" >&2
+        cat "$output_path" >&2
+        return 1
+    fi
+    if [[ "$(cat "$output_path")" != "$expected" ]]; then
+        printf 'FAIL: %s output mismatch\nexpected:\n%s\nactual:\n' "$case_name" "$expected" >&2
+        cat "$output_path" >&2
+        return 1
+    fi
+    printf 'PASS: %s\n' "$case_name"
+}
+
+assert_failed() {
+    local case_name="$1"
+    local expected="$2"
+    local output_path="$temporary_root/$case_name.output"
+    local status
+
+    set +e
+    PATH="$case_bin" /bin/bash "$gate" >"$output_path" 2>&1
+    status=$?
+    set -e
+
+    if [[ "$status" -ne 1 ]]; then
+        printf 'FAIL: %s exited %s, expected 1\n' "$case_name" "$status" >&2
         cat "$output_path" >&2
         return 1
     fi
@@ -100,6 +130,13 @@ create_rustfmt
 create_clippy
 assert_blocked wrong-rustc $'BLOCKED_OFFLINE_DEPENDENCY\nmissing crates/packages:\n- rustc@1.90.0 (found: rustc 1.89.0 (fake))'
 
+create_case failing-rustc
+create_cargo
+create_rustc 1.90.0 1
+create_rustfmt
+create_clippy
+assert_blocked failing-rustc $'BLOCKED_OFFLINE_DEPENDENCY\nmissing crates/packages:\n- rustc@1.90.0'
+
 create_case absent-rustfmt
 create_cargo
 create_rustc 1.90.0
@@ -118,3 +155,10 @@ create_rustc 1.90.0
 create_rustfmt
 create_clippy
 assert_blocked missing-cached-crate $'error: no matching package named `missing-cache` found\nBLOCKED_OFFLINE_DEPENDENCY\nmissing crates/packages:\n- missing-cache'
+
+create_case generic-cargo-failure
+create_cargo generic-failure
+create_rustc 1.90.0
+create_rustfmt
+create_clippy
+assert_failed generic-cargo-failure 'error: malformed manifest'

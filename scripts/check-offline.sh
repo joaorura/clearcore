@@ -54,15 +54,17 @@ fi
 if ! command -v rustc >/dev/null 2>&1; then
     missing_components+=("rustc@$PINNED_TOOLCHAIN")
 else
-    rustc_version="$(rustc --version 2>/dev/null)"
-    readonly rustc_version
-    if [[ "$rustc_version" != "rustc $PINNED_TOOLCHAIN "* ]]; then
+    rustc_version=""
+    if ! rustc_version="$(rustc --version 2>/dev/null)"; then
+        missing_components+=("rustc@$PINNED_TOOLCHAIN")
+    elif [[ "$rustc_version" != "rustc $PINNED_TOOLCHAIN "* ]]; then
         if [[ -n "$rustc_version" ]]; then
             missing_components+=("rustc@$PINNED_TOOLCHAIN (found: $rustc_version)")
         else
             missing_components+=("rustc@$PINNED_TOOLCHAIN")
         fi
     fi
+    readonly rustc_version
 fi
 
 if ! command -v rustfmt >/dev/null 2>&1 || ! rustfmt --version >/dev/null 2>&1; then
