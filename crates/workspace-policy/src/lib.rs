@@ -1,6 +1,15 @@
 //! Enforces repository-wide Cargo manifest policy.
 
+mod manifest;
+mod syntax;
+
 use std::{fs, io, path::Path};
+
+use manifest::{
+    DependencyDeclaration, dependency_uses_defaults, parse_manifest, validate_member_path,
+};
+
+const WORKSPACE_MEMBER: &str = "<workspace>";
 
 /// A repository-wide Cargo manifest policy violation.
 #[derive(Debug, Eq, PartialEq)]
@@ -11,169 +20,81 @@ pub enum PolicyViolation {
     DependencyUsesDefaultFeatures { member: String, dependency: String },
 }
 
-/// Checks every registered workspace member manifest.
+/// Checks the root workspace policy and every registered member manifest.
 ///
 /// # Errors
-/// Returns an I/O error when the root or a registered member manifest cannot be read.
+/// Returns an I/O error when a manifest cannot be read or its policy-relevant TOML cannot be
+/// interpreted unambiguously.
 pub fn check_workspace(workspace_root: &Path) -> io::Result<Vec<PolicyViolation>> {
-    let workspace_manifest = fs::read_to_string(workspace_root.join("Cargo.toml"))?;
+    let root_path = workspace_root.join("Cargo.toml");
+    let root = read_manifest(&root_path)?;
+    let members = root
+        .members
+        .as_ref()
+        .ok_or_else(|| invalid_data(&root_path, "workspace.members is required"))?;
     let mut violations = Vec::new();
 
-    for member in workspace_members(&workspace_manifest) {
-        let manifest = fs::read_to_string(workspace_root.join(&member).join("Cargo.toml"))?;
+    for (dependency, declaration) in &root.workspace_dependencies {
+        match declaration {
+            DependencyDeclaration::Path => {}
+            DependencyDeclaration::ThirdParty {
+                default_features_disabled: true,
+            } => {}
+            DependencyDeclaration::ThirdParty {
+                default_features_disabled: false,
+            } => violations.push(PolicyViolation::DependencyUsesDefaultFeatures {
+                member: WORKSPACE_MEMBER.to_owned(),
+                dependency: dependency.clone(),
+            }),
+            DependencyDeclaration::Inherited { .. } => {
+                return Err(invalid_data(
+                    &root_path,
+                    "workspace dependencies cannot inherit from themselves",
+                ));
+            }
+        }
+    }
 
-        if has_nonempty_default_features(&manifest) {
+    for member in members {
+        validate_member_path(member).map_err(|error| invalid_data(&root_path, &error))?;
+        let manifest_path = workspace_root.join(member).join("Cargo.toml");
+        let manifest = read_manifest(&manifest_path)?;
+
+        if manifest.nonempty_default_features {
             violations.push(PolicyViolation::NonemptyDefaultFeatures {
                 member: member.clone(),
             });
         }
 
-        for dependency in dependencies_using_default_features(&manifest) {
-            violations.push(PolicyViolation::DependencyUsesDefaultFeatures {
-                member: member.clone(),
-                dependency,
-            });
+        for (dependency, declaration) in &manifest.dependencies {
+            if dependency_uses_defaults(dependency, declaration, &root.workspace_dependencies)
+                .map_err(|error| invalid_data(&manifest_path, &error))?
+            {
+                violations.push(PolicyViolation::DependencyUsesDefaultFeatures {
+                    member: member.clone(),
+                    dependency: dependency.clone(),
+                });
+            }
         }
     }
 
     Ok(violations)
 }
 
-/// Reports whether a manifest declares a nonempty `default` feature.
+/// Reports whether a manifest declares nonempty default features or cannot be parsed safely.
 #[must_use]
 pub fn has_nonempty_default_features(manifest: &str) -> bool {
-    let mut in_features = false;
-
-    for line in manifest.lines().map(str::trim) {
-        if line.starts_with('[') {
-            in_features = line == "[features]";
-            continue;
-        }
-
-        if !in_features {
-            continue;
-        }
-
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-
-        if key.trim() == "default" {
-            return value.trim() != "[]";
-        }
-    }
-
-    false
+    parse_manifest(manifest).map_or(true, |parsed| parsed.nonempty_default_features)
 }
 
-fn workspace_members(manifest: &str) -> Vec<String> {
-    let mut in_workspace = false;
-    let mut member_value = String::new();
-    let mut collecting_members = false;
-
-    for line in manifest.lines().map(strip_comment).map(str::trim) {
-        if line.starts_with('[') && !collecting_members {
-            in_workspace = line == "[workspace]";
-            continue;
-        }
-
-        if in_workspace && !collecting_members {
-            let Some((key, value)) = line.split_once('=') else {
-                continue;
-            };
-            if key.trim() != "members" {
-                continue;
-            }
-            collecting_members = true;
-            member_value.push_str(value);
-        } else if collecting_members {
-            member_value.push_str(line);
-        }
-
-        if collecting_members && member_value.contains(']') {
-            break;
-        }
-    }
-
-    quoted_values(&member_value)
+fn read_manifest(path: &Path) -> io::Result<manifest::Manifest> {
+    let content = fs::read_to_string(path)?;
+    parse_manifest(&content).map_err(|error| invalid_data(path, &error))
 }
 
-fn dependencies_using_default_features(manifest: &str) -> Vec<String> {
-    let mut in_dependencies = false;
-    let mut violations = Vec::new();
-    let mut pending: Option<(String, String, usize)> = None;
-
-    for line in manifest.lines().map(strip_comment).map(str::trim) {
-        if let Some((dependency, declaration, depth)) = pending.as_mut() {
-            declaration.push_str(line);
-            *depth += brace_depth(line);
-            if *depth == 0 {
-                if third_party_defaults_enabled(declaration) {
-                    violations.push(dependency.clone());
-                }
-                pending = None;
-            }
-            continue;
-        }
-
-        if line.starts_with('[') {
-            in_dependencies = is_dependency_section(line);
-            continue;
-        }
-
-        if !in_dependencies || line.is_empty() {
-            continue;
-        }
-
-        let Some((name, value)) = line.split_once('=') else {
-            continue;
-        };
-        let dependency = name.trim().trim_matches('"').to_owned();
-        let depth = brace_depth(value);
-        if depth > 0 {
-            pending = Some((dependency, value.to_owned(), depth));
-        } else if third_party_defaults_enabled(value) {
-            violations.push(dependency);
-        }
-    }
-
-    violations
-}
-
-fn strip_comment(line: &str) -> &str {
-    line.split_once('#').map_or(line, |(content, _)| content)
-}
-
-fn quoted_values(value: &str) -> Vec<String> {
-    value
-        .split('"')
-        .enumerate()
-        .filter_map(|(index, part)| (index % 2 == 1).then(|| part.to_owned()))
-        .collect()
-}
-
-fn is_dependency_section(line: &str) -> bool {
-    let section = line.trim_matches(['[', ']']);
-    matches!(section, "dependencies" | "dev-dependencies" | "build-dependencies")
-        || section.ends_with(".dependencies")
-        || section.ends_with(".dev-dependencies")
-        || section.ends_with(".build-dependencies")
-}
-
-fn brace_depth(value: &str) -> usize {
-    value.chars().fold(0, |depth, character| match character {
-        '{' => depth + 1,
-        '}' => depth.saturating_sub(1),
-        _ => depth,
-    })
-}
-
-fn third_party_defaults_enabled(declaration: &str) -> bool {
-    let compact: String = declaration
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect();
-    let is_path_dependency = compact.starts_with('{') && compact.contains("path=");
-
-    !is_path_dependency && !compact.contains("default-features=false")
+fn invalid_data(path: &Path, error: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("{}: {error}", path.display()),
+    )
 }
