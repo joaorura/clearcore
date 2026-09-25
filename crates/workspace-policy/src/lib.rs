@@ -36,8 +36,8 @@ pub fn check_workspace(workspace_root: &Path) -> io::Result<Vec<PolicyViolation>
 
     for (dependency, declaration) in &root.workspace_dependencies {
         match declaration {
-            DependencyDeclaration::Path => {}
-            DependencyDeclaration::ThirdParty {
+            DependencyDeclaration::Path
+            | DependencyDeclaration::ThirdParty {
                 default_features_disabled: true,
             } => {}
             DependencyDeclaration::ThirdParty {

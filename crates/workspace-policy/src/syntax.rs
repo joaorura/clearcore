@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) enum Value {
+pub enum Value {
     String(String),
     Bool(bool),
     Array(Vec<Self>),
     Table(BTreeMap<String, Self>),
 }
 
-pub(crate) fn statements(input: &str) -> Result<Vec<String>, String> {
+pub fn statements(input: &str) -> Result<Vec<String>, String> {
     if input.contains("\"\"\"") || input.contains("'''") {
         return Err("multiline strings are unsupported".to_owned());
     }
@@ -88,14 +88,14 @@ pub(crate) fn statements(input: &str) -> Result<Vec<String>, String> {
     Ok(statements)
 }
 
-pub(crate) fn parse_key_path(input: &str) -> Result<Vec<String>, String> {
+pub fn parse_key_path(input: &str) -> Result<Vec<String>, String> {
     split_top_level(input, '.')?
         .into_iter()
         .map(parse_key)
         .collect()
 }
 
-pub(crate) fn split_assignment(input: &str) -> Result<(&str, &str), String> {
+pub fn split_assignment(input: &str) -> Result<(&str, &str), String> {
     let index = top_level_delimiter(input, '=')?
         .ok_or_else(|| "expected a key/value assignment".to_owned())?;
     let (key, value) = (input[..index].trim(), input[index + 1..].trim());
@@ -105,7 +105,7 @@ pub(crate) fn split_assignment(input: &str) -> Result<(&str, &str), String> {
     Ok((key, value))
 }
 
-pub(crate) fn parse_value(input: &str) -> Result<Value, String> {
+pub fn parse_value(input: &str) -> Result<Value, String> {
     let input = input.trim();
     if matches!(input.chars().next(), Some('"' | '\'')) {
         return parse_string(input).map(Value::String);
@@ -179,7 +179,9 @@ fn parse_single_key(input: &str) -> Result<String, String> {
     if path.len() != 1 {
         return Err("dotted assignment keys are unsupported".to_owned());
     }
-    path.into_iter().next().ok_or_else(|| "empty key".to_owned())
+    path.into_iter()
+        .next()
+        .ok_or_else(|| "empty key".to_owned())
 }
 
 fn parse_key(input: &str) -> Result<String, String> {

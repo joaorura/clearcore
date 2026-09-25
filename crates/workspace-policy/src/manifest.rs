@@ -6,19 +6,19 @@ use std::{
 use crate::syntax::{Value, parse_key_path, parse_value, split_assignment, statements};
 
 #[derive(Clone, Debug)]
-pub(crate) enum DependencyDeclaration {
+pub enum DependencyDeclaration {
     Path,
     ThirdParty { default_features_disabled: bool },
     Inherited { default_features: Option<bool> },
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct Manifest {
-    pub(crate) members: Option<Vec<String>>,
-    pub(crate) nonempty_default_features: bool,
+pub struct Manifest {
+    pub members: Option<Vec<String>>,
+    pub nonempty_default_features: bool,
     default_features_seen: bool,
-    pub(crate) workspace_dependencies: BTreeMap<String, DependencyDeclaration>,
-    pub(crate) dependencies: Vec<(String, DependencyDeclaration)>,
+    pub workspace_dependencies: BTreeMap<String, DependencyDeclaration>,
+    pub dependencies: Vec<(String, DependencyDeclaration)>,
 }
 
 #[derive(Clone, Copy)]
@@ -30,7 +30,7 @@ enum Section {
     Dependencies,
 }
 
-pub(crate) fn parse_manifest(input: &str) -> Result<Manifest, String> {
+pub fn parse_manifest(input: &str) -> Result<Manifest, String> {
     let mut manifest = Manifest::default();
     let mut section = Section::Other;
     let mut section_path = Vec::new();
@@ -72,7 +72,7 @@ pub(crate) fn parse_manifest(input: &str) -> Result<Manifest, String> {
     Ok(manifest)
 }
 
-pub(crate) fn dependency_uses_defaults(
+pub fn dependency_uses_defaults(
     name: &str,
     declaration: &DependencyDeclaration,
     workspace_dependencies: &BTreeMap<String, DependencyDeclaration>,
@@ -99,14 +99,20 @@ pub(crate) fn dependency_uses_defaults(
     }
 }
 
-pub(crate) fn validate_member_path(member: &str) -> Result<(), String> {
-    if member.is_empty() || member.chars().any(|character| matches!(character, '*' | '?' | '[')) {
+pub fn validate_member_path(member: &str) -> Result<(), String> {
+    if member.is_empty()
+        || member
+            .chars()
+            .any(|character| matches!(character, '*' | '?' | '['))
+    {
         return Err("empty and glob workspace members are unsupported".to_owned());
     }
-    if Path::new(member)
-        .components()
-        .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
-    {
+    if Path::new(member).components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
         return Err("workspace member must remain beneath the workspace root".to_owned());
     }
     Ok(())
@@ -231,12 +237,14 @@ fn parse_dependency_table(
 fn validate_dependency_fields(fields: &BTreeMap<String, Value>) -> Result<(), String> {
     for (key, value) in fields {
         let valid = match key.as_str() {
-            "version" | "git" | "registry" | "registry-index" | "path" | "package"
-            | "branch" | "tag" | "rev" => matches!(value, Value::String(_)),
+            "version" | "git" | "registry" | "registry-index" | "path" | "package" | "branch"
+            | "tag" | "rev" => matches!(value, Value::String(_)),
             "default-features" | "workspace" | "optional" | "public" => {
                 matches!(value, Value::Bool(_))
             }
-            "features" => matches!(value, Value::Array(values) if values.iter().all(|item| matches!(item, Value::String(_)))),
+            "features" => {
+                matches!(value, Value::Array(values) if values.iter().all(|item| matches!(item, Value::String(_))))
+            }
             _ => false,
         };
         if !valid {
@@ -270,5 +278,8 @@ fn is_dependency_section(path: &[String]) -> bool {
 }
 
 fn is_dependency_name(name: &str) -> bool {
-    matches!(name, "dependencies" | "dev-dependencies" | "build-dependencies")
+    matches!(
+        name,
+        "dependencies" | "dev-dependencies" | "build-dependencies"
+    )
 }
