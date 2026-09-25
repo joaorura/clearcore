@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearcore.example/schemas/model-asset-manifest.schema.json",
+  "title": "M0 Model Asset Record Set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["candidate", "legal_review", "approval"],
+  "properties": {
+    "candidate": {"$ref": "https://clearcore.example/schemas/candidate-provenance.schema.json"},
+    "legal_review": {"$ref": "https://clearcore.example/schemas/legal-review.schema.json"},
+    "approval": {"$ref": "https://clearcore.example/schemas/approval-manifest.schema.json"}
+  }
+}
