@@ -1,3 +1,11 @@
 [workspace]
-members = ["sibling"]
+members = [
+    'compliant#member',
+    "sibling", # outside-string comment
+]
 resolver = "3"
+
+[workspace.dependencies]
+'inherited-bad' = { version = "1#stable" }
+"inherited-ok" = { version = "1", "default-features" = false }
+"path-shared" = { path = "local#source" }

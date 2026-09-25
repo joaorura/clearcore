@@ -1,0 +1,24 @@
+[package]
+name = "compliant-member"
+version = "0.0.0"
+edition = "2024"
+
+[features]
+"default" = [ ]
+
+[dependencies]
+"inherited-ok" = { workspace = true }
+"path-shared" = { workspace = true }
+"git#fragment" = { git = "https://example.invalid/repository#revision", default-features = false }
+
+[dev-dependencies]
+dev-ok = { version = "1", default-features = false }
+
+[build-dependencies]
+build-ok = {
+    version = "1",
+    "default-features" = false,
+}
+
+[target.'cfg(unix)'.dependencies]
+target-ok = { version = "1", default-features = false }

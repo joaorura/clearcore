@@ -1,55 +1,62 @@
-use std::path::PathBuf;
+use std::{error::Error, path::PathBuf};
 
 use workspace_policy::{PolicyViolation, check_workspace, has_nonempty_default_features};
 
-#[test]
-fn workspace_policy_rejects_nonempty_default_features() {
-    // Given
-    let manifest = include_str!("../Cargo.toml");
+type TestResult = Result<(), Box<dyn Error>>;
 
-    // When
-    let default_features_enabled = has_nonempty_default_features(manifest);
-
-    // Then
-    assert!(!default_features_enabled);
+fn fixture_root(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
 }
 
 #[test]
-fn workspace_policy_rejects_sibling_dependencies_with_implicit_default_features() {
-    // Given
-    let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/noncompliant-workspace");
+fn workspace_policy_rejects_nonempty_default_features() {
+    let manifest = "[features]\n\"default\" = ['enabled']";
 
-    // When
-    let violations = check_workspace(&fixture_root).expect("fixture manifests should be readable");
+    assert!(has_nonempty_default_features(manifest));
+}
 
-    // Then
+#[test]
+fn workspace_policy_rejects_effective_defaults_across_supported_forms() -> TestResult {
+    let violations = check_workspace(&fixture_root("noncompliant-workspace"))?;
+
     assert_eq!(
         violations,
         [
             PolicyViolation::DependencyUsesDefaultFeatures {
+                member: "<workspace>".to_owned(),
+                dependency: "inherited-bad".to_owned(),
+            },
+            PolicyViolation::NonemptyDefaultFeatures {
                 member: "sibling".to_owned(),
-                dependency: "inline".to_owned(),
             },
             PolicyViolation::DependencyUsesDefaultFeatures {
                 member: "sibling".to_owned(),
-                dependency: "shorthand".to_owned(),
+                dependency: "inherited-bad".to_owned(),
+            },
+            PolicyViolation::DependencyUsesDefaultFeatures {
+                member: "sibling".to_owned(),
+                dependency: "quoted#inline".to_owned(),
+            },
+            PolicyViolation::DependencyUsesDefaultFeatures {
+                member: "sibling".to_owned(),
+                dependency: "dev-bad".to_owned(),
+            },
+            PolicyViolation::DependencyUsesDefaultFeatures {
+                member: "sibling".to_owned(),
+                dependency: "build-bad".to_owned(),
             },
         ]
     );
+    Ok(())
 }
 
 #[test]
-fn workspace_policy_accepts_all_registered_repository_manifests() {
-    // Given
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|crates| crates.parent())
-        .expect("workspace-policy should be nested under the workspace root");
+fn workspace_policy_accepts_all_registered_repository_manifests() -> TestResult {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let violations = check_workspace(&workspace_root)?;
 
-    // When
-    let violations = check_workspace(workspace_root).expect("workspace manifests should be readable");
-
-    // Then
     assert!(violations.is_empty(), "policy violations: {violations:?}");
+    Ok(())
 }

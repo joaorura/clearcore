@@ -3,8 +3,23 @@ name = "noncompliant-sibling"
 version = "0.0.0"
 edition = "2024"
 
+[features]
+"default" = ['enabled']
+
 [dependencies]
-compliant = { version = "1", default-features = false }
-inline = { version = "1" }
-local = { path = "../local" }
-shorthand = "1"
+"inherited-bad" = { workspace = true }
+"inherited-ok" = { workspace = true }
+"path-shared" = { workspace = true }
+"quoted#inline" = { version = "1#tag" }
+local = { path = "../local#copy" }
+
+[target.'cfg(unix)'.dependencies]
+target-ok = { version = "1", default-features = false }
+
+[target.'cfg(windows)'.dev-dependencies]
+dev-bad = "1"
+
+[build-dependencies]
+build-bad = {
+    version = "1",
+}
