@@ -84,7 +84,10 @@ pub fn check_workspace(workspace_root: &Path) -> io::Result<Vec<PolicyViolation>
 /// Reports whether a manifest declares nonempty default features or cannot be parsed safely.
 #[must_use]
 pub fn has_nonempty_default_features(manifest: &str) -> bool {
-    parse_manifest(manifest).map_or(true, |parsed| parsed.nonempty_default_features)
+    match parse_manifest(manifest) {
+        Ok(parsed) => parsed.nonempty_default_features,
+        Err(_) => true,
+    }
 }
 
 fn read_manifest(path: &Path) -> io::Result<manifest::Manifest> {

@@ -24,6 +24,9 @@ pub(crate) fn statements(input: &str) -> Result<Vec<String>, String> {
         if comment {
             if character == '\n' {
                 comment = false;
+                if brace_depth != 0 {
+                    return Err("inline tables cannot span multiple lines".to_owned());
+                }
                 finish_statement(&mut statements, &mut current, square_depth, brace_depth);
             }
             continue;
@@ -161,7 +164,7 @@ fn collection_items(input: &str, closing: char) -> Result<Vec<&str>, String> {
     for (index, item) in items.iter().enumerate() {
         let item = item.trim();
         if item.is_empty() {
-            if index + 1 == items.len() {
+            if closing == ']' && index + 1 == items.len() {
                 continue;
             }
             return Err(format!("empty item before `{closing}`"));
@@ -176,9 +179,7 @@ fn parse_single_key(input: &str) -> Result<String, String> {
     if path.len() != 1 {
         return Err("dotted assignment keys are unsupported".to_owned());
     }
-    path.into_iter()
-        .next()
-        .ok_or_else(|| "empty key".to_owned())
+    path.into_iter().next().ok_or_else(|| "empty key".to_owned())
 }
 
 fn parse_key(input: &str) -> Result<String, String> {

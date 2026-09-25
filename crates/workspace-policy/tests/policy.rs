@@ -12,9 +12,9 @@ fn fixture_root(name: &str) -> PathBuf {
 
 #[test]
 fn workspace_policy_rejects_nonempty_default_features() {
-    let manifest = "[features]\n\"default\" = ['enabled']";
+    let manifest = include_str!("../Cargo.toml");
 
-    assert!(has_nonempty_default_features(manifest));
+    assert!(!has_nonempty_default_features(manifest));
 }
 
 #[test]
@@ -82,6 +82,27 @@ fn multiline_inline_dependency_tables_fail_closed() {
     let manifest = r#"
         [dependencies]
         bad = { version = "1",
+            default-features = false }
+    "#;
+
+    assert!(has_nonempty_default_features(manifest));
+}
+
+#[test]
+fn inline_dependency_table_trailing_commas_fail_closed() {
+    let manifest = r#"
+        [dependencies]
+        bad = { version = "1", default-features = false, }
+    "#;
+
+    assert!(has_nonempty_default_features(manifest));
+}
+
+#[test]
+fn comment_split_inline_dependency_tables_fail_closed() {
+    let manifest = r#"
+        [dependencies]
+        bad = { version = "1", # comment
             default-features = false }
     "#;
 
