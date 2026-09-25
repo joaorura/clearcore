@@ -1,0 +1,67 @@
+{
+  "status": "SUPERSEDED_BY_PRODUCTION_APPROVAL",
+  "candidate_kind": "TECHNICAL_CANDIDATE_SELECTION",
+  "asset_name": "DeepFilterNet3_onnx.tar.gz",
+  "selection_statement": "The user selected this standard DeepFilterNet3 ONNX archive as a technical candidate only.",
+  "non_approval_statement": "This technical-selection record is superseded for production release by governance/model-assets/df-compatible-release-asset-v1/. It does not replace the signed production candidate-provenance, legal-review, approval-manifest, or fixed trust policy.",
+  "explicit_exclusions": [
+    "DeepFilterNet3_ll_onnx.tar.gz is not selected.",
+    "No official Large model is selected."
+  ],
+  "upstream": {
+    "repository": "Rikorose/DeepFilterNet",
+    "tag": "v0.5.6",
+    "path": "models/DeepFilterNet3_onnx.tar.gz",
+    "github_contents_api_url": "https://api.github.com/repos/Rikorose/DeepFilterNet/contents/models/DeepFilterNet3_onnx.tar.gz?ref=v0.5.6",
+    "github_blob_sha": "1c4f4ffe1015fbb4541433cf291234ca32338871",
+    "github_blob_url": "https://github.com/Rikorose/DeepFilterNet/blob/v0.5.6/models/DeepFilterNet3_onnx.tar.gz",
+    "raw_url": "https://raw.githubusercontent.com/Rikorose/DeepFilterNet/v0.5.6/models/DeepFilterNet3_onnx.tar.gz"
+  },
+  "download_verification": {
+    "http_status": 200,
+    "byte_size": 7983136,
+    "sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+    "source_urn": "urn:sha256:c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+    "verification_date": "2026-09-24"
+  },
+  "archive_inspection": {
+    "inspection_method": "tar listing only; archive was not extracted",
+    "member_count": 4,
+    "members": [
+      {
+        "path": "tmp/export/enc.onnx",
+        "type": "regular-file",
+        "byte_size": 1954042,
+        "mode": "0664"
+      },
+      {
+        "path": "tmp/export/erb_dec.onnx",
+        "type": "regular-file",
+        "byte_size": 3292397,
+        "mode": "0664"
+      },
+      {
+        "path": "tmp/export/df_dec.onnx",
+        "type": "regular-file",
+        "byte_size": 3340803,
+        "mode": "0664"
+      },
+      {
+        "path": "tmp/export/config.ini",
+        "type": "regular-file",
+        "byte_size": 2067,
+        "mode": "0664"
+      }
+    ],
+    "safety_checks": {
+      "absolute_paths_rejected": true,
+      "parent_traversal_rejected": true,
+      "symlinks_rejected": true,
+      "hardlinks_rejected": true,
+      "device_nodes_rejected": true,
+      "executable_regular_files_rejected": true,
+      "unsafe_members": []
+    }
+  },
+  "repository_storage": "The verified production archive is stored as vendor/approved/df-compatible-release-asset-v1.bin and is bound by the signed production dossier."
+}
