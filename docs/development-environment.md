@@ -23,7 +23,13 @@ Run the deterministic offline gate from the repository root:
 scripts/check-offline.sh
 ```
 
-The gate runs locked, offline metadata resolution, build, and tests. If the pinned toolchain or a locked crate is unavailable, it exits with code 2 and prints `BLOCKED_OFFLINE_DEPENDENCY` plus the exact missing toolchain package or crates Cargo reported. Resolve that condition by updating the approved development image or dependency cache outside the release job. Never repair it by downloading during CI or release.
+The gate first checks Cargo, exact `rustc 1.90.0`, `rustfmt`, and Clippy independently, then runs locked, offline metadata resolution, build, and tests. If a required component is unavailable, the Rust version is wrong, or a locked crate is absent, it exits with code 2 and prints `BLOCKED_OFFLINE_DEPENDENCY` plus only the affected components or crates. Resolve that condition by updating the approved development image or dependency cache outside the release job. Never repair it by downloading during CI or release.
+
+The gate classifier has a no-Rust regression harness that supplies controlled fake commands and never accesses the network:
+
+```sh
+bash tests/check-offline.sh
+```
 
 ## Workspace commands
 

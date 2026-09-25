@@ -4,10 +4,10 @@ set -uo pipefail
 readonly BLOCKED_STATUS="BLOCKED_OFFLINE_DEPENDENCY"
 readonly PINNED_TOOLCHAIN="1.90.0"
 
-report_missing_toolchain() {
+report_blockers() {
     printf '%s\n' "$BLOCKED_STATUS" >&2
     printf 'missing crates/packages:\n' >&2
-    printf '%s\n' "- rust-toolchain@$PINNED_TOOLCHAIN:cargo,rustc,rustfmt,clippy" >&2
+    printf -- '- %s\n' "$@" >&2
 }
 
 report_missing_crates() {
@@ -24,11 +24,8 @@ report_missing_crates() {
         return 1
     fi
 
-    printf '%s\n' "$BLOCKED_STATUS" >&2
-    printf 'missing crates/packages:\n' >&2
-    while IFS= read -r package; do
-        printf '%s\n' "- $package" >&2
-    done <<<"$missing"
+    mapfile -t missing_packages <<<"$missing"
+    report_blockers "${missing_packages[@]}"
 }
 
 run_offline() {
@@ -48,8 +45,36 @@ run_offline() {
     return 1
 }
 
-if ! command -v cargo >/dev/null 2>&1; then
-    report_missing_toolchain
+missing_components=()
+
+if ! command -v cargo >/dev/null 2>&1 || ! cargo --version >/dev/null 2>&1; then
+    missing_components+=("cargo")
+fi
+
+if ! command -v rustc >/dev/null 2>&1; then
+    missing_components+=("rustc@$PINNED_TOOLCHAIN")
+else
+    rustc_version="$(rustc --version 2>/dev/null)"
+    readonly rustc_version
+    if [[ "$rustc_version" != "rustc $PINNED_TOOLCHAIN "* ]]; then
+        if [[ -n "$rustc_version" ]]; then
+            missing_components+=("rustc@$PINNED_TOOLCHAIN (found: $rustc_version)")
+        else
+            missing_components+=("rustc@$PINNED_TOOLCHAIN")
+        fi
+    fi
+fi
+
+if ! command -v rustfmt >/dev/null 2>&1 || ! rustfmt --version >/dev/null 2>&1; then
+    missing_components+=("rustfmt")
+fi
+
+if ! command -v clippy-driver >/dev/null 2>&1 || ! clippy-driver --version >/dev/null 2>&1; then
+    missing_components+=("clippy")
+fi
+
+if [[ "${#missing_components[@]}" -ne 0 ]]; then
+    report_blockers "${missing_components[@]}"
     exit 2
 fi
 
