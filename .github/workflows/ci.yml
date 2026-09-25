@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_OFFLINE: "true"
+  CARGO_TERM_COLOR: always
+  RUSTUP_DIST_SERVER: http://127.0.0.1:9
+  RUSTUP_UPDATE_ROOT: http://127.0.0.1:9
+
+jobs:
+  rust:
+    runs-on: [self-hosted, linux, x64, rust-1.90.0-offline]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify pinned toolchain
+        run: |
+          rustc --version | grep -Eq '^rustc 1\.90\.0 '
+          cargo --version
+          cargo fmt --version
+          cargo clippy --version
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
+      - name: Build workspace
+        run: cargo build --workspace --locked --offline
+      - name: Test workspace
+        run: cargo test --workspace --locked --offline
+      - name: Verify offline gate
+        run: scripts/check-offline.sh
