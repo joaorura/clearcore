@@ -84,6 +84,6 @@ temporary_directory="$(mktemp -d)"
 readonly temporary_directory
 trap 'rm -rf "$temporary_directory"' EXIT
 
-run_offline metadata cargo metadata --workspace --locked --offline --format-version 1 --no-deps || exit $?
+run_offline metadata cargo metadata --locked --offline --format-version 1 --no-deps || exit $?
 run_offline build cargo build --workspace --locked --offline || exit $?
 run_offline test cargo test --workspace --locked --offline || exit $?
