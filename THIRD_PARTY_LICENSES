@@ -1,0 +1,11 @@
+THIRD-PARTY LICENSE REGISTER
+
+The exact approved M0 release asset is `vendor/approved/df-compatible-release-asset-v1.bin`. It is the byte-for-byte upstream `DeepFilterNet3_onnx.tar.gz` from `Rikorose/DeepFilterNet` tag `v0.5.6`, SHA-256 `c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616`.
+
+The repository's Apache-2.0 license applies only to original repository work. It does not grant rights to DeepFilterNet code or weights, libDF, tract, platform SDKs, drivers, samples, corpora, or any other third-party material.
+
+Before a third-party component or asset may be distributed, this register must identify its exact version or immutable source, copyright holder, license, redistribution terms, conversion or derivative-work terms where applicable, and corresponding legal approval evidence.
+
+Copyright (c) 2021 Hendrik Schröter. João Messias Lima Pereira recorded the project owner's explicit directive for this free and open-source application to treat the selected model weights and code as `MIT OR Apache-2.0`. This is an owner decision, not external legal counsel. Attribution and license references: [upstream repository](https://github.com/Rikorose/DeepFilterNet/tree/v0.5.6), [MIT](https://github.com/Rikorose/DeepFilterNet/blob/v0.5.6/LICENSE-MIT), and [Apache-2.0](https://github.com/Rikorose/DeepFilterNet/blob/v0.5.6/LICENSE-APACHE).
+
+The production provenance, legal review, approval manifest, and authorized public key are in `governance/model-assets/df-compatible-release-asset-v1/`. The archive was not converted or quantized; it was renamed only for opaque release storage.
