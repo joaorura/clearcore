@@ -1,0 +1,10 @@
+[package]
+name = "noncompliant-sibling"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+compliant = { version = "1", default-features = false }
+inline = { version = "1" }
+local = { path = "../local" }
+shorthand = "1"
