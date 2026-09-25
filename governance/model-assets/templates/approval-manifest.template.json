@@ -1,0 +1,14 @@
+{
+  "status": "PENDING",
+  "asset_id": "",
+  "candidate_sha256": "",
+  "candidate_record_sha256": "",
+  "legal_approval_id": "",
+  "legal_review_record_sha256": "",
+  "approver_identity": "",
+  "approval_date": "",
+  "redistribution_terms": "",
+  "conversion_terms": "",
+  "approved_for_release": false,
+  "key_id": ""
+}
