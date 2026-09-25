@@ -1,4 +1,7 @@
 .omo/
+.superpowers/
+/target/
+**/*private-key*.pem
 **/__pycache__/
 *.py[cod]
 .pytest_cache/
