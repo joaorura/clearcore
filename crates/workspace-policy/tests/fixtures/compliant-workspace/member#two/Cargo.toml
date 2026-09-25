@@ -1,0 +1,16 @@
+[package]
+name = "member-two"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+git-fragment = { git = "https://example.invalid/repository#revision", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+target-ok = { version = "1", default-features = false }
+
+[target.'cfg(windows)'.dev-dependencies]
+target-dev-ok = {
+    version = "1",
+    default-features = false,
+}

@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    'literal-member',
+    "member#two", # comment outside a basic string
+]
+resolver = "3"
+
+[workspace.dependencies]
+"shared#dependency" = { version = "1#stable", default-features = false }
+'path-shared' = { path = "local#source" }

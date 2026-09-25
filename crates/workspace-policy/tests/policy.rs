@@ -53,6 +53,14 @@ fn workspace_policy_rejects_effective_defaults_across_supported_forms() -> TestR
 }
 
 #[test]
+fn workspace_policy_accepts_all_supported_fixture_forms() -> TestResult {
+    let violations = check_workspace(&fixture_root("compliant-workspace"))?;
+
+    assert!(violations.is_empty(), "policy violations: {violations:?}");
+    Ok(())
+}
+
+#[test]
 fn workspace_policy_accepts_all_registered_repository_manifests() -> TestResult {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let violations = check_workspace(&workspace_root)?;
