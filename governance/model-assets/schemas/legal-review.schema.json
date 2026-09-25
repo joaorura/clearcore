@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearcore.example/schemas/legal-review.schema.json",
+  "title": "Model Asset Legal Review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "reviewer_identity", "review_date", "redistribution_terms", "conversion_terms", "legal_approval_id", "weight_license", "code_license"],
+  "properties": {
+    "status": {"const": "APPROVED"},
+    "reviewer_identity": {"type": "string", "minLength": 1},
+    "review_date": {"type": "string", "format": "date"},
+    "redistribution_terms": {"type": "string", "minLength": 1},
+    "conversion_terms": {"type": "string", "minLength": 1},
+    "legal_approval_id": {"type": "string", "minLength": 1},
+    "weight_license": {"type": "string", "minLength": 1},
+    "code_license": {"type": "string", "minLength": 1}
+  }
+}

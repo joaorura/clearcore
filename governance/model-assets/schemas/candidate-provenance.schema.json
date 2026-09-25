@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clearcore.example/schemas/candidate-provenance.schema.json",
+  "title": "Model Asset Candidate Provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "asset_id", "source", "sha256", "weight_license", "code_license", "conversion_terms"],
+  "properties": {
+    "status": {"const": "APPROVED"},
+    "asset_id": {"const": "df-compatible-release-asset-v1"},
+    "source": {
+      "type": "string",
+      "pattern": "^urn:sha256:[0-9a-f]{64}$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "weight_license": {"type": "string", "minLength": 1},
+    "code_license": {"type": "string", "minLength": 1},
+    "conversion_terms": {"type": "string", "minLength": 1}
+  }
+}
