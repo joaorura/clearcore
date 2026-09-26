@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "realtime-noise-contracts"
+version = "0.1.0"
+
+[[package]]
 name = "realtime-noise-qualification"
 version = "0.1.0"
 
