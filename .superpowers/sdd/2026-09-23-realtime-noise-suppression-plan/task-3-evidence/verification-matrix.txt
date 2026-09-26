@@ -1,0 +1,33 @@
+Runner for every command:
+  Docker image hippocamp-rust:1.90-task3
+  --network none
+  RUSTUP_TOOLCHAIN=1.90.0
+
+Commands and observed results:
+  cargo fmt --all -- --check
+    exit 0
+  cargo test -p realtime-noise-contracts --test wire_v1 --locked --offline
+    exit 0; 12 passed, 0 failed
+  cargo test -p realtime-noise-contracts --test transport_properties --locked --offline
+    exit 0; 6 passed, 0 failed
+  cargo test -p realtime-noise-contracts --locked --offline
+    exit 0; 18 integration tests passed, 0 failed
+  cargo test -p workspace-policy workspace_policy_accepts_all_registered_repository_manifests --locked --offline
+    exit 0; 1 passed, 0 failed
+  cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
+    exit 0; no warnings
+  cargo build --workspace --locked --offline
+    exit 0
+  cargo test --workspace --locked --offline
+    exit 0; 27 tests passed, 0 failed
+  bash scripts/check-offline.sh
+    exit 0
+  cargo generate-lockfile --offline
+    exit 0
+
+Lockfile identity:
+  before sha256 db2397f0083d9b97f9820037c532a33e1cff31943e2abfeee7ef297d1dcc47e6
+  after  sha256 db2397f0083d9b97f9820037c532a33e1cff31943e2abfeee7ef297d1dcc47e6
+  git diff --exit-code -- Cargo.lock: exit 0
+
+Final combined matrix exit status: 0

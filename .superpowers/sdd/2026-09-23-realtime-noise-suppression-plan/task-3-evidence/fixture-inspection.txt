@@ -1,0 +1,22 @@
+Commands:
+  wc -c fixtures/wire/frame-v1-valid.bin fixtures/wire/frame-v1-invalid-reserved.bin
+  od -An -tx1 -N56 fixtures/wire/frame-v1-valid.bin
+  od -An -tx1 -N16 fixtures/wire/frame-v1-invalid-reserved.bin
+  cmp -l fixtures/wire/frame-v1-valid.bin fixtures/wire/frame-v1-invalid-reserved.bin
+
+Observed sizes:
+1960 fixtures/wire/frame-v1-valid.bin
+1960 fixtures/wire/frame-v1-invalid-reserved.bin
+3920 total
+
+Valid header and first four samples:
+ 01 00 00 00 80 07 00 00 05 00 00 00 00 00 00 00
+ 2a 00 00 00 00 00 00 00 00 ca 9a 3b 00 00 00 00
+ 07 00 00 00 00 00 00 00 00 00 00 00 00 00 80
+ 00 00 80 3f 00 00 80 bf
+
+Invalid header:
+ 01 00 00 00 80 07 00 00 05 00 00 00 01 00 00 00
+
+cmp -l output (one-based byte position, octal values):
+  13   0   1

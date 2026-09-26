@@ -1,0 +1,35 @@
+malformed_input: APPLICABLE, PASS
+  Twelve wire tests reject 1959/1961-byte records, unsupported version, wrong payload,
+  low/high unknown flag bits, every reserved byte, and the checked invalid fixture.
+
+stale_state: APPLICABLE, PASS
+  The external consumer decoded sequence 42, then a second independent record as sequence 43.
+  No prior-frame state was retained.
+
+dirty_worktree: APPLICABLE, PASS
+  Baseline tracked status at c342a42 was empty. During implementation, status contained only
+  declared Task 3 paths. Final tracked status is recorded after the second commit.
+
+flaky_tests: APPLICABLE, PASS
+  The complete contracts package ran three consecutive times with 18 tests each and no failures:
+  FLAKY_PROBE_RUN_1=PASS
+  FLAKY_PROBE_RUN_2=PASS
+  FLAKY_PROBE_RUN_3=PASS
+
+misleading_success_output: APPLICABLE, PASS
+  The invalid-reserved regression test was wrapped with explicit status capture.
+  OBSERVED_EXIT_STATUS=0 matched its passing output; the final matrix used set -e and reported
+  FINAL_MATRIX_EXIT_STATUS=0 only after every command completed.
+
+prompt_injection: NOT APPLICABLE
+  Task 3 parses fixed binary records and has no prompt or untrusted instruction surface.
+
+cancel_resume: NOT APPLICABLE
+  Task 3 defines synchronous value/trait contracts and no resumable operation.
+
+hung_or_long_commands: NOT APPLICABLE
+  There are no loops waiting on time or external services; all tests are deterministic and finish
+  immediately in an isolated local runner.
+
+repeated_interruptions: NOT APPLICABLE
+  Task 3 has no persisted workflow or interruption/recovery state machine.

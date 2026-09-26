@@ -1,0 +1,22 @@
+Command:
+  cargo doc -p realtime-noise-contracts --no-deps --locked --offline
+
+Runner:
+  Docker image hippocamp-rust:1.90-task3, --network none, RUSTUP_TOOLCHAIN=1.90.0
+
+Result:
+  Finished dev profile successfully.
+  Generated target/doc/realtime_noise_contracts/index.html.
+
+Public items observed in the generated crate index:
+AudioFrame
+CHANNELS
+DEFAULT_CAPACITY_HOPS
+Discontinuity
+FrameEnvelope
+HOP_SAMPLES
+RealtimeTransport
+SAMPLE_RATE_HZ
+TransportFull
+WireDecodeError
+WireFrameEnvelopeV1

@@ -1,0 +1,20 @@
+Consumer location during the probe:
+  /tmp/opencode/hippocamp-task3-consumer (outside the repository; removed after execution)
+
+Dependency:
+  realtime-noise-contracts = { path = "/workspace/crates/contracts" }
+
+Command surface:
+  cargo run --offline
+
+Runner:
+  Disposable Docker container hippocamp-task3-consumer, --network none,
+  Rust 1.90.0, repository mounted as the path dependency source surface.
+
+Observed output:
+decoded sequence=42 generation=7 flags=5 bytes_exact=true next_sequence=43
+
+Assertions performed by the consumer:
+  The valid fixture decoded through the public API.
+  Re-encoding produced byte-exact fixture bytes.
+  A second record with sequence 43 decoded as 43, proving no stale sequence state.

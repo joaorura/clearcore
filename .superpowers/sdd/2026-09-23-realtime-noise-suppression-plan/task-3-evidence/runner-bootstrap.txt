@@ -1,0 +1,19 @@
+Bootstrap was separate from all project commands.
+
+Pre-existing image:
+  rust:1.90.0-bookworm (local image ID 3914072ca0c3)
+
+Initial isolated probe:
+  rustc and Cargo were 1.90.0, but rustfmt and Clippy were absent. With
+  --network none the toolchain attempted a channel lookup and failed before project tests.
+
+One-time network-enabled bootstrap:
+  rustup component add rustfmt clippy
+  docker commit -> hippocamp-rust:1.90-task3
+
+Local runner image ID:
+  sha256:2ee1c0cc268a3bc8b6a8a584539662db80498f451210e94e6755da65b5c4f2f5
+
+All subsequent project commands used:
+  --network none
+  RUSTUP_TOOLCHAIN=1.90.0
