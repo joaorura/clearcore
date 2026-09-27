@@ -165,3 +165,60 @@ Raw observations are in `task-3-evidence/adversarial-probes.txt`.
 - Verification containers: all used `--rm` and left no containers.
 - Scratch files: no Task 3 scratch source remains outside the durable evidence directory.
 - Local runner image: removed after the second commit and final repository checks.
+
+## Fix round 1
+
+### Important finding
+
+Independent review found that the public `Discontinuity` API did not match the intended wire-facing
+contract: its storage and `bits`/`from_bits` signatures used `u32`, and consumers had no typed
+`contains(Self)` operation. The V1 record still stores flags in a four-byte little-endian field, so
+the correction is an API-domain `u8` value with an explicit `u8`/`u32` codec boundary, not a wire
+layout change.
+
+### RED and GREEN evidence
+
+The durable original RED evidence remains above: before Task 3 production APIs existed,
+`cargo test -p realtime-noise-contracts --test wire_v1 --locked --offline` exited 101 because the
+required imports were unresolved. The original GREEN matrix in
+`task-3-evidence/verification-matrix.txt` predates this round and is not claimed as a green result
+for this correction.
+
+For this round, the regression test now requires `u8` bits, rejects `16_u8`, and verifies
+`contains(Self)` for present and absent flags. A fresh GREEN and full offline matrix were attempted
+in the available disposable Rust 1.90-tagged runner with networking disabled. The runner lacked
+both `rustc` and `cargo`, so the command exited 127 before any Cargo command ran. The exact command
+and output are preserved in `task-3-evidence/fix-round-1.txt`; no successful fresh Cargo result is
+invented here.
+
+### API and codec correction
+
+- `Discontinuity` now wraps `u8`; `KNOWN_BITS`, `bits`, and `from_bits` use the same domain type.
+- `Discontinuity::contains(self, flag: Self)` exposes the typed consumer query.
+- Encoding widens the typed value with `u32::from(...)` before writing the unchanged four-byte V1
+  little-endian field.
+- Decoding rejects non-normative `u32` wire bits, then narrows with `u8::try_from(...)` before
+  constructing `Discontinuity`.
+
+### Verification results
+
+- Scoped working-tree inspection found only the three expected Rust paths modified.
+- The code/test diff contains the `u8` domain contract, typed containment, explicit wire widening
+  and narrowing, and the focused regression coverage.
+- Fresh Rust verification is blocked by the local runner failure described above; this is a runner
+  availability result, not a passing test claim.
+
+### Manual consumer impact
+
+Consumers now receive a `u8` from `bits`, pass a `u8` to `from_bits`, and query combined flags with
+`contains(Self)`. The on-wire V1 flags remain four bytes and retain their little-endian ABI, so
+records do not change layout or encoding width.
+
+### Cleanup and quota fallback
+
+- The disposable verification containers used `--rm`; no container is retained by this attempt.
+- The original OpenAI worker exhausted quota after implementation; the fallback worker supplied the
+  scoped code/test changes but did not create a commit. This round packages those changes without
+  broadening the fix.
+- The temporary `hippocamp-rust:1.90-task3-fix1` runner image is removed during the final cleanup
+  receipt.

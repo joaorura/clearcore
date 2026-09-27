@@ -1,0 +1,36 @@
+Task 3 fix round 1 evidence
+
+Scoped code paths inspected:
+  crates/contracts/src/audio.rs
+  crates/contracts/src/wire.rs
+  crates/contracts/tests/wire_v1.rs
+
+Current correction inspected:
+  - Discontinuity storage and public bit API use u8.
+  - Discontinuity::contains(Self) is present.
+  - V1 wire encoding explicitly widens u8 flags with u32::from(...).
+  - V1 wire decoding validates u32 wire bits, narrows with u8::try_from(...), then uses from_bits.
+  - The wire_v1 regression test assigns bits to u8 and checks typed containment.
+
+Fresh offline verification attempt:
+  docker run --rm --network none -e RUSTUP_TOOLCHAIN=1.90.0 -v "$PWD:/workspace" -w /workspace hippocamp-rust:1.90-task3-fix1 bash -lc 'rustc --version; cargo test -p realtime-noise-contracts --test wire_v1 --locked --offline; cargo test --workspace --locked --offline'
+
+Observed output:
+  bash: line 1: rustc: command not found
+  bash: line 1: cargo: command not found
+  bash: line 1: cargo: command not found
+  runner_exit=127
+
+Result:
+  No fresh Cargo GREEN result is available from this runner. The original Task 3 RED/GREEN matrix
+  is retained in task-3-report.md and task-3-evidence/verification-matrix.txt, but predates this
+  focused correction and is not represented as current verification.
+
+Repository hygiene verification:
+  GIT_MASTER=1 git diff --check
+  exit=0
+
+Cleanup:
+  docker image rm hippocamp-rust:1.90-task3-fix1
+  Untagged: hippocamp-rust:1.90-task3-fix1
+  Deleted: sha256:bf49a87418d9a9efa3281a0e0db2b55c11281a7c56ae602a151bf417cca3f6b0

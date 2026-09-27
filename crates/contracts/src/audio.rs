@@ -7,7 +7,7 @@ pub const HOP_SAMPLES: usize = 480;
 pub type AudioFrame = [f32; HOP_SAMPLES];
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct Discontinuity(u32);
+pub struct Discontinuity(u8);
 
 impl Discontinuity {
     pub const NONE: Self = Self(0);
@@ -16,12 +16,12 @@ impl Discontinuity {
     pub const GENERATION_CHANGE: Self = Self(4);
     pub const INFERENCE_DEADLINE_MISS: Self = Self(8);
 
-    const KNOWN_BITS: u32 = Self::CAPTURE_DROP.0
+    pub(crate) const KNOWN_BITS: u8 = Self::CAPTURE_DROP.0
         | Self::DEVICE_CHANGE.0
         | Self::GENERATION_CHANGE.0
         | Self::INFERENCE_DEADLINE_MISS.0;
 
-    pub const fn from_bits(bits: u32) -> Option<Self> {
+    pub const fn from_bits(bits: u8) -> Option<Self> {
         if bits & !Self::KNOWN_BITS == 0 {
             Some(Self(bits))
         } else {
@@ -29,8 +29,12 @@ impl Discontinuity {
         }
     }
 
-    pub const fn bits(self) -> u32 {
+    pub const fn bits(self) -> u8 {
         self.0
+    }
+
+    pub const fn contains(self, flag: Self) -> bool {
+        self.0 & flag.0 == flag.0
     }
 }
 

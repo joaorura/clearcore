@@ -82,7 +82,7 @@ impl WireFrameEnvelopeV1 {
         let mut bytes = [0_u8; WIRE_SIZE_BYTES];
         bytes[0..4].copy_from_slice(&VERSION.to_le_bytes());
         bytes[4..8].copy_from_slice(&PAYLOAD_LEN_BYTES.to_le_bytes());
-        bytes[8..12].copy_from_slice(&envelope.discontinuity.bits().to_le_bytes());
+        bytes[8..12].copy_from_slice(&u32::from(envelope.discontinuity.bits()).to_le_bytes());
         bytes[12..16].copy_from_slice(&0_u32.to_le_bytes());
         bytes[16..24].copy_from_slice(&envelope.sequence.to_le_bytes());
         bytes[24..32].copy_from_slice(&envelope.capture_monotonic_ns.to_le_bytes());
@@ -121,9 +121,13 @@ impl WireFrameEnvelopeV1 {
         }
 
         let raw_flags = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
-        let Some(discontinuity) = Discontinuity::from_bits(raw_flags) else {
+        if raw_flags & !u32::from(Discontinuity::KNOWN_BITS) != 0 {
             return Err(WireDecodeError::UnknownFlags { actual: raw_flags });
-        };
+        }
+        let flags = u8::try_from(raw_flags)
+            .map_err(|_| WireDecodeError::UnknownFlags { actual: raw_flags })?;
+        let discontinuity = Discontinuity::from_bits(flags)
+            .ok_or(WireDecodeError::UnknownFlags { actual: raw_flags })?;
 
         let reserved = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
         if reserved != 0 {

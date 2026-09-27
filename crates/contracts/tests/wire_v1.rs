@@ -42,16 +42,21 @@ fn frame_envelope_is_directly_constructible_and_copyable() {
 }
 
 #[test]
-fn discontinuity_accepts_only_normative_flags() {
-    let combined = Discontinuity::CAPTURE_DROP
-        | Discontinuity::DEVICE_CHANGE
-        | Discontinuity::GENERATION_CHANGE
-        | Discontinuity::INFERENCE_DEADLINE_MISS;
+fn discontinuity_uses_u8_bits_and_typed_contains() {
+    let combined = Discontinuity::CAPTURE_DROP | Discontinuity::GENERATION_CHANGE;
+
+    let bits: u8 = combined.bits();
 
     assert_eq!(Discontinuity::NONE.bits(), 0);
-    assert_eq!(combined.bits(), 15);
-    assert!(Discontinuity::from_bits(16).is_none());
-    assert!(Discontinuity::from_bits(1_u32 << 31).is_none());
+    assert_eq!(Discontinuity::CAPTURE_DROP.bits(), 1);
+    assert_eq!(Discontinuity::DEVICE_CHANGE.bits(), 2);
+    assert_eq!(Discontinuity::GENERATION_CHANGE.bits(), 4);
+    assert_eq!(Discontinuity::INFERENCE_DEADLINE_MISS.bits(), 8);
+    assert_eq!(bits, 5);
+    assert!(combined.contains(Discontinuity::CAPTURE_DROP));
+    assert!(!combined.contains(Discontinuity::DEVICE_CHANGE));
+    assert_eq!(Discontinuity::from_bits(bits), Some(combined));
+    assert!(Discontinuity::from_bits(16_u8).is_none());
 }
 
 #[test]
