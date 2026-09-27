@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running `target/debug/benchmark --backend tract --profile avx2-minimum --duration 300`
+{"report":"benchmarks/cpu-baseline.json","status":"BLOCKED_PENDING_GOLDEN"}

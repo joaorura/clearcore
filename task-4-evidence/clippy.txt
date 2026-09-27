@@ -1,0 +1,12 @@
+   Compiling tract-linalg v0.19.16
+    Checking tract-core v0.19.16
+    Checking tract-nnef v0.19.16
+    Checking tract-hir v0.19.16
+    Checking tract-pulse-opl v0.19.16
+    Checking tract-onnx-opl v0.19.16
+    Checking tract-pulse v0.19.16
+    Checking tract-onnx v0.19.16
+    Checking deep_filter v0.5.6 (https://github.com/Rikorose/DeepFilterNet.git?tag=v0.5.6#978576aa)
+    Checking realtime-noise-model v0.1.0 (/workspace/crates/model)
+    Checking realtime-noise-tools v0.1.0 (/workspace/crates/tools)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.01s

@@ -1,0 +1,4 @@
+   Compiling realtime-noise-tools v0.1.0 (/workspace/crates/tools)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running `target/debug/validate-asset`
+{"asset_id":"df-compatible-release-asset-v1","asset_sha256":"c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616","candidate_record_sha256":"f382facf4d055a8d5387ca0102b3ff521bd9d1f3764b22ebe90c29d92dfb10ba","key_id":"sha256:cfa7e10c021031f5481775cf32093d41e5aaaad454653f3ed0022769cbbfd3f2","legal_review_record_sha256":"ea6f77e32a6b5aa80b6562e605f89bad56e860963d39f62361821af076bf9e44","status":"M0_APPROVED"}

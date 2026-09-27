@@ -1,0 +1,157 @@
+   Compiling tract-linalg v0.19.16
+   Compiling tract-core v0.19.16
+   Compiling tract-nnef v0.19.16
+   Compiling tract-hir v0.19.16
+   Compiling tract-pulse-opl v0.19.16
+   Compiling tract-onnx-opl v0.19.16
+   Compiling tract-pulse v0.19.16
+   Compiling tract-onnx v0.19.16
+   Compiling deep_filter v0.5.6 (https://github.com/Rikorose/DeepFilterNet.git?tag=v0.5.6#978576aa)
+   Compiling realtime-noise-model v0.1.0 (/workspace/crates/model)
+   Compiling realtime-noise-tools v0.1.0 (/workspace/crates/tools)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.95s
+     Running unittests src/lib.rs (target/debug/deps/realtime_noise_contracts-df74c815a881053b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/transport_properties.rs (target/debug/deps/transport_properties-f3349b4529b90fc0)
+
+running 6 tests
+test realtime_transport_is_object_safe_and_thread_shareable ... ok
+test empty_transport_pop_is_deterministic ... ok
+test transport_reports_capacity_and_backlog ... ok
+test transport_preserves_fifo_order ... ok
+test default_capacity_is_twenty_four_hops ... ok
+test full_transport_rejects_new_frame_without_removing_consumer_items ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/wire_v1.rs (target/debug/deps/wire_v1-eed9f32ee97d26c4)
+
+running 12 tests
+test audio_contract_uses_fixed_mono_ten_millisecond_hops ... ok
+test discontinuity_uses_u8_bits_and_typed_contains ... ok
+test checked_invalid_fixture_rejects_nonzero_reserved_field ... ok
+test frame_envelope_is_directly_constructible_and_copyable ... ok
+test valid_fixture_decodes_and_reencodes_exactly ... ok
+test wire_v1_rejects_each_nonzero_reserved_byte ... ok
+test wire_v1_rejects_high_unknown_flag ... ok
+test wire_v1_preserves_signed_zero_infinity_and_nan_sample_bits ... ok
+test wire_v1_rejects_low_unknown_flag ... ok
+test wire_v1_rejects_malformed_total_lengths ... ok
+test wire_v1_rejects_wrong_payload_size ... ok
+test wire_v1_rejects_unsupported_version ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/realtime_noise_model-fb74d6c2c79d2b92)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/asset_gate.rs (target/debug/deps/asset_gate-ca0d40e00c9791ec)
+
+running 2 tests
+test tract_backend_refuses_unapproved_asset ... ok
+test approved_manifest_is_bound_to_fresh_m0_verification ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/golden_reference.rs (target/debug/deps/golden_reference-6a481a9d60c6fa29)
+
+running 1 test
+test missing_frozen_golden_is_a_truthful_block ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tract_smoke.rs (target/debug/deps/tract_smoke-1e6f8405d0a8e4c9)
+
+running 1 test
+test approved_tract_backend_processes_one_finite_frame ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s
+
+     Running unittests src/lib.rs (target/debug/deps/realtime_noise_qualification-64b2e55b84700368)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/realtime_noise_tools-c4de07a7d3a42bb6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/benchmark.rs (target/debug/deps/benchmark-058ce3efdbfee163)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/generate-golden.rs (target/debug/deps/generate_golden-4b452536ac18e407)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/validate-asset.rs (target/debug/deps/validate_asset-4056d06dc2869085)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/workspace_policy-56a0a3d55e0f20ff)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/policy.rs (target/debug/deps/policy-7239ffb79871d9af)
+
+running 9 tests
+test multiline_inline_dependency_tables_fail_closed ... ok
+test comment_split_inline_dependency_tables_fail_closed ... ok
+test inline_dependency_table_trailing_commas_fail_closed ... ok
+test malformed_dependency_declarations_fail_closed ... ok
+test workspace_policy_rejects_nonempty_default_features ... ok
+test workspace_policy_rejects_unsupported_dependency_tables ... ok
+test workspace_policy_rejects_effective_defaults_across_supported_forms ... ok
+test workspace_policy_accepts_all_supported_fixture_forms ... ok
+test workspace_policy_accepts_all_registered_repository_manifests ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests realtime_noise_contracts
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests realtime_noise_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests realtime_noise_qualification
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests realtime_noise_tools
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests workspace_policy
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
