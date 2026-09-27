@@ -184,12 +184,12 @@ required imports were unresolved. The original GREEN matrix in
 `task-3-evidence/verification-matrix.txt` predates this round and is not claimed as a green result
 for this correction.
 
-For this round, the regression test now requires `u8` bits, rejects `16_u8`, and verifies
-`contains(Self)` for present and absent flags. A fresh GREEN and full offline matrix were attempted
-in the available disposable Rust 1.90-tagged runner with networking disabled. The runner lacked
-both `rustc` and `cargo`, so the command exited 127 before any Cargo command ran. The exact command
-and output are preserved in `task-3-evidence/fix-round-1.txt`; no successful fresh Cargo result is
-invented here.
+For this round, the regression test requires `u8` bits, rejects `16_u8`, and verifies
+`contains(Self)` for present and absent flags. A fresh GREEN and full offline matrix now exists in a
+derived Rust 1.90 runner with networking disabled. It passed focused wire tests (12), full contracts
+tests (18), the selected workspace-policy test (1), strict Clippy, workspace build, workspace tests
+(27), the offline gate, lockfile identity, and Rustdoc. The original unavailable runner and its exit
+127 are retained as historical evidence in `task-3-evidence/fix-round-1.txt`.
 
 ### API and codec correction
 
@@ -205,20 +205,25 @@ invented here.
 - Scoped working-tree inspection found only the three expected Rust paths modified.
 - The code/test diff contains the `u8` domain contract, typed containment, explicit wire widening
   and narrowing, and the focused regression coverage.
-- Fresh Rust verification is blocked by the local runner failure described above; this is a runner
-  availability result, not a passing test claim.
+- The current focused wire suite passed 12/12 and the full contracts suite passed 18/18 in the
+  network-disabled runner.
+- Strict Clippy, workspace build, workspace tests (27/27), offline gate, Rustdoc, and lockfile
+  identity all returned exit 0 in the same current verification cycle.
 
 ### Manual consumer impact
 
 Consumers now receive a `u8` from `bits`, pass a `u8` to `from_bits`, and query combined flags with
 `contains(Self)`. The on-wire V1 flags remain four bytes and retain their little-endian ABI, so
-records do not change layout or encoding width.
+records do not change layout or encoding width. A temporary external path crate compiled and ran
+offline against the current contracts crate, declared `let bits: u8`, exercised `contains`, and
+decoded/re-encoded the checked fixture byte-exactly with output
+`TASK3_FIX_ROUND1_CONSUMER_PASS bits=5 bytes_exact=true`.
 
 ### Cleanup and quota fallback
 
-- The disposable verification containers used `--rm`; no container is retained by this attempt.
+- The disposable verification containers used `--rm`; no project-run container is retained.
 - The original OpenAI worker exhausted quota after implementation; the fallback worker supplied the
   scoped code/test changes but did not create a commit. This round packages those changes without
   broadening the fix.
-- The temporary `hippocamp-rust:1.90-task3-fix1` runner image is removed during the final cleanup
-  receipt.
+- The bootstrap container, external consumer directories, and derived
+  `hippocamp-rust:1.90-task3-fix-round-1` image are removed during the final cleanup receipt.
