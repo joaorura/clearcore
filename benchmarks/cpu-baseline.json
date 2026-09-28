@@ -1,9 +1,10 @@
 {
-  "schema_version": 1,
-  "status": "BLOCKED_PENDING_GOLDEN",
-  "run_id": "task4-1790569066",
-  "started_at_unix_seconds": 1790569066,
-  "finished_at_unix_seconds": 1790569066,
+  "asset_id": "df-compatible-release-asset-v1",
+  "asset_sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+  "backend": "tract",
+  "backend_version": "deep_filter-v0.5.6",
+  "candidate_record_sha256": "f382facf4d055a8d5387ca0102b3ff521bd9d1f3764b22ebe90c29d92dfb10ba",
+  "clean_worktree": false,
   "command": [
     "benchmark",
     "--backend",
@@ -13,41 +14,48 @@
     "--duration",
     "300"
   ],
+  "deadline_ms": 10.0,
+  "finished_at_unix_seconds": 1790598277,
   "git_revision": "unavailable",
-  "clean_worktree": false,
-  "worker_inference_only": true,
-  "backend": "tract",
-  "backend_version": "deep_filter-v0.5.6",
+  "host": {
+    "avx2": true,
+    "container_or_vm_ambiguity": true,
+    "cpu_model": "Intel(R) Core(TM) Ultra 7 265H",
+    "frequency_ac_affinity_governor": "not_observable",
+    "kernel": "Linux 7.0.12-linuxkit",
+    "operating_conditions_observed": false,
+    "os": "linux",
+    "physical_cores": 16,
+    "ram_kib": 7812432,
+    "reference_class_qualified": false
+  },
+  "key_id": "sha256:cfa7e10c021031f5481775cf32093d41e5aaaad454653f3ed0022769cbbfd3f2",
+  "legal_review_record_sha256": "ea6f77e32a6b5aa80b6562e605f89bad56e860963d39f62361821af076bf9e44",
+  "measurements": {
+    "allocation": {
+      "available": true,
+      "initialization_bytes": null,
+      "initialization_count": null,
+      "measurement_completed": false,
+      "mechanism": "stats_alloc-0.1.10",
+      "per_hop_bytes": null,
+      "per_hop_count": null,
+      "total_bytes": null,
+      "total_count": null,
+      "warm_up_bytes": null,
+      "warm_up_count": null
+    },
+    "reason": "BLOCKED_PENDING_GOLDEN: /workspace/fixtures/golden/frozen-reference.json is absent"
+  },
+  "p99_limit_ms": 7.0,
+  "profile": "avx2-minimum",
+  "requested_duration_seconds": 300,
+  "run_id": "task4-1790598277",
   "runtime": "tract",
   "runtime_version": "0.19.16",
-  "profile": "avx2-minimum",
-  "asset_id": "df-compatible-release-asset-v1",
-  "asset_sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
-  "candidate_record_sha256": "f382facf4d055a8d5387ca0102b3ff521bd9d1f3764b22ebe90c29d92dfb10ba",
-  "legal_review_record_sha256": "ea6f77e32a6b5aa80b6562e605f89bad56e860963d39f62361821af076bf9e44",
-  "key_id": "sha256:cfa7e10c021031f5481775cf32093d41e5aaaad454653f3ed0022769cbbfd3f2",
-  "requested_duration_seconds": 300,
+  "schema_version": 1,
+  "started_at_unix_seconds": 1790598277,
+  "status": "BLOCKED_PENDING_GOLDEN",
   "warm_up_policy": "one ordered pass over every frozen corpus frame",
-  "deadline_ms": 10.0,
-  "p99_limit_ms": 7.0,
-  "host": {
-    "os": "linux",
-    "kernel": "Linux 7.0.12-linuxkit",
-    "cpu_model": "Intel(R) Core(TM) Ultra 7 265H",
-    "avx2": true,
-    "physical_cores": 16,
-    "ram_kib": 7812440,
-    "container_or_vm_ambiguity": true,
-    "reference_class_qualified": false,
-    "frequency_ac_affinity_governor": "not_observable"
-  },
-  "measurements": {
-    "reason": "BLOCKED_PENDING_GOLDEN: /workspace/fixtures/golden/frozen-reference.json is absent",
-    "allocation": {
-      "mechanism": "unavailable-under-unsafe-code-forbid",
-      "available": false,
-      "per_hop_count": null,
-      "per_hop_bytes": null
-    }
-  }
+  "worker_inference_only": true
 }

@@ -7,14 +7,20 @@ fn blocked_receipt_declares_ready_allocation_instrumentation()
         serde_json::from_str(include_str!("../../../benchmarks/cpu-baseline.json"))?;
     let allocation = &receipt["measurements"]["allocation"];
 
-    // In the offline build, allocation instrumentation is unavailable because stats_alloc
-    // is not in the offline cache. A network-enabled dependency bootstrap is required
-    // to fetch stats_alloc=0.1.10 and enable the alloc_instrumentation feature.
-    assert_eq!(
-        allocation["mechanism"],
-        "unavailable-under-unsafe-code-forbid"
-    );
-    assert_eq!(allocation["available"], false);
+    assert_eq!(receipt["status"], "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(receipt["clean_worktree"], false);
+    assert_eq!(receipt["host"]["reference_class_qualified"], false);
+    assert_eq!(receipt["host"]["operating_conditions_observed"], false);
+    assert_eq!(allocation["mechanism"], "stats_alloc-0.1.10");
+    assert_eq!(allocation["available"], true);
+    assert_eq!(allocation["measurement_completed"], false);
+    assert_ne!(receipt["status"], "BLOCKED_ALLOCATION_MEASUREMENT");
+    assert!(allocation["initialization_count"].is_null());
+    assert!(allocation["initialization_bytes"].is_null());
+    assert!(allocation["warm_up_count"].is_null());
+    assert!(allocation["warm_up_bytes"].is_null());
+    assert!(allocation["total_count"].is_null());
+    assert!(allocation["total_bytes"].is_null());
     assert!(allocation["per_hop_count"].is_null());
     assert!(allocation["per_hop_bytes"].is_null());
     Ok(())

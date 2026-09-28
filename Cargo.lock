@@ -206,7 +206,7 @@ dependencies = [
 [[package]]
 name = "deep_filter"
 version = "0.5.6"
-source = "git+https://github.com/Rikorose/DeepFilterNet.git?tag=v0.5.6#978576aa8400552a4ce9730838c635aa30db5e61"
+source = "git+https://github.com/Rikorose/DeepFilterNet.git?rev=978576aa8400552a4ce9730838c635aa30db5e61#978576aa8400552a4ce9730838c635aa30db5e61"
 dependencies = [
  "anyhow",
  "flate2",
@@ -908,6 +908,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "stats_alloc",
 ]
 
 [[package]]
@@ -1123,6 +1124,12 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "stats_alloc"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
 
 [[package]]
 name = "strength_reduce"
