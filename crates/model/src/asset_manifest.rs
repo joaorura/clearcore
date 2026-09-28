@@ -10,7 +10,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{InferenceError, archive, json::parse_unique};
+use crate::{InferenceError, archive, json::parse_unique, m0_records};
 
 const ASSET_ID: &str = "df-compatible-release-asset-v1";
 pub const APPROVED_ASSET_SHA256: &str =
@@ -29,6 +29,7 @@ pub struct ApprovedAssetManifest {
     candidate_record_sha256: String,
     legal_review_record_sha256: String,
     key_id: String,
+    repository_root: PathBuf,
     archive_path: PathBuf,
     #[cfg(feature = "tract")]
     archive: Arc<[u8]>,
@@ -60,6 +61,19 @@ impl ApprovedAssetManifest {
     pub fn archive_path(&self) -> &Path {
         &self.archive_path
     }
+    pub(crate) fn revalidate(&self) -> Result<Self, InferenceError> {
+        let fresh = Self::verify(&self.repository_root)?;
+        if fresh.asset_id != self.asset_id
+            || fresh.asset_sha256 != self.asset_sha256
+            || fresh.candidate_record_sha256 != self.candidate_record_sha256
+            || fresh.legal_review_record_sha256 != self.legal_review_record_sha256
+            || fresh.key_id != self.key_id
+            || fresh.archive_path != self.archive_path
+        {
+            return Err(blocked("approved asset binding changed after verification"));
+        }
+        Ok(fresh)
+    }
     #[cfg(feature = "tract")]
     pub fn archive_snapshot(&self) -> Arc<[u8]> {
         Arc::clone(&self.archive)
@@ -72,6 +86,7 @@ fn verify(root: &Path) -> Result<ApprovedAssetManifest, InferenceError> {
     let legal = read_json(&governance.join("legal-review.json"))?;
     let mut approval = read_json(&governance.join("approval-manifest.json"))?;
     let policy = read_json(&root.join("governance/model-assets/trust-policy.json"))?;
+    m0_records::validate(&candidate, &legal, &approval).map_err(|error| blocked(&error))?;
     validate_record(&candidate, "asset_id", ASSET_ID)?;
     validate_record(&candidate, "sha256", APPROVED_ASSET_SHA256)?;
     validate_record(&approval, "asset_id", ASSET_ID)?;
@@ -84,10 +99,18 @@ fn verify(root: &Path) -> Result<ApprovedAssetManifest, InferenceError> {
     {
         return Err(blocked("reviewed record digest mismatch"));
     }
-    let authorized = policy
+    let policy_object = policy
+        .as_object()
+        .ok_or_else(|| blocked("trust policy must be an object"))?;
+    if policy_object.len() != 1 || !policy_object.contains_key("authorized_key_ids") {
+        return Err(blocked("trust policy fields mismatch"));
+    }
+    let authorized = policy_object
         .get("authorized_key_ids")
         .and_then(Value::as_array)
-        .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(KEY_ID)));
+        .is_some_and(|ids| {
+            ids.iter().all(Value::is_string) && ids.iter().any(|id| id.as_str() == Some(KEY_ID))
+        });
     if !authorized {
         return Err(blocked("approval key is not authorized by fixed policy"));
     }
@@ -134,6 +157,7 @@ fn verify(root: &Path) -> Result<ApprovedAssetManifest, InferenceError> {
         candidate_record_sha256: CANDIDATE_DIGEST.to_owned(),
         legal_review_record_sha256: LEGAL_DIGEST.to_owned(),
         key_id: KEY_ID.to_owned(),
+        repository_root: root.to_path_buf(),
         archive_path,
         #[cfg(feature = "tract")]
         archive: archive_bytes.into(),

@@ -32,6 +32,7 @@ impl TractBackend {
         profile: CpuProfile,
     ) -> Result<Self, InferenceError> {
         profile.ensure_supported()?;
+        let manifest = manifest.revalidate()?;
         let descriptor = BackendDescriptor {
             backend: "tract",
             backend_version: "deep_filter-v0.5.6",

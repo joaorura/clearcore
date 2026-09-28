@@ -2,6 +2,6 @@
 
 Status: `BLOCKED_PENDING_GOLDEN`.
 
-Canonical report: `benchmarks/cpu-baseline.json` (SHA-256 `3df4a7a442f7a927b603dfceac675ac8c46cc2b4938a9f7112bb36d659c6cc7b`).
+Canonical report: `benchmarks/cpu-baseline.json` (SHA-256 `7e610667769201cce0cb0e8200767011487adbaf4439f1f602a38ec3723698f1`).
 
-This blocked receipt records inference-worker scope only. It does not claim product end-to-end latency or M1 approval. The frozen golden, physical host qualification, and per-hop allocation instrumentation are unavailable.
+This report measures inference-worker latency only and does not claim product end-to-end latency or M1 approval. See the canonical JSON for measured values and blockers.

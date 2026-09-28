@@ -903,7 +903,9 @@ version = "0.1.0"
 name = "realtime-noise-tools"
 version = "0.1.0"
 dependencies = [
+ "realtime-noise-contracts",
  "realtime-noise-model",
+ "serde",
  "serde_json",
  "sha2",
 ]

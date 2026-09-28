@@ -35,5 +35,8 @@ tract-hir = { version = "=0.19.16", default-features = false, optional = true }
 tract-onnx = { version = "=0.19.16", default-features = false, optional = true }
 tract-pulse = { version = "=0.19.16", default-features = false, optional = true }
 
+[dev-dependencies]
+tempfile = { version = "=3.23.0", default-features = false }
+
 [lints]
 workspace = true

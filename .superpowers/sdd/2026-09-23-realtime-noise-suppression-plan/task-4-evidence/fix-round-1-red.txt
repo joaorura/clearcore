@@ -1,0 +1,14 @@
+Task 4 fix round 1 RED
+UTC date: 2026-09-28
+
+Command:
+docker run --rm --network none -e CARGO_HOME=/cargo-cache -e RUSTUP_TOOLCHAIN=1.90.0-x86_64-unknown-linux-gnu -v "$PWD:/workspace" -v hippocamp-task4-cargo:/cargo-cache -v hippocamp-task4-target:/workspace/target -w /workspace hippocamp-task4-rust:local /usr/local/cargo/bin/cargo test -p realtime-noise-model --features tract --locked --offline
+
+Exit status: 101
+
+Expected behavior failures:
+- golden::tests::rejects_reordered_cases: the reader accepted reordered corpus cases.
+- golden::tests::rejects_invalid_input_digest: the reader accepted a malformed input digest.
+- golden::tests::rejects_non_finite_quality_threshold: the validator accepted a non-finite quality threshold.
+
+The command resolved entirely from the provisioned offline Cargo cache with Docker networking disabled. Compilation succeeded; the failures are assertions against missing validation behavior, not dependency, toolchain, import, or unrelated workspace failures.

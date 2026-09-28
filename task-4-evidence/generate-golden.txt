@@ -1,3 +1,0 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
-     Running `target/debug/generate-golden`
-{"reason":"validated local corpus manifest is absent; no fixture was generated","status":"BLOCKED_PENDING_GOLDEN"}

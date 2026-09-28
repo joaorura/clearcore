@@ -1,6 +1,0 @@
-    Checking realtime-noise-model v0.1.0 (/workspace/crates/model)
- Documenting realtime-noise-model v0.1.0 (/workspace/crates/model)
- Documenting realtime-noise-tools v0.1.0 (/workspace/crates/tools)
-    Checking realtime-noise-tools v0.1.0 (/workspace/crates/tools)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.29s
-   Generated /workspace/target/doc/realtime_noise_contracts/index.html and 7 other files

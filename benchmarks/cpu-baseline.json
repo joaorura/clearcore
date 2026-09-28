@@ -1,24 +1,47 @@
 {
-  "allocation_measurement": "unavailable",
   "asset_id": "df-compatible-release-asset-v1",
   "asset_sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
   "backend": "tract",
-  "blockers": [
-    "BLOCKED_PENDING_GOLDEN",
-    "BLOCKED_UNSUPPORTED_CPU_PROFILE",
-    "BLOCKED_ALLOCATION_MEASUREMENT"
+  "backend_version": "deep_filter-v0.5.6",
+  "candidate_record_sha256": "f382facf4d055a8d5387ca0102b3ff521bd9d1f3764b22ebe90c29d92dfb10ba",
+  "clean_worktree": false,
+  "command": [
+    "benchmark",
+    "--backend",
+    "tract",
+    "--profile",
+    "avx2-minimum",
+    "--duration",
+    "300"
   ],
-  "deadline_misses": null,
-  "deadline_ms": 10,
-  "golden_available": false,
-  "measured_duration_seconds": null,
-  "p99_limit_ms": 7,
-  "p99_ms": null,
-  "physical_host_qualification": "not_observable_in_container",
+  "deadline_ms": 10.0,
+  "finished_at_unix_seconds": 1790569066,
+  "git_revision": "unavailable",
+  "host": {
+    "avx2": true,
+    "container_or_vm_ambiguity": true,
+    "cpu_model": "Intel(R) Core(TM) Ultra 7 265H",
+    "frequency_ac_affinity_governor": "not_observable",
+    "kernel": "Linux 7.0.12-linuxkit",
+    "os": "linux",
+    "physical_cores": 16,
+    "ram_kib": 7812440,
+    "reference_class_qualified": false
+  },
+  "key_id": "sha256:cfa7e10c021031f5481775cf32093d41e5aaaad454653f3ed0022769cbbfd3f2",
+  "legal_review_record_sha256": "ea6f77e32a6b5aa80b6562e605f89bad56e860963d39f62361821af076bf9e44",
+  "measurements": {
+    "reason": "BLOCKED_PENDING_GOLDEN: /workspace/fixtures/golden/frozen-reference.json is absent"
+  },
+  "p99_limit_ms": 7.0,
   "profile": "avx2-minimum",
   "requested_duration_seconds": 300,
-  "run_id": "task4-blocked-1790478060",
+  "run_id": "task4-1790569066",
+  "runtime": "tract",
+  "runtime_version": "0.19.16",
   "schema_version": 1,
+  "started_at_unix_seconds": 1790569066,
   "status": "BLOCKED_PENDING_GOLDEN",
+  "warm_up_policy": "one ordered pass over every frozen corpus frame",
   "worker_inference_only": true
 }
