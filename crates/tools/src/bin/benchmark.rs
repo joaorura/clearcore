@@ -18,6 +18,7 @@ static GLOBAL: &StatsAlloc<std::alloc::System> = &INSTRUMENTED_SYSTEM;
 const REQUESTED_SECONDS: u64 = 300;
 const REQUESTED_SECONDS_F64: f64 = 300.0;
 const DEADLINE_MS: f64 = 10.0;
+const MAX_DURATION_SECONDS: f64 = REQUESTED_SECONDS_F64 + DEADLINE_MS / 1_000.0;
 const P99_LIMIT_MS: f64 = 7.0;
 
 struct LatencyMetrics {
@@ -32,7 +33,7 @@ fn qualification_status(
     allocation_count: usize,
     clean_worktree: bool,
 ) -> &'static str {
-    if duration_seconds >= REQUESTED_SECONDS_F64
+    if (REQUESTED_SECONDS_F64..=MAX_DURATION_SECONDS).contains(&duration_seconds)
         && latency.p99_ms <= P99_LIMIT_MS
         && latency.max_ms <= DEADLINE_MS
         && latency.deadline_misses == 0
@@ -50,6 +51,8 @@ fn allocation_not_run() -> Value {
         "mechanism": "stats_alloc-0.1.10",
         "available": true,
         "measurement_completed": false,
+        "verification_count": Value::Null,
+        "verification_bytes": Value::Null,
         "initialization_count": Value::Null,
         "initialization_bytes": Value::Null,
         "warm_up_count": Value::Null,
@@ -77,15 +80,28 @@ fn run() -> Result<&'static str, String> {
     let root = env::current_dir().map_err(|error| error.to_string())?;
     let started = unix_seconds()?;
     let clean_worktree = worktree_is_clean(&root);
-    let manifest = ApprovedAssetManifest::verify(&root).map_err(|error| error.to_string())?;
     let host = host_evidence();
+    let manifest = match ApprovedAssetManifest::verify(&root) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return write_report(
+                &root,
+                "BLOCKED_NO_APPROVED_ASSET",
+                None,
+                &host,
+                started,
+                clean_worktree,
+                &json!({"reason": error.to_string(), "allocation": allocation_not_run()}),
+            );
+        }
+    };
     let golden = match GoldenFixture::read(&root.join("fixtures/golden/frozen-reference.json")) {
         Ok(golden) => golden,
         Err(error) => {
             return write_report(
                 &root,
                 "BLOCKED_PENDING_GOLDEN",
-                &manifest,
+                Some(&manifest),
                 &host,
                 started,
                 clean_worktree,
@@ -97,7 +113,7 @@ fn run() -> Result<&'static str, String> {
         return write_report(
             &root,
             "BLOCKED_UNSUPPORTED_CPU_PROFILE",
-            &manifest,
+            Some(&manifest),
             &host,
             started,
             clean_worktree,
@@ -111,10 +127,16 @@ fn run() -> Result<&'static str, String> {
     let initialization = initialization_region.change();
     let initialization_count = initialization.allocations + initialization.reallocations;
     let initialization_bytes = allocation_bytes(&initialization)?;
+    let verification_region = Region::new(GLOBAL);
     verify_golden(&mut backend, &golden)?;
+    let verification = verification_region.change();
+    let verification_count = verification.allocations + verification.reallocations;
+    let verification_bytes = allocation_bytes(&verification)?;
     let benchmark = measure_backend(
         &mut backend,
         &golden,
+        verification_count,
+        verification_bytes,
         initialization_count,
         initialization_bytes,
     )?;
@@ -126,7 +148,7 @@ fn run() -> Result<&'static str, String> {
             benchmark.allocation_count,
             clean_worktree,
         ),
-        &manifest,
+        Some(&manifest),
         &host,
         started,
         clean_worktree,
@@ -167,6 +189,8 @@ fn verify_golden(backend: &mut TractBackend, golden: &GoldenFixture) -> Result<(
 fn measure_backend(
     backend: &mut TractBackend,
     golden: &GoldenFixture,
+    verification_count: usize,
+    verification_bytes: isize,
     initialization_count: usize,
     initialization_bytes: isize,
 ) -> Result<BenchmarkResult, String> {
@@ -232,6 +256,8 @@ fn measure_backend(
             "mechanism": "stats_alloc-0.1.10",
             "available": true,
             "measurement_completed": true,
+            "verification_count": verification_count,
+            "verification_bytes": verification_bytes,
             "initialization_count": initialization_count,
             "initialization_bytes": initialization_bytes,
             "warm_up_count": warm_up_count,
@@ -330,7 +356,7 @@ fn host_evidence() -> HostEvidence {
 fn write_report(
     root: &Path,
     status: &'static str,
-    manifest: &ApprovedAssetManifest,
+    manifest: Option<&ApprovedAssetManifest>,
     host: &HostEvidence,
     started: u64,
     clean_worktree: bool,
@@ -352,11 +378,11 @@ fn write_report(
         "runtime": "tract",
         "runtime_version": "0.19.16",
         "profile": "avx2-minimum",
-        "asset_id": manifest.asset_id(),
-        "asset_sha256": manifest.asset_sha256(),
-        "candidate_record_sha256": manifest.candidate_record_sha256(),
-        "legal_review_record_sha256": manifest.legal_review_record_sha256(),
-        "key_id": manifest.key_id(),
+        "asset_id": manifest.map(ApprovedAssetManifest::asset_id),
+        "asset_sha256": manifest.map(ApprovedAssetManifest::asset_sha256),
+        "candidate_record_sha256": manifest.map(ApprovedAssetManifest::candidate_record_sha256),
+        "legal_review_record_sha256": manifest.map(ApprovedAssetManifest::legal_review_record_sha256),
+        "key_id": manifest.map(ApprovedAssetManifest::key_id),
         "requested_duration_seconds": REQUESTED_SECONDS,
         "warm_up_policy": "one ordered pass over every frozen corpus frame",
         "deadline_ms": DEADLINE_MS,
@@ -504,6 +530,20 @@ mod tests {
 
         assert_eq!(
             qualification_status(300.0, &latency, 0, false),
+            "M1_FAILED_BENCHMARK"
+        );
+    }
+
+    #[test]
+    fn qualification_status_rejects_excessive_duration_overrun() {
+        let latency = LatencyMetrics {
+            p99_ms: 7.0,
+            max_ms: 10.0,
+            deadline_misses: 0,
+        };
+
+        assert_eq!(
+            qualification_status(300.011, &latency, 0, true),
             "M1_FAILED_BENCHMARK"
         );
     }

@@ -15,6 +15,11 @@ fn blocked_receipt_declares_ready_allocation_instrumentation()
     assert_eq!(allocation["available"], true);
     assert_eq!(allocation["measurement_completed"], false);
     assert_ne!(receipt["status"], "BLOCKED_ALLOCATION_MEASUREMENT");
+    assert!(allocation.as_object().is_some_and(|fields| {
+        fields.contains_key("verification_count") && fields.contains_key("verification_bytes")
+    }));
+    assert!(allocation["verification_count"].is_null());
+    assert!(allocation["verification_bytes"].is_null());
     assert!(allocation["initialization_count"].is_null());
     assert!(allocation["initialization_bytes"].is_null());
     assert!(allocation["warm_up_count"].is_null());

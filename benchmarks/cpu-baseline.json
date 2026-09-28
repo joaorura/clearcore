@@ -15,7 +15,7 @@
     "300"
   ],
   "deadline_ms": 10.0,
-  "finished_at_unix_seconds": 1790598277,
+  "finished_at_unix_seconds": 1790598875,
   "git_revision": "unavailable",
   "host": {
     "avx2": true,
@@ -42,6 +42,8 @@
       "per_hop_count": null,
       "total_bytes": null,
       "total_count": null,
+      "verification_bytes": null,
+      "verification_count": null,
       "warm_up_bytes": null,
       "warm_up_count": null
     },
@@ -50,11 +52,11 @@
   "p99_limit_ms": 7.0,
   "profile": "avx2-minimum",
   "requested_duration_seconds": 300,
-  "run_id": "task4-1790598277",
+  "run_id": "task4-1790598875",
   "runtime": "tract",
   "runtime_version": "0.19.16",
   "schema_version": 1,
-  "started_at_unix_seconds": 1790598277,
+  "started_at_unix_seconds": 1790598875,
   "status": "BLOCKED_PENDING_GOLDEN",
   "warm_up_policy": "one ordered pass over every frozen corpus frame",
   "worker_inference_only": true
