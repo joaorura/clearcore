@@ -1,12 +1,18 @@
 use std::{
     env, fs,
-    path::Path,
+    io::Read,
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
     process::{Command, ExitCode},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use realtime_noise_model::{
     ApprovedAssetManifest, CpuProfile, GoldenFixture, InferenceBackend, TractBackend,
+};
+use realtime_noise_tools::host_evidence::{
+    BoundHostEvidence, HostEvidenceFiles, LocalHostFacts, RunBinding, bind_host_evidence,
+    observe_local_host,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -76,11 +82,15 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<&'static str, String> {
-    validate_arguments()?;
+    let arguments = validate_arguments()?;
     let root = env::current_dir().map_err(|error| error.to_string())?;
     let started = unix_seconds()?;
+    let run_id = arguments
+        .run_id
+        .clone()
+        .unwrap_or_else(|| format!("task4-{started}"));
     let clean_worktree = worktree_is_clean(&root);
-    let host = host_evidence();
+    let host = host_evidence(&root, &arguments, &run_id, started);
     let manifest = match ApprovedAssetManifest::verify(&root) {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -95,6 +105,17 @@ fn run() -> Result<&'static str, String> {
             );
         }
     };
+    if !host.qualifies() {
+        return write_report(
+            &root,
+            "BLOCKED_UNSUPPORTED_CPU_PROFILE",
+            Some(&manifest),
+            &host,
+            started,
+            clean_worktree,
+            &json!({"reason": host.rejection_reason.as_deref(), "allocation": allocation_not_run()}),
+        );
+    }
     let golden = match GoldenFixture::read(&root.join("fixtures/golden/frozen-reference.json")) {
         Ok(golden) => golden,
         Err(error) => {
@@ -109,18 +130,6 @@ fn run() -> Result<&'static str, String> {
             );
         }
     };
-    if !host.qualifies {
-        return write_report(
-            &root,
-            "BLOCKED_UNSUPPORTED_CPU_PROFILE",
-            Some(&manifest),
-            &host,
-            started,
-            clean_worktree,
-            &json!({"golden_provenance_sha256": golden.provenance_sha256, "allocation": allocation_not_run()}),
-        );
-    }
-
     let initialization_region = Region::new(GLOBAL);
     let mut backend =
         TractBackend::new(&manifest, CpuProfile::Avx2Minimum).map_err(|error| error.to_string())?;
@@ -276,81 +285,91 @@ fn measure_backend(
     })
 }
 
+struct BenchmarkArguments {
+    command: Vec<String>,
+    evidence_paths: Option<(PathBuf, PathBuf)>,
+    run_id: Option<String>,
+}
+
 struct HostEvidence {
-    os: String,
+    local: LocalHostFacts,
     kernel: String,
-    cpu_model: String,
-    avx2: bool,
-    physical_cores: Option<usize>,
-    ram_kib: Option<u64>,
-    container: bool,
-    operating_conditions: &'static str,
-    qualifies: bool,
+    verified: Option<BoundHostEvidence>,
+    rejection_reason: Option<String>,
+    run_id: String,
+    command: Vec<String>,
 }
 
-fn reference_host_qualifies(
-    container: bool,
-    avx2: bool,
-    cores: usize,
-    model: &str,
-    ram_kib: Option<u64>,
-    operating_conditions_observed: bool,
-) -> bool {
-    !container
-        && avx2
-        && cores == 4
-        && model.contains("i5-10210U")
-        && ram_kib.is_some_and(|ram| ram >= 8 * 1024 * 1024)
-        && operating_conditions_observed
-}
-
-fn host_evidence() -> HostEvidence {
-    let cpuinfo = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
-    let model = cpuinfo
-        .lines()
-        .find_map(|line| line.strip_prefix("model name\t: "))
-        .unwrap_or("unavailable")
-        .to_owned();
-    let cores = cpuinfo
-        .lines()
-        .filter_map(|line| line.strip_prefix("core id\t\t: "))
-        .collect::<std::collections::BTreeSet<_>>()
-        .len();
-    let ram = fs::read_to_string("/proc/meminfo")
-        .ok()
-        .and_then(|contents| {
-            contents.lines().find_map(|line| {
-                line.strip_prefix("MemTotal:")?
-                    .split_whitespace()
-                    .next()?
-                    .parse()
-                    .ok()
-            })
-        });
-    let container = Path::new("/.dockerenv").exists();
-    let avx2 = cpuinfo.lines().any(|line| {
-        line.starts_with("flags") && line.split_whitespace().any(|flag| flag == "avx2")
-    });
-    let operating_conditions_observed = false;
-    let qualifies = reference_host_qualifies(
-        container,
-        avx2,
-        cores,
-        &model,
-        ram,
-        operating_conditions_observed,
-    );
-    HostEvidence {
-        os: env::consts::OS.to_owned(),
-        kernel: command_output("uname", &["-sr"]),
-        cpu_model: model,
-        avx2,
-        physical_cores: (cores > 0).then_some(cores),
-        ram_kib: ram,
-        container,
-        operating_conditions: "not_observable",
-        qualifies,
+impl HostEvidence {
+    const fn qualifies(&self) -> bool {
+        self.verified.is_some()
     }
+}
+
+fn host_evidence(
+    root: &Path,
+    arguments: &BenchmarkArguments,
+    run_id: &str,
+    started: u64,
+) -> HostEvidence {
+    let local = observe_local_host();
+    let result = arguments.evidence_paths.as_ref().map_or_else(
+        || Err("host evidence was not supplied".to_owned()),
+        |(document_path, provenance_path)| {
+            let document = read_evidence_file(root, document_path)?;
+            let provenance = read_evidence_file(root, provenance_path)?;
+            bind_host_evidence(
+                HostEvidenceFiles {
+                    document: &document,
+                    provenance: &provenance,
+                },
+                &local,
+                &RunBinding {
+                    run_id,
+                    started_at_unix_seconds: started,
+                },
+            )
+            .map_err(|error| error.to_string())
+        },
+    );
+    let (verified, rejection_reason) = match result {
+        Ok(evidence) => (Some(evidence), None),
+        Err(reason) => (None, Some(reason)),
+    };
+    HostEvidence {
+        local,
+        kernel: command_output("uname", &["-sr"]),
+        verified,
+        rejection_reason,
+        run_id: run_id.to_owned(),
+        command: arguments.command.clone(),
+    }
+}
+
+fn read_evidence_file(root: &Path, path: &Path) -> Result<Vec<u8>, String> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let mut file = fs::File::open(&path).map_err(|error| error.to_string())?;
+    let opened_metadata = file.metadata().map_err(|error| error.to_string())?;
+    let path_metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+    if !opened_metadata.file_type().is_file()
+        || !path_metadata.file_type().is_file()
+        || path_metadata.file_type().is_symlink()
+        || opened_metadata.dev() != path_metadata.dev()
+        || opened_metadata.ino() != path_metadata.ino()
+    {
+        return Err(format!(
+            "host evidence is not a regular file: {}",
+            path.display()
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    Ok(bytes)
 }
 
 fn write_report(
@@ -366,10 +385,10 @@ fn write_report(
     let report = json!({
         "schema_version": 1,
         "status": status,
-        "run_id": format!("task4-{started}"),
+        "run_id": host.run_id,
         "started_at_unix_seconds": started,
         "finished_at_unix_seconds": unix_seconds()?,
-        "command": ["benchmark", "--backend", "tract", "--profile", "avx2-minimum", "--duration", "300"],
+        "command": host.command,
         "git_revision": revision,
         "clean_worktree": clean_worktree,
         "worker_inference_only": true,
@@ -388,16 +407,23 @@ fn write_report(
         "deadline_ms": DEADLINE_MS,
         "p99_limit_ms": P99_LIMIT_MS,
         "host": {
-            "os": host.os,
+            "os": host.local.os,
+            "architecture": host.local.architecture,
             "kernel": host.kernel,
-            "cpu_model": host.cpu_model,
-            "avx2": host.avx2,
-            "physical_cores": host.physical_cores,
-            "ram_kib": host.ram_kib,
-            "container_or_vm_ambiguity": host.container,
-            "operating_conditions_observed": host.operating_conditions != "not_observable",
-            "reference_class_qualified": host.qualifies,
-            "frequency_ac_affinity_governor": host.operating_conditions
+            "cpu_model": host.local.cpu_model,
+            "avx2": host.local.avx2,
+            "physical_cores": host.local.physical_cores,
+            "ram_kib": host.local.ram_kib,
+            "container_or_vm_ambiguity": host.local.virtualized,
+            "operating_conditions_observed": host.verified.is_some(),
+            "reference_class_qualified": host.qualifies(),
+            "host_evidence_sha256": host.verified.as_ref().map(|evidence| &evidence.evidence_sha256),
+            "host_evidence_run_id": host.verified.as_ref().map(|evidence| &evidence.run_id),
+            "observation_started_at_unix_seconds": host.verified.as_ref().map(|evidence| evidence.observation_started_at_unix_seconds),
+            "observation_finished_at_unix_seconds": host.verified.as_ref().map(|evidence| evidence.observation_finished_at_unix_seconds),
+            "frequency_ac_affinity_governor": host.verified.as_ref().map(|evidence| &evidence.operating_conditions),
+            "provenance": host.verified.as_ref().map(|evidence| &evidence.provenance),
+            "rejection_reason": host.rejection_reason
         },
         "measurements": measurements
     });
@@ -418,7 +444,7 @@ fn write_report(
     Ok(status)
 }
 
-fn validate_arguments() -> Result<(), String> {
+fn validate_arguments() -> Result<BenchmarkArguments, String> {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     let expected = [
         "--backend",
@@ -428,14 +454,57 @@ fn validate_arguments() -> Result<(), String> {
         "--duration",
         "300",
     ];
-    arguments
-        .iter()
-        .map(String::as_str)
-        .eq(expected)
-        .then_some(())
-        .ok_or_else(|| {
-            "benchmark requires --backend tract --profile avx2-minimum --duration 300".to_owned()
-        })
+    if arguments.len() < expected.len()
+        || !arguments
+            .iter()
+            .take(expected.len())
+            .map(String::as_str)
+            .eq(expected)
+    {
+        return Err(usage());
+    }
+    let extras = &arguments[expected.len()..];
+    let (evidence_paths, run_id) = match extras {
+        [] => (None, None),
+        [
+            evidence_flag,
+            evidence,
+            provenance_flag,
+            provenance,
+            run_id_flag,
+            run_id,
+        ] if evidence_flag == "--host-evidence"
+            && provenance_flag == "--host-evidence-provenance"
+            && run_id_flag == "--run-id"
+            && valid_run_id(run_id) =>
+        {
+            (
+                Some((PathBuf::from(evidence), PathBuf::from(provenance))),
+                Some(run_id.clone()),
+            )
+        }
+        _ => return Err(usage()),
+    };
+    let mut command = vec!["benchmark".to_owned()];
+    command.extend(arguments);
+    Ok(BenchmarkArguments {
+        command,
+        evidence_paths,
+        run_id,
+    })
+}
+
+fn valid_run_id(run_id: &str) -> bool {
+    !run_id.is_empty()
+        && run_id.len() <= 64
+        && run_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn usage() -> String {
+    "benchmark requires --backend tract --profile avx2-minimum --duration 300 and optional --host-evidence <json> --host-evidence-provenance <record> --run-id <id>"
+        .to_owned()
 }
 
 fn frame_to_array(frame: &[f32]) -> Result<[f32; realtime_noise_contracts::HOP_SAMPLES], String> {
@@ -490,7 +559,9 @@ fn unix_seconds() -> Result<u64, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LatencyMetrics, qualification_status, reference_host_qualifies};
+    use std::{fs, os::unix::fs::symlink, path::Path, time::SystemTime};
+
+    use super::{LatencyMetrics, qualification_status, read_evidence_file};
 
     #[test]
     fn qualification_status_approves_zero_allocation_qualifying_run() {
@@ -549,26 +620,22 @@ mod tests {
     }
 
     #[test]
-    fn host_qualification_rejects_unobserved_operating_conditions() {
-        assert!(!reference_host_qualifies(
-            false,
-            true,
-            4,
-            "Intel(R) Core(TM) i5-10210U CPU",
-            Some(8_388_608),
-            false,
+    fn evidence_reader_rejects_symlink() -> Result<(), Box<dyn std::error::Error>> {
+        let unique = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "realtime-noise-host-evidence-{}-{unique}",
+            std::process::id()
         ));
-    }
+        fs::create_dir(&root)?;
+        fs::write(root.join("target.json"), b"{}")?;
+        symlink("target.json", root.join("evidence.json"))?;
 
-    #[test]
-    fn host_qualification_accepts_complete_reference_evidence() {
-        assert!(reference_host_qualifies(
-            false,
-            true,
-            4,
-            "Intel(R) Core(TM) i5-10210U CPU",
-            Some(8_388_608),
-            true,
-        ));
+        let result = read_evidence_file(&root, Path::new("evidence.json"));
+        fs::remove_dir_all(&root)?;
+
+        assert!(result.is_err());
+        Ok(())
     }
 }

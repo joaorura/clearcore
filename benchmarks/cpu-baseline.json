@@ -15,19 +15,26 @@
     "300"
   ],
   "deadline_ms": 10.0,
-  "finished_at_unix_seconds": 1790598875,
+  "finished_at_unix_seconds": 1790617292,
   "git_revision": "unavailable",
   "host": {
+    "architecture": "x86_64",
     "avx2": true,
     "container_or_vm_ambiguity": true,
     "cpu_model": "Intel(R) Core(TM) Ultra 7 265H",
-    "frequency_ac_affinity_governor": "not_observable",
+    "frequency_ac_affinity_governor": null,
+    "host_evidence_run_id": null,
+    "host_evidence_sha256": null,
     "kernel": "Linux 7.0.12-linuxkit",
+    "observation_finished_at_unix_seconds": null,
+    "observation_started_at_unix_seconds": null,
     "operating_conditions_observed": false,
     "os": "linux",
     "physical_cores": 16,
+    "provenance": null,
     "ram_kib": 7812432,
-    "reference_class_qualified": false
+    "reference_class_qualified": false,
+    "rejection_reason": "host evidence was not supplied"
   },
   "key_id": "sha256:cfa7e10c021031f5481775cf32093d41e5aaaad454653f3ed0022769cbbfd3f2",
   "legal_review_record_sha256": "ea6f77e32a6b5aa80b6562e605f89bad56e860963d39f62361821af076bf9e44",
@@ -47,17 +54,17 @@
       "warm_up_bytes": null,
       "warm_up_count": null
     },
-    "reason": "BLOCKED_PENDING_GOLDEN: /workspace/fixtures/golden/frozen-reference.json is absent"
+    "reason": "host evidence was not supplied"
   },
   "p99_limit_ms": 7.0,
   "profile": "avx2-minimum",
   "requested_duration_seconds": 300,
-  "run_id": "task4-1790598875",
+  "run_id": "task4-1790617292",
   "runtime": "tract",
   "runtime_version": "0.19.16",
   "schema_version": 1,
-  "started_at_unix_seconds": 1790598875,
-  "status": "BLOCKED_PENDING_GOLDEN",
+  "started_at_unix_seconds": 1790617292,
+  "status": "BLOCKED_UNSUPPORTED_CPU_PROFILE",
   "warm_up_policy": "one ordered pass over every frozen corpus frame",
   "worker_inference_only": true
 }

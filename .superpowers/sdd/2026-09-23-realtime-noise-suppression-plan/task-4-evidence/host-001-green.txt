@@ -1,0 +1,37 @@
+Task 4 HOST-001 GREEN
+UTC date: 2026-09-28
+
+Focused command:
+docker run --rm --network none -e CARGO_HOME=/cargo-cache -e RUSTUP_TOOLCHAIN=1.90.0-x86_64-unknown-linux-gnu -v "$PWD:/workspace" -v hippocamp-task4-cargo:/cargo-cache -v hippocamp-task4-target:/workspace/target -w /workspace hippocamp-task4-rust:local /usr/local/cargo/bin/cargo test -p realtime-noise-tools --test host_evidence --locked --offline
+
+Exit status: 0
+
+Result:
+running 9 tests
+test complete_fresh_evidence_qualifies_matching_reference_host ... ok
+test incomplete_evidence_is_rejected ... ok
+test invalid_frequency_is_rejected ... ok
+test non_finite_frequency_is_rejected_at_json_boundary ... ok
+test optimistic_evidence_is_rejected_on_mismatched_host ... ok
+test provenance_digest_mismatch_is_rejected ... ok
+test stale_evidence_is_rejected ... ok
+test unknown_evidence_field_is_rejected ... ok
+test unknown_virtualization_state_is_rejected ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+Additional verification:
+- `cargo test -p realtime-noise-tools --test benchmark_receipt --locked --offline`: 1 passed.
+- `cargo test -p realtime-noise-tools --bin benchmark --locked --offline`: 5 passed, including symlink evidence rejection.
+- `cargo clippy -p realtime-noise-tools --all-targets --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `cargo test --workspace --all-features --locked --offline`: passed.
+- `cargo build --workspace --all-features --locked --offline`: passed.
+- `scripts/check-offline.sh` in the network-disabled pinned-toolchain container: passed.
+- `bash tests/check-offline.sh`: all eight fail-closed scenarios passed.
+
+Native `scripts/check-offline.sh` truthfully returned `BLOCKED_OFFLINE_DEPENDENCY` because this host has no cargo, rustc 1.90.0, rustfmt, or Clippy. No network access or installation was attempted.
+
+Workspace-wide strict Clippy still reaches two pre-existing warnings in untouched model files:
+- `crates/model/src/archive_adversarial_tests.rs`: `items_after_statements`.
+- `crates/model/tests/m0_adversarial.rs`: `uninlined_format_args`.
