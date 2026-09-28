@@ -12,3 +12,53 @@ Expected behavior failures:
 - golden::tests::rejects_non_finite_quality_threshold: the validator accepted a non-finite quality threshold.
 
 The command resolved entirely from the provisioned offline Cargo cache with Docker networking disabled. Compilation succeeded; the failures are assertions against missing validation behavior, not dependency, toolchain, import, or unrelated workspace failures.
+
+## Follow-up: allocation instrumentation receipt RED
+
+Command:
+docker run --rm --network none -e CARGO_HOME=/cargo-cache -e RUSTUP_TOOLCHAIN=1.90.0 -v "$PWD:/workspace" -v hippocamp-task4-cargo:/cargo-cache -w /workspace rust:1.90.0-bookworm bash -lc 'export PATH=/usr/local/cargo/bin:$PATH; cargo test -p realtime-noise-tools --test benchmark_receipt --locked --offline'
+
+Exit status: 101
+
+Expected behavior failure:
+- `blocked_receipt_declares_ready_allocation_instrumentation` expected allocation mechanism `stats_alloc-0.1.10`; the receipt reported `unavailable-under-unsafe-code-forbid`.
+
+The dependency source was provisioned in a network-enabled bootstrap container without a project mount. The RED command itself ran with Docker networking disabled and failed only because the benchmark receipt still declared allocation instrumentation unavailable.
+
+## Follow-up: allocation measurement state receipt RED
+
+Command:
+docker run --rm --network none -e CARGO_HOME=/cargo-cache -e RUSTUP_TOOLCHAIN=1.90.0-x86_64-unknown-linux-gnu -v "$PWD:/workspace" -v hippocamp-task4-cargo:/cargo-cache -v hippocamp-task4-target:/workspace/target -w /workspace hippocamp-task4-rust:local /usr/local/cargo/bin/cargo test -p realtime-noise-tools --test benchmark_receipt --locked --offline
+
+Exit status: 101
+
+Expected behavior failure:
+- `blocked_receipt_declares_ready_allocation_instrumentation` expected `measurement_completed: false`; the receipt omitted the field and deserialized it as `null`.
+
+## Follow-up: qualification precondition REDs
+
+Commands:
+- `cargo test -p realtime-noise-tools --bin benchmark --locked --offline qualification_status_rejects_dirty_worktree`
+- `cargo test -p realtime-noise-tools --bin benchmark --locked --offline host_qualification`
+
+Exit status: 101 for each command.
+
+Expected missing-code failures:
+- the first command failed to compile because `qualification_status` did not yet accept the clean-worktree precondition;
+- the second command failed to compile because `reference_host_qualifies` did not yet exist.
+
+Both commands ran in the same network-disabled Docker toolchain and offline Cargo cache used above.
+
+## Follow-up: review hardening REDs
+
+Commands:
+- `cargo test -p realtime-noise-tools --bin benchmark --locked --offline qualification_status_rejects_excessive_duration_overrun`
+- `cargo test -p realtime-noise-tools --test benchmark_receipt --locked --offline`
+
+Exit status: 101 for each command.
+
+Expected behavior failures:
+- the duration test observed `M1_APPROVED` for a measured duration of `300.011` seconds;
+- the receipt test found no explicit `verification_count` and `verification_bytes` fields separating the golden-verification phase from measured hops.
+
+The implementation now bounds qualifying duration to `300.000..=300.010` seconds and reports golden-verification allocation metrics separately.
