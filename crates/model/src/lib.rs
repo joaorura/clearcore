@@ -1,6 +1,8 @@
 #![allow(clippy::missing_errors_doc)]
 
 mod archive;
+#[cfg(test)]
+mod archive_adversarial_tests;
 mod asset_manifest;
 mod error;
 mod golden;

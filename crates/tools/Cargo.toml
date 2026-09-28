@@ -17,5 +17,11 @@ serde = { version = "=1.0.229", default-features = false, features = ["derive", 
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
 sha2 = { version = "=0.10.9", default-features = false, features = ["std"] }
 
+# stats_alloc = { version = "=0.1.10", default-features = false, optional = true }
+# The above dependency is required for per-hop allocation instrumentation but is not available
+# in the offline cache. It must be added in a separate network-enabled dependency bootstrap step
+# (without project mount) per the task requirements. Once fetched, enable the alloc_instrumentation
+# feature and uncomment the dependency.
+
 [lints]
 workspace = true
