@@ -13,6 +13,8 @@ fn blocked_receipt_declares_ready_allocation_instrumentation()
     assert_eq!(receipt["host"]["operating_conditions_observed"], false);
     assert_eq!(receipt["host"]["host_evidence_sha256"], Value::Null);
     assert_eq!(receipt["host"]["host_evidence_run_id"], Value::Null);
+    assert_eq!(receipt["host"]["sustained_frequency"], Value::Null);
+    assert!(receipt["host"]["topology"].is_array());
     assert_eq!(
         receipt["host"]["rejection_reason"],
         "host evidence was not supplied"

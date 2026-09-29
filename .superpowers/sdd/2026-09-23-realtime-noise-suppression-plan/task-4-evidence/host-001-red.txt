@@ -1,23 +1,29 @@
-Task 4 HOST-001 RED
-UTC date: 2026-09-28
+Task 4 HOST-001 frequency-proof remediation RED
+UTC date: 2026-09-29
+
+Exploit under test:
+The prior schema accepted an arbitrary provenance byte string plus the caller-claimed scalar
+`minimum_sustained_frequency_mhz`. It did not contain machine-verifiable per-core frequency
+observations spanning the required 300 seconds.
 
 Command:
-docker run --rm --network none -e CARGO_HOME=/cargo-cache -e RUSTUP_TOOLCHAIN=1.90.0-x86_64-unknown-linux-gnu -v "$PWD:/workspace" -v hippocamp-task4-cargo:/cargo-cache -v hippocamp-task4-target:/workspace/target -w /workspace hippocamp-task4-rust:local /usr/local/cargo/bin/cargo test -p realtime-noise-tools --test host_evidence --locked --offline
+docker run --rm --network none -e CARGO_HOME=/cargo-cache -e RUSTUP_TOOLCHAIN=1.90.0-x86_64-unknown-linux-gnu -v "$PWD:/workspace" -v hippocamp-task4-cargo:/cargo-cache -v hippocamp-task4-target:/workspace/target -w /workspace hippocamp-task4-rust:local /usr/local/cargo/bin/cargo test -p realtime-noise-tools --test host_evidence opaque_provenance_and_claimed_minimum_do_not_qualify --locked --offline -- --exact
 
 Exit status: 101
 
-Expected missing-feature failure:
-error[E0432]: unresolved import `realtime_noise_tools::host_evidence`
-  --> crates/tools/tests/host_evidence.rs:1:27
-   |
- 1 | use realtime_noise_tools::host_evidence::{
-   |                           ^^^^^^^^^^^^^ could not find `host_evidence` in `realtime_noise_tools`
+Expected exploit reproduction:
+test opaque_provenance_and_claimed_minimum_do_not_qualify ... FAILED
 
-The network-disabled Rust 1.90 runner compiled the existing package and failed because no typed host-evidence ingestion module exists. The failure is not caused by a download, missing cache, malformed test import, or unrelated workspace failure. The new tests require complete fresh evidence to qualify and reject incomplete, unknown-field, stale, non-finite, provenance-mismatched, and current-host-mismatched evidence.
+thread 'opaque_provenance_and_claimed_minimum_do_not_qualify' panicked at crates/tools/tests/host_evidence.rs:
+assertion failed: !bind(&document, provenance, &reference_host())
+
+The failure proves the old validator qualified evidence based on opaque provenance and a claimed
+minimum rather than independently validating a bounded 300-second observation series. This RED
+was captured before implementing the new observation schema and validation path.
 
 Native diagnostics prerequisite observation:
 - `cargo --version`: command not found.
 - `rustc --version`: command not found.
-- Rust LSP diagnostic: `rust-analyzer` is not installed.
+- Serena Rust diagnostics: no language server is available.
 
 No toolchain or language server was fetched because repository verification is required to remain offline.

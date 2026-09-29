@@ -3,12 +3,16 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub use crate::host_observation::{LocalHostFacts, observe_local_host};
+use crate::host_frequency::{
+    SustainedFrequencyObservation, SustainedFrequencySummary, validate_sustained_frequency,
+};
+pub use crate::host_observation::{CpuTopologyEntry, LocalHostFacts, observe_local_host};
 
 const MINIMUM_RAM_KIB: u64 = 8 * 1024 * 1024;
-const MINIMUM_FREQUENCY_MHZ: f64 = 2_000.0;
 const MINIMUM_OBSERVATION_SECONDS: u64 = 300;
 const MAXIMUM_EVIDENCE_AGE_SECONDS: u64 = 300;
+const MAXIMUM_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
+const MAXIMUM_PROVENANCE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RunBinding<'a> {
@@ -30,6 +34,7 @@ pub struct BoundHostEvidence {
     pub observation_finished_at_unix_seconds: u64,
     pub host: HostIdentity,
     pub operating_conditions: OperatingConditions,
+    pub sustained_frequency: SustainedFrequencySummary,
     pub provenance: EvidenceProvenance,
 }
 
@@ -59,6 +64,7 @@ struct HostEvidenceDocument {
     observation_finished_at_unix_seconds: u64,
     host: HostIdentity,
     operating_conditions: OperatingConditions,
+    sustained_frequency_observation: SustainedFrequencyObservation,
     provenance: EvidenceProvenance,
 }
 
@@ -77,7 +83,6 @@ pub struct HostIdentity {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperatingConditions {
-    pub minimum_sustained_frequency_mhz: f64,
     pub ac_power: bool,
     pub affinity_cpus: Vec<usize>,
     pub governor: String,
@@ -88,8 +93,19 @@ pub struct OperatingConditions {
 pub struct EvidenceProvenance {
     pub collector: String,
     pub command: Vec<String>,
-    pub source_description: String,
     pub source_sha256: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservationProvenanceRecord {
+    schema_version: u32,
+    run_id: String,
+    observation_started_at_unix_seconds: u64,
+    observation_finished_at_unix_seconds: u64,
+    collector: String,
+    command: Vec<String>,
+    observation_sha256: String,
 }
 
 /// Parses and binds a host-evidence document to the local host and benchmark run.
@@ -103,9 +119,16 @@ pub fn bind_host_evidence(
     local: &LocalHostFacts,
     binding: &RunBinding<'_>,
 ) -> Result<BoundHostEvidence, HostEvidenceError> {
+    if files.document.len() > MAXIMUM_DOCUMENT_BYTES
+        || files.provenance.len() > MAXIMUM_PROVENANCE_BYTES
+    {
+        return Err(HostEvidenceError::Invalid(
+            "host evidence exceeds size limit",
+        ));
+    }
     let document: HostEvidenceDocument = serde_json::from_slice(files.document)
         .map_err(|error| HostEvidenceError::Malformed(error.to_string()))?;
-    validate_document(&document, files.provenance, local, binding)?;
+    let sustained_frequency = validate_document(&document, files.provenance, local, binding)?;
     Ok(BoundHostEvidence {
         evidence_sha256: sha256(files.document),
         run_id: document.run_id,
@@ -113,6 +136,7 @@ pub fn bind_host_evidence(
         observation_finished_at_unix_seconds: document.observation_finished_at_unix_seconds,
         host: document.host,
         operating_conditions: document.operating_conditions,
+        sustained_frequency,
         provenance: document.provenance,
     })
 }
@@ -122,7 +146,7 @@ fn validate_document(
     provenance: &[u8],
     local: &LocalHostFacts,
     binding: &RunBinding<'_>,
-) -> Result<(), HostEvidenceError> {
+) -> Result<SustainedFrequencySummary, HostEvidenceError> {
     let observed_seconds = document
         .observation_finished_at_unix_seconds
         .checked_sub(document.observation_started_at_unix_seconds)
@@ -135,10 +159,10 @@ fn validate_document(
         .ok_or(HostEvidenceError::Invalid(
             "observation finishes after benchmark start",
         ))?;
-    if document.schema_version != 1
+    if document.schema_version != 2
         || document.run_id.is_empty()
         || document.run_id != binding.run_id
-        || observed_seconds < MINIMUM_OBSERVATION_SECONDS
+        || observed_seconds != MINIMUM_OBSERVATION_SECONDS
         || evidence_age > MAXIMUM_EVIDENCE_AGE_SECONDS
     {
         return Err(HostEvidenceError::Invalid(
@@ -147,7 +171,11 @@ fn validate_document(
     }
     validate_host(&document.host, local)?;
     validate_operating_conditions(&document.operating_conditions, local)?;
-    validate_provenance(&document.provenance, provenance)
+    let sustained_frequency =
+        validate_sustained_frequency(&document.sustained_frequency_observation, local)
+            .map_err(HostEvidenceError::Invalid)?;
+    validate_provenance(&document.provenance, provenance, document)?;
+    Ok(sustained_frequency)
 }
 
 fn validate_host(host: &HostIdentity, local: &LocalHostFacts) -> Result<(), HostEvidenceError> {
@@ -181,9 +209,7 @@ fn validate_operating_conditions(
             .affinity_cpus
             .windows(2)
             .all(|pair| pair[0] < pair[1]);
-    if !conditions.minimum_sustained_frequency_mhz.is_finite()
-        || conditions.minimum_sustained_frequency_mhz < MINIMUM_FREQUENCY_MHZ
-        || !conditions.ac_power
+    if !conditions.ac_power
         || local.ac_power != Some(conditions.ac_power)
         || !affinity_is_canonical
         || local.affinity_cpus != conditions.affinity_cpus
@@ -200,13 +226,28 @@ fn validate_operating_conditions(
 fn validate_provenance(
     provenance: &EvidenceProvenance,
     source: &[u8],
+    document: &HostEvidenceDocument,
 ) -> Result<(), HostEvidenceError> {
+    let record: ObservationProvenanceRecord = serde_json::from_slice(source)
+        .map_err(|error| HostEvidenceError::Malformed(error.to_string()))?;
+    let observation = serde_json::to_value(&document.sustained_frequency_observation)
+        .and_then(|value| serde_json::to_vec(&value))
+        .map_err(|error| HostEvidenceError::Malformed(error.to_string()))?;
     if provenance.collector.is_empty()
-        || provenance.source_description.is_empty()
         || provenance.command.is_empty()
         || provenance.command.iter().any(String::is_empty)
         || !is_sha256(&provenance.source_sha256)
         || provenance.source_sha256 != sha256(source)
+        || record.schema_version != 1
+        || record.run_id != document.run_id
+        || record.observation_started_at_unix_seconds
+            != document.observation_started_at_unix_seconds
+        || record.observation_finished_at_unix_seconds
+            != document.observation_finished_at_unix_seconds
+        || record.collector != provenance.collector
+        || record.command != provenance.command
+        || !is_sha256(&record.observation_sha256)
+        || record.observation_sha256 != sha256(&observation)
     {
         return Err(HostEvidenceError::Invalid(
             "observation provenance is incomplete",

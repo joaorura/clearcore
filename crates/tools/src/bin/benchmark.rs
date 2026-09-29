@@ -22,6 +22,8 @@ use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
 static GLOBAL: &StatsAlloc<std::alloc::System> = &INSTRUMENTED_SYSTEM;
 
 const REQUESTED_SECONDS: u64 = 300;
+const MAXIMUM_HOST_EVIDENCE_BYTES: usize = 16 * 1024 * 1024;
+const MAXIMUM_HOST_PROVENANCE_BYTES: usize = 64 * 1024;
 const REQUESTED_SECONDS_F64: f64 = 300.0;
 const DEADLINE_MS: f64 = 10.0;
 const MAX_DURATION_SECONDS: f64 = REQUESTED_SECONDS_F64 + DEADLINE_MS / 1_000.0;
@@ -316,8 +318,9 @@ fn host_evidence(
     let result = arguments.evidence_paths.as_ref().map_or_else(
         || Err("host evidence was not supplied".to_owned()),
         |(document_path, provenance_path)| {
-            let document = read_evidence_file(root, document_path)?;
-            let provenance = read_evidence_file(root, provenance_path)?;
+            let document = read_evidence_file(root, document_path, MAXIMUM_HOST_EVIDENCE_BYTES)?;
+            let provenance =
+                read_evidence_file(root, provenance_path, MAXIMUM_HOST_PROVENANCE_BYTES)?;
             bind_host_evidence(
                 HostEvidenceFiles {
                     document: &document,
@@ -346,13 +349,13 @@ fn host_evidence(
     }
 }
 
-fn read_evidence_file(root: &Path, path: &Path) -> Result<Vec<u8>, String> {
+fn read_evidence_file(root: &Path, path: &Path, maximum_bytes: usize) -> Result<Vec<u8>, String> {
     let path = if path.is_absolute() {
         path.to_path_buf()
     } else {
         root.join(path)
     };
-    let mut file = fs::File::open(&path).map_err(|error| error.to_string())?;
+    let file = fs::File::open(&path).map_err(|error| error.to_string())?;
     let opened_metadata = file.metadata().map_err(|error| error.to_string())?;
     let path_metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
     if !opened_metadata.file_type().is_file()
@@ -366,9 +369,22 @@ fn read_evidence_file(root: &Path, path: &Path) -> Result<Vec<u8>, String> {
             path.display()
         ));
     }
+    if opened_metadata.len() > maximum_bytes as u64 {
+        return Err(format!(
+            "host evidence exceeds size limit: {}",
+            path.display()
+        ));
+    }
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
+    file.take(maximum_bytes as u64 + 1)
+        .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
+    if bytes.len() > maximum_bytes {
+        return Err(format!(
+            "host evidence exceeds size limit: {}",
+            path.display()
+        ));
+    }
     Ok(bytes)
 }
 
@@ -382,7 +398,12 @@ fn write_report(
     measurements: &Value,
 ) -> Result<&'static str, String> {
     let revision = command_output("git", &["rev-parse", "HEAD"]);
-    let report = json!({
+    let sustained_frequency = json!(
+        host.verified
+            .as_ref()
+            .map(|evidence| &evidence.sustained_frequency)
+    );
+    let mut report = json!({
         "schema_version": 1,
         "status": status,
         "run_id": host.run_id,
@@ -427,6 +448,8 @@ fn write_report(
         },
         "measurements": measurements
     });
+    report["host"]["topology"] = json!(&host.local.topology);
+    report["host"]["sustained_frequency"] = sustained_frequency;
     let bytes = serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?;
     fs::create_dir_all(root.join("benchmarks")).map_err(|error| error.to_string())?;
     fs::write(root.join("benchmarks/cpu-baseline.json"), &bytes)
@@ -561,7 +584,9 @@ fn unix_seconds() -> Result<u64, String> {
 mod tests {
     use std::{fs, os::unix::fs::symlink, path::Path, time::SystemTime};
 
-    use super::{LatencyMetrics, qualification_status, read_evidence_file};
+    use super::{
+        LatencyMetrics, MAXIMUM_HOST_EVIDENCE_BYTES, qualification_status, read_evidence_file,
+    };
 
     #[test]
     fn qualification_status_approves_zero_allocation_qualifying_run() {
@@ -632,7 +657,11 @@ mod tests {
         fs::write(root.join("target.json"), b"{}")?;
         symlink("target.json", root.join("evidence.json"))?;
 
-        let result = read_evidence_file(&root, Path::new("evidence.json"));
+        let result = read_evidence_file(
+            &root,
+            Path::new("evidence.json"),
+            MAXIMUM_HOST_EVIDENCE_BYTES,
+        );
         fs::remove_dir_all(&root)?;
 
         assert!(result.is_err());

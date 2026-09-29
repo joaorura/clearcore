@@ -1,26 +1,33 @@
 Task 4 HOST-001 manual CLI probes
-UTC date: 2026-09-28
+UTC date: 2026-09-29
 
-All commands ran in the existing network-disabled Rust 1.90.0 Docker runner.
-
-Partial optional suffix:
-`benchmark --backend tract --profile avx2-minimum --duration 300 --host-evidence only-one-path`
-
-Result: exit status 2 with the exact usage contract. No benchmark receipt was written.
-
-Invalid duration:
-`benchmark --backend tract --profile avx2-minimum --duration 299`
-
-Result: exit status 2 with the exact usage contract. No benchmark receipt was written.
-
-Malformed evidence document:
-`benchmark --backend tract --profile avx2-minimum --duration 300 --host-evidence .superpowers/sdd/2026-09-23-realtime-noise-suppression-plan/task-4-evidence/host-001-red.txt --host-evidence-provenance .superpowers/sdd/2026-09-23-realtime-noise-suppression-plan/task-4-evidence/host-001-red.txt --run-id malformed-evidence-probe`
-
-Result: exit status 2 and structured status `BLOCKED_UNSUPPORTED_CPU_PROFILE`.
+All commands ran in a temporary repository copy with the existing network-disabled Rust 1.90.0
+Docker runner. The temporary copy was removed after the probes.
 
 Required baseline command without host evidence:
 `benchmark --backend tract --profile avx2-minimum --duration 300`
 
-Result: exit status 2 and structured status `BLOCKED_UNSUPPORTED_CPU_PROFILE`. The canonical JSON records `host evidence was not supplied`, null evidence/provenance fields, the locally observed unsupported container host, and no fabricated allocation or latency result. The Markdown digest matches the canonical JSON.
+Result: exit status 2 and structured status `BLOCKED_UNSUPPORTED_CPU_PROFILE`. The generated JSON
+records `host evidence was not supplied`, null evidence/provenance/frequency-summary fields, the
+locally observed unsupported container host and full CPU topology, and no fabricated allocation or
+latency result. This fresh blocked receipt is the committed canonical JSON/Markdown pair.
 
-No probe recorded `M1_APPROVED`, fabricated a qualifying host, ran a shortened workload as if complete, or bypassed the missing frozen golden.
+Opaque text used as both evidence and provenance:
+`benchmark --backend tract --profile avx2-minimum --duration 300 --host-evidence .superpowers/sdd/2026-09-23-realtime-noise-suppression-plan/task-4-evidence/host-001-red.txt --host-evidence-provenance .superpowers/sdd/2026-09-23-realtime-noise-suppression-plan/task-4-evidence/host-001-red.txt --run-id opaque-evidence-probe`
+
+Result: exit status 2 and structured status `BLOCKED_UNSUPPORTED_CPU_PROFILE`. The generated JSON
+records `malformed host evidence: expected value at line 1 column 1`, null verified evidence,
+null structured provenance, and null sustained-frequency summary.
+
+Partial optional suffix:
+`benchmark --backend tract --profile avx2-minimum --duration 300 --host-evidence only-one-path`
+
+Result: exit status 2 with the exact usage contract. No qualifying benchmark ran.
+
+Invalid duration:
+`benchmark --backend tract --profile avx2-minimum --duration 299`
+
+Result: exit status 2 with the exact usage contract. No qualifying benchmark ran.
+
+No probe recorded `M1_APPROVED`, fabricated a qualifying host or 300-second observation, ran a
+shortened workload as if complete, or bypassed the missing frozen golden.

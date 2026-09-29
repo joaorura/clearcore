@@ -15,7 +15,7 @@
     "300"
   ],
   "deadline_ms": 10.0,
-  "finished_at_unix_seconds": 1790617292,
+  "finished_at_unix_seconds": 1790704078,
   "git_revision": "unavailable",
   "host": {
     "architecture": "x86_64",
@@ -32,9 +32,92 @@
     "os": "linux",
     "physical_cores": 16,
     "provenance": null,
-    "ram_kib": 7812432,
+    "ram_kib": 7812424,
     "reference_class_qualified": false,
-    "rejection_reason": "host evidence was not supplied"
+    "rejection_reason": "host evidence was not supplied",
+    "sustained_frequency": null,
+    "topology": [
+      {
+        "core_id": 0,
+        "logical_cpu": 0,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 1,
+        "logical_cpu": 1,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 2,
+        "logical_cpu": 2,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 3,
+        "logical_cpu": 3,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 4,
+        "logical_cpu": 4,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 5,
+        "logical_cpu": 5,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 6,
+        "logical_cpu": 6,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 7,
+        "logical_cpu": 7,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 8,
+        "logical_cpu": 8,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 9,
+        "logical_cpu": 9,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 10,
+        "logical_cpu": 10,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 11,
+        "logical_cpu": 11,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 12,
+        "logical_cpu": 12,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 13,
+        "logical_cpu": 13,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 14,
+        "logical_cpu": 14,
+        "physical_package_id": 0
+      },
+      {
+        "core_id": 15,
+        "logical_cpu": 15,
+        "physical_package_id": 0
+      }
+    ]
   },
   "key_id": "sha256:cfa7e10c021031f5481775cf32093d41e5aaaad454653f3ed0022769cbbfd3f2",
   "legal_review_record_sha256": "ea6f77e32a6b5aa80b6562e605f89bad56e860963d39f62361821af076bf9e44",
@@ -59,11 +142,11 @@
   "p99_limit_ms": 7.0,
   "profile": "avx2-minimum",
   "requested_duration_seconds": 300,
-  "run_id": "task4-1790617292",
+  "run_id": "task4-1790704078",
   "runtime": "tract",
   "runtime_version": "0.19.16",
   "schema_version": 1,
-  "started_at_unix_seconds": 1790617292,
+  "started_at_unix_seconds": 1790704078,
   "status": "BLOCKED_UNSUPPORTED_CPU_PROFILE",
   "warm_up_policy": "one ordered pass over every frozen corpus frame",
   "worker_inference_only": true
