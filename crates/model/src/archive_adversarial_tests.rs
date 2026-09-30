@@ -51,11 +51,11 @@ fn encode(members: &[Member]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
 }
 
 fn replace_first_file_path(path: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let mut tar = Vec::new();
-    GzDecoder::new(approved_archive().as_slice()).read_to_end(&mut tar)?;
     // The first actual file entry (enc.onnx) header is at offset 1024 in the raw tar
     // (offset 0 is the PAX extended header)
     const FIRST_FILE_HEADER_OFFSET: usize = 1024;
+    let mut tar = Vec::new();
+    GzDecoder::new(approved_archive().as_slice()).read_to_end(&mut tar)?;
     tar[FIRST_FILE_HEADER_OFFSET..FIRST_FILE_HEADER_OFFSET + 100].fill(0);
     tar[FIRST_FILE_HEADER_OFFSET..FIRST_FILE_HEADER_OFFSET + path.len()].copy_from_slice(path);
     tar[FIRST_FILE_HEADER_OFFSET + 148..FIRST_FILE_HEADER_OFFSET + 156].fill(b' ');

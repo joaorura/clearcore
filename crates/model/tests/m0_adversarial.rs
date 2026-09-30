@@ -36,7 +36,7 @@ fn rejects_candidate_and_approval_hash_tampering() -> Result<(), Box<dyn std::er
     mutate_json(candidate.path(), "candidate-provenance.json", |value| {
         let new_sha256 = "0".repeat(64);
         value["sha256"] = Value::String(new_sha256.clone());
-        value["source"] = Value::String(format!("urn:sha256:{}", new_sha256));
+        value["source"] = Value::String(format!("urn:sha256:{new_sha256}"));
     })?;
     assert!(rejects(candidate.path())?.contains("candidate_sha256 does not match sha256"));
 

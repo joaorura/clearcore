@@ -308,7 +308,10 @@ fn validate_corpus_v2_rejects_missing_source_lock() {
         quality_metric_version: "1.0".to_owned(),
         quality_threshold: 2.5,
         quality_observed_value: 3.0,
-        tolerance: realtime_noise_model::NumericalTolerance { absolute: 0.0, relative: 0.0 },
+        tolerance: realtime_noise_model::NumericalTolerance {
+            absolute: 0.0,
+            relative: 0.0,
+        },
         source_lock_sha256: "0".repeat(64),
         sources: vec![source],
         cases: vec![case],
@@ -365,7 +368,10 @@ fn validate_corpus_v2_rejects_source_lock_mismatch() {
         quality_metric_version: "1.0".to_owned(),
         quality_threshold: 2.5,
         quality_observed_value: 3.0,
-        tolerance: realtime_noise_model::NumericalTolerance { absolute: 0.0, relative: 0.0 },
+        tolerance: realtime_noise_model::NumericalTolerance {
+            absolute: 0.0,
+            relative: 0.0,
+        },
         source_lock_sha256: "a".repeat(64),
         sources: vec![source],
         cases: vec![case],
@@ -424,7 +430,8 @@ fn validate_input_case_v2_rejects_mismatched_sha256() {
         frame_count: 2,
     };
     let frames = vec![vec![0.0f32; 480]; case.frame_count];
-    let err = realtime_noise_tools::golden_manifest::validate_input_case_v2(&case, &frames).unwrap_err();
+    let err =
+        realtime_noise_tools::golden_manifest::validate_input_case_v2(&case, &frames).unwrap_err();
     assert_eq!(
         realtime_noise_tools::golden_manifest::blocked_status(&err),
         "BLOCKED_PENDING_GOLDEN"
@@ -439,14 +446,19 @@ fn finalize_corpus_manifest() {
     } else {
         std::path::Path::new("../../fixtures/corpus/corpus-manifest.json").to_path_buf()
     };
-    if let Ok(bytes) = std::fs::read(&manifest_path) {
-        if let Ok(mut manifest) = serde_json::from_slice::<realtime_noise_tools::golden_manifest::ManifestV2>(&bytes) {
-            let digest = realtime_noise_tools::golden_manifest::compute_corpus_sha256_v2(&manifest).unwrap();
-            manifest.corpus_sha256 = digest;
-            let formatted = serde_json::to_string_pretty(&manifest).unwrap();
-            std::fs::write(&manifest_path, formatted).unwrap();
-        }
-    }
+    let Ok(bytes) = std::fs::read(&manifest_path) else {
+        return;
+    };
+    let Ok(mut manifest) =
+        serde_json::from_slice::<realtime_noise_tools::golden_manifest::ManifestV2>(&bytes)
+    else {
+        return;
+    };
+    let digest =
+        realtime_noise_tools::golden_manifest::compute_corpus_sha256_v2(&manifest).unwrap();
+    manifest.corpus_sha256 = digest;
+    let formatted = serde_json::to_string_pretty(&manifest).unwrap();
+    std::fs::write(&manifest_path, formatted).unwrap();
 }
 
 #[test]
@@ -460,7 +472,8 @@ fn real_corpus_manifest_v2_passes_validation() {
     let manifest_path = root.join("fixtures/corpus/corpus-manifest.json");
     if manifest_path.exists() {
         let manifest_bytes = std::fs::read(&manifest_path).unwrap();
-        let manifest = realtime_noise_tools::golden_manifest::Manifest::parse(&manifest_bytes).unwrap();
+        let manifest =
+            realtime_noise_tools::golden_manifest::Manifest::parse(&manifest_bytes).unwrap();
         assert!(realtime_noise_tools::golden_manifest::validate_corpus(root, &manifest).is_ok());
     }
 }

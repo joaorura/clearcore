@@ -10,5 +10,8 @@ publish = false
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-model = { path = "../model" }
 
+[features]
+tract = ["realtime-noise-model/tract"]
+
 [lints]
 workspace = true
