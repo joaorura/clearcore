@@ -30,11 +30,11 @@
 - [x] Task: Golden reference generation [5e1da1b]
     - [x] Execute `generate-golden --fresh` inside offline container
     - [x] Verify creation and integrity of `fixtures/golden/frozen-reference.json`
-- [~] Task: Latency contract & benchmark qualification
-    - [ ] Document 30 ms algorithmic latency amendment in spec and architecture notes
-    - [ ] Run benchmark qualification with 300-second sustained frequency observation
-    - [ ] Record hardware observation with development host waiver
-- [ ] Task: M1 Milestone Approval Audit
-    - [ ] Update `task-4-corpus-builder-report.md` and append ruling to `ledger.jsonl`
-    - [ ] Verify all gates for `M1_APPROVED` are satisfied
+- [x] Task: Latency contract & benchmark qualification [605ee00]
+    - [x] Document 30 ms algorithmic latency amendment in spec and architecture notes
+    - [x] Run benchmark qualification with 300-second sustained frequency observation
+    - [x] Record hardware observation with development host waiver
+- [x] Task: M1 Milestone Approval Audit [605ee00]
+    - [x] Update `task-4-corpus-builder-report.md` and append ruling to `ledger.jsonl`
+    - [x] Verify all gates for `M1_APPROVED` are satisfied
 - [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
