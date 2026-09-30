@@ -1,7 +1,15 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_const_for_fn)]
 
-use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES, SAMPLE_RATE_HZ};
+pub mod endpoint_converter;
+pub mod input_accumulator;
+pub mod output_deframer;
+pub mod resampler;
+
+pub use endpoint_converter::EndpointFormatConverter;
+pub use input_accumulator::{ACCUMULATOR_CAPACITY_SAMPLES, InputAccumulator};
+pub use output_deframer::{DEFRAMER_CAPACITY_SAMPLES, OutputDeframer};
+pub use resampler::{IdentityResampler, LinearResampler, Resampler};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SampleFormat {
@@ -43,7 +51,10 @@ impl core::fmt::Display for FormatError {
             Self::UnsupportedSampleRate(r) => write!(f, "unsupported sample rate: {r} Hz"),
             Self::UnsupportedSampleFormat => write!(f, "unsupported sample format"),
             Self::BufferLengthMismatch { expected, actual } => {
-                write!(f, "buffer length mismatch: expected {expected}, got {actual}")
+                write!(
+                    f,
+                    "buffer length mismatch: expected {expected}, got {actual}"
+                )
             }
             Self::CapacityExceeded => write!(f, "adapter buffer capacity exceeded"),
         }
@@ -51,80 +62,3 @@ impl core::fmt::Display for FormatError {
 }
 
 impl std::error::Error for FormatError {}
-
-pub const ACCUMULATOR_CAPACITY_SAMPLES: usize = 1920;
-
-#[derive(Debug)]
-pub struct InputAccumulator {
-    buffer: [f32; ACCUMULATOR_CAPACITY_SAMPLES],
-    head: usize,
-    len: usize,
-}
-
-impl Default for InputAccumulator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl InputAccumulator {
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            buffer: [0.0; ACCUMULATOR_CAPACITY_SAMPLES],
-            head: 0,
-            len: 0,
-        }
-    }
-
-    pub fn push_samples(&mut self, _samples: &[f32]) {
-        // Skeleton: red phase no-op
-    }
-
-    pub fn pop_frame(&mut self) -> Option<AudioFrame> {
-        // Skeleton: red phase returns None
-        None
-    }
-
-    #[must_use]
-    pub const fn available_samples(&self) -> usize {
-        self.len
-    }
-
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    pub fn clear(&mut self) {
-        self.head = 0;
-        self.len = 0;
-    }
-}
-
-pub struct EndpointFormatConverter;
-
-impl EndpointFormatConverter {
-    pub fn validate_config(_config: &AudioEndpointConfig) -> Result<(), FormatError> {
-        // Skeleton: red phase returns Ok(()) so unsupported format test fails
-        Ok(())
-    }
-
-    pub fn pcm16_to_f32(_i16_slice: &[i16], _f32_out: &mut [f32]) -> Result<(), FormatError> {
-        // Skeleton: red phase no-op so roundtrip test fails
-        Ok(())
-    }
-
-    pub fn f32_to_pcm16(_f32_slice: &[f32], _i16_out: &mut [i16]) -> Result<(), FormatError> {
-        // Skeleton: red phase no-op so roundtrip test fails
-        Ok(())
-    }
-
-    pub fn stereo_to_mono(_stereo: &[f32], _mono: &mut [f32]) -> Result<(), FormatError> {
-        Ok(())
-    }
-
-    pub fn mono_to_stereo(_mono: &[f32], _stereo: &mut [f32]) -> Result<(), FormatError> {
-        Ok(())
-    }
-}

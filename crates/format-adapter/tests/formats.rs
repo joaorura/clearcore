@@ -53,12 +53,7 @@ fn unsupported_endpoint_format_fails_instead_of_converting_implicitly() {
 fn pcm16_conversion_roundtrip_with_saturation() {
     // Test conversion between f32 and i16 with saturation clamping
     let f32_inputs = [
-        0.0f32,
-        0.5,
-        -0.5,
-        1.0,
-        -1.0,
-        2.5,  // should saturate to i16::MAX (32767)
+        0.0f32, 0.5, -0.5, 1.0, -1.0, 2.5,  // should saturate to i16::MAX (32767)
         -3.0, // should saturate to i16::MIN (-32768)
     ];
 
@@ -70,7 +65,10 @@ fn pcm16_conversion_roundtrip_with_saturation() {
     assert_eq!(i16_buffer[3], 32767);
     assert_eq!(i16_buffer[4], -32768);
     assert_eq!(i16_buffer[5], 32767, "values > 1.0 must saturate to 32767");
-    assert_eq!(i16_buffer[6], -32768, "values < -1.0 must saturate to -32768");
+    assert_eq!(
+        i16_buffer[6], -32768,
+        "values < -1.0 must saturate to -32768"
+    );
 
     // Convert back from i16 to f32
     let mut f32_outputs = [0.0f32; 7];
@@ -88,4 +86,25 @@ fn pcm16_conversion_roundtrip_with_saturation() {
     let tolerance = (1.0 / 32767.0) + 1e-6;
     assert!((f32_outputs[1] - 0.5).abs() <= tolerance);
     assert!((f32_outputs[2] - (-0.5)).abs() <= tolerance);
+}
+
+#[test]
+fn stereo_to_mono_and_mono_to_stereo_roundtrip() {
+    // Left: 0.2, Right: 0.8 => mono average should be 0.5
+    // Left: -0.4, Right: -0.6 => mono average should be -0.5
+    let stereo_in = [0.2f32, 0.8, -0.4, -0.6];
+    let mut mono_out = [0.0f32; 2];
+
+    EndpointFormatConverter::stereo_to_mono(&stereo_in, &mut mono_out)
+        .expect("stereo to mono conversion should succeed");
+
+    assert!((mono_out[0] - 0.5).abs() < 1e-6);
+    assert!((mono_out[1] - (-0.5)).abs() < 1e-6);
+
+    // Now upmix mono back to stereo: mono [0.5, -0.5] -> stereo [0.5, 0.5, -0.5, -0.5]
+    let mut stereo_out = [0.0f32; 4];
+    EndpointFormatConverter::mono_to_stereo(&mono_out, &mut stereo_out)
+        .expect("mono to stereo conversion should succeed");
+
+    assert_eq!(stereo_out, [0.5, 0.5, -0.5, -0.5]);
 }
