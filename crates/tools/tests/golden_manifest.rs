@@ -275,3 +275,119 @@ fn validate_input_case_rejects_frames_sha256_mismatch() {
         "BLOCKED_PENDING_GOLDEN"
     );
 }
+
+#[test]
+fn validate_corpus_v2_rejects_missing_source_lock() {
+    let source = realtime_noise_tools::golden_manifest::SourceRecord {
+        source_id: "src-001".to_owned(),
+        origin: "https://example.com/asset.wav".to_owned(),
+        revision: "v1.0".to_owned(),
+        source_sha256: "0".repeat(64),
+        license: "CC0-1.0".to_owned(),
+        redistribution_terms: "public-domain".to_owned(),
+        processing_authorization: "explicit".to_owned(),
+        attribution: "Test Author".to_owned(),
+    };
+    let case = realtime_noise_tools::golden_manifest::CorpusCaseV2 {
+        case_id: "case-001".to_owned(),
+        frames_path: PathBuf::from("frames/case-001.json"),
+        input_sha256: "0".repeat(64),
+        source_id: "src-001".to_owned(),
+        transcription_applicability: "none".to_owned(),
+        snr_noise_class: "stationary".to_owned(),
+        sample_rate_hz: 48000,
+        channels: 1,
+        frame_count: 2,
+    };
+    let manifest = realtime_noise_tools::golden_manifest::ManifestV2 {
+        schema_version: 2,
+        status: "APPROVED".to_owned(),
+        corpus_sha256: "0".repeat(64),
+        input_normalization: "peak".to_owned(),
+        quality_metric: "PESQ".to_owned(),
+        quality_metric_version: "1.0".to_owned(),
+        quality_threshold: 2.5,
+        quality_observed_value: 3.0,
+        tolerance: realtime_noise_model::NumericalTolerance { absolute: 0.0, relative: 0.0 },
+        source_lock_sha256: "0".repeat(64),
+        sources: vec![source],
+        cases: vec![case],
+    };
+    let temp_root = env::temp_dir().join(format!(
+        "hippocamp-test-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp_root).unwrap();
+    let err = validate_corpus(&temp_root, &Manifest::V2(manifest)).unwrap_err();
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_reason(&err),
+        "source-lock.json missing"
+    );
+    let _ = std::fs::remove_dir_all(&temp_root);
+}
+
+#[test]
+fn validate_corpus_v2_rejects_source_lock_mismatch() {
+    let source = realtime_noise_tools::golden_manifest::SourceRecord {
+        source_id: "src-001".to_owned(),
+        origin: "https://example.com/asset.wav".to_owned(),
+        revision: "v1.0".to_owned(),
+        source_sha256: "0".repeat(64),
+        license: "CC0-1.0".to_owned(),
+        redistribution_terms: "public-domain".to_owned(),
+        processing_authorization: "explicit".to_owned(),
+        attribution: "Test Author".to_owned(),
+    };
+    let case = realtime_noise_tools::golden_manifest::CorpusCaseV2 {
+        case_id: "case-001".to_owned(),
+        frames_path: PathBuf::from("frames/case-001.json"),
+        input_sha256: "0".repeat(64),
+        source_id: "src-001".to_owned(),
+        transcription_applicability: "none".to_owned(),
+        snr_noise_class: "stationary".to_owned(),
+        sample_rate_hz: 48000,
+        channels: 1,
+        frame_count: 2,
+    };
+    let manifest = realtime_noise_tools::golden_manifest::ManifestV2 {
+        schema_version: 2,
+        status: "APPROVED".to_owned(),
+        corpus_sha256: "0".repeat(64),
+        input_normalization: "peak".to_owned(),
+        quality_metric: "PESQ".to_owned(),
+        quality_metric_version: "1.0".to_owned(),
+        quality_threshold: 2.5,
+        quality_observed_value: 3.0,
+        tolerance: realtime_noise_model::NumericalTolerance { absolute: 0.0, relative: 0.0 },
+        source_lock_sha256: "a".repeat(64),
+        sources: vec![source],
+        cases: vec![case],
+    };
+    let temp_root = env::temp_dir().join(format!(
+        "hippocamp-test-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let corpus_dir = temp_root.join("fixtures/corpus");
+    std::fs::create_dir_all(&corpus_dir).unwrap();
+    std::fs::write(corpus_dir.join("source-lock.json"), b"content").unwrap();
+    let err = validate_corpus(&temp_root, &Manifest::V2(manifest)).unwrap_err();
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_reason(&err),
+        "source-lock.json digest mismatch"
+    );
+    let _ = std::fs::remove_dir_all(&temp_root);
+}
