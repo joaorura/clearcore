@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Start Daemon via Script",
+      "type": "bashdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/start-realtime-noise.sh"
+    },
+    {
+      "name": "Run Daemon Binary (--run)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/release/realtime-noise-service",
+      "args": ["--run"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb"
+    },
+    {
+      "name": "Run Status Query CLI",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/release/realtime-noise-app-tauri",
+      "args": ["--status"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb"
+    }
+  ]
+}

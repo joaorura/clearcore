@@ -29,9 +29,24 @@ if pgrep -f "realtime-noise-service --run" >/dev/null 2>&1; then
     exit 0
 fi
 
-# Run daemon in background
+# Prefer systemd user service if configured
+if systemctl --user is-enabled realtime-noise.service >/dev/null 2>&1 || [[ -f "${HOME}/.config/systemd/user/realtime-noise.service" ]]; then
+    echo "Starting via systemd user unit..."
+    systemctl --user daemon-reload
+    systemctl --user start realtime-noise.service
+    sleep 0.5
+    if systemctl --user is-active --quiet realtime-noise.service; then
+        echo "Status: RUNNING (systemd managed)"
+        echo "Virtual microphone node is ready in PipeWire/WirePlumber."
+        echo "To stop: ./stop-realtime-noise.sh"
+        exit 0
+    fi
+fi
+
+# Fallback: Run daemon in background via nohup
 nohup "${BIN_PATH}" --run > /tmp/realtime-noise-service.log 2>&1 &
 SERVICE_PID=$!
+disown "${SERVICE_PID}" 2>/dev/null || true
 
 echo "Service daemon launched with PID: ${SERVICE_PID}"
 echo "Logs: /tmp/realtime-noise-service.log"

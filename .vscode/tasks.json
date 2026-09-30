@@ -1,0 +1,82 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "env": {
+      "PATH": "${env:HOME}/.cargo/bin:${env:HOME}/.local/bin:${env:PATH}"
+    }
+  },
+  "tasks": [
+    {
+      "label": "Start All (Daemon + App UI)",
+      "type": "shell",
+      "command": "${workspaceFolder}/start-all.sh",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Stop All (Daemon + App UI)",
+      "type": "shell",
+      "command": "${workspaceFolder}/stop-all.sh",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Check Daemon Status (IPC)",
+      "type": "shell",
+      "command": "cargo run --release -p realtime-noise-app-tauri -- --status",
+      "problemMatcher": [],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Set Mode: Active (DeepFilterNet)",
+      "type": "shell",
+      "command": "cargo run --release -p realtime-noise-app-tauri -- --mode active",
+      "problemMatcher": []
+    },
+    {
+      "label": "Set Mode: Bypass",
+      "type": "shell",
+      "command": "cargo run --release -p realtime-noise-app-tauri -- --mode bypass",
+      "problemMatcher": []
+    },
+    {
+      "label": "Set Mode: Mute",
+      "type": "shell",
+      "command": "cargo run --release -p realtime-noise-app-tauri -- --mode mute",
+      "problemMatcher": []
+    },
+    {
+      "label": "Cargo Build All (Release)",
+      "type": "shell",
+      "command": "ninja -C platform/linux/helper/build && cargo build --release",
+      "problemMatcher": [
+        "$rustc"
+      ]
+    },
+    {
+      "label": "Cargo Test (Offline Gate)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/check-offline.sh",
+      "problemMatcher": [
+        "$rustc"
+      ]
+    }
+  ]
+}

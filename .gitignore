@@ -1,3 +1,12 @@
+target/
+**/target/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+platform/linux/helper/build/
+crates/app-tauri/src-tauri/binaries/
+.serena/
 .omo/
 **/__pycache__/
 *.py[cod]

@@ -1,0 +1,12 @@
+{
+  "rust-analyzer.linkedProjects": [
+    "${workspaceFolder}/Cargo.toml"
+  ],
+  "rust-analyzer.cargo.allFeatures": false,
+  "rust-analyzer.cargo.features": ["tract"],
+  "rust-analyzer.check.command": "check",
+  "files.exclude": {
+    "**/.git": true,
+    "**/.serena": true
+  }
+}
