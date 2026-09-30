@@ -875,6 +875,14 @@ name = "realtime-noise-contracts"
 version = "0.1.0"
 
 [[package]]
+name = "realtime-noise-engine"
+version = "0.1.0"
+dependencies = [
+ "realtime-noise-contracts",
+ "realtime-noise-model",
+]
+
+[[package]]
 name = "realtime-noise-model"
 version = "0.1.0"
 dependencies = [

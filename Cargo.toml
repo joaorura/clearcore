@@ -5,6 +5,7 @@ members = [
     "crates/qualification",
     "crates/contracts",
     "crates/model",
+    "crates/engine",
 ]
 resolver = "3"
 

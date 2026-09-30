@@ -1,16 +1,16 @@
 # Implementation Plan: Task 5 Realtime Noise Engine, Queues, Generations & Silence Policy
 
 ## Phase 1: Workspace Registration & Contract Tests (RED)
-- [ ] Task: Create `crates/engine` crate and register in workspace
-    - [ ] Create `crates/engine/Cargo.toml` with edition 2024 and dependencies on `realtime-noise-contracts`, `realtime-noise-model`
-    - [ ] Add `crates/engine` to workspace members in root `Cargo.toml`
-    - [ ] Run `cargo check --workspace --locked --offline` in Docker
-- [ ] Task: Write initial failing contract tests (RED)
-    - [ ] Write `crates/engine/tests/deadline.rs` with test `inference_deadline_miss_closes_generation_and_outputs_silence`
-    - [ ] Write `crates/engine/tests/generation.rs` with test `bypass_keeps_framing_without_calling_inference_or_raw_fallback`
-    - [ ] Verify that tests fail cleanly with missing types/methods
-    - [ ] Commit RED state to Git history with git notes
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Create `crates/engine` crate and register in workspace
+    - [x] Create `crates/engine/Cargo.toml` with edition 2024 and dependencies on `realtime-noise-contracts`, `realtime-noise-model`
+    - [x] Add `crates/engine` to workspace members in root `Cargo.toml`
+    - [x] Run `cargo check --workspace --locked --offline` in Docker
+- [x] Task: Write initial failing contract tests (RED)
+    - [x] Write `crates/engine/tests/deadline.rs` with test `inference_deadline_miss_closes_generation_and_outputs_silence`
+    - [x] Write `crates/engine/tests/generation.rs` with test `bypass_keeps_framing_without_calling_inference_or_raw_fallback`
+    - [x] Verify that tests fail cleanly with missing types/methods
+    - [x] Commit RED state to Git history with git notes
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 2: Engine Core, Generations & Modes (GREEN)
 - [ ] Task: Implement generation lifecycle & engine types
