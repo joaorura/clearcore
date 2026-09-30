@@ -21,12 +21,12 @@
     - [x] Run `cargo test -p realtime-noise-format-adapter --locked --offline` in Docker
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
-## Phase 3: Adapter Worker & Multi-Format Stress Tests (GREEN & STRESS)
-- [ ] Task: Implement format adapter worker and comprehensive tests
-    - [ ] Implement `crates/format-adapter/src/format_worker.rs`
-    - [ ] Write `crates/format-adapter/tests/resampling.rs` for sample rate validation
-    - [ ] Run full format-adapter test suite and clippy in Docker
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+## Phase 3: Adapter Worker & Multi-Format Stress Tests (GREEN & STRESS) [checkpoint: 434efcb]
+- [x] Task: Implement format adapter worker and comprehensive tests
+    - [x] Implement `crates/format-adapter/src/format_worker.rs`
+    - [x] Write `crates/format-adapter/tests/resampling.rs` for sample rate validation
+    - [x] Run full format-adapter test suite and clippy in Docker
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 4: Final Verification, Checkpoint & Track Completion
 - [ ] Task: Full offline workspace verification
