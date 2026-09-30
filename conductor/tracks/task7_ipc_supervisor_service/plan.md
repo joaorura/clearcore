@@ -27,19 +27,19 @@
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [checkpoint: 271ac70]
 
 ## Phase 3: Daemon Binary, Lifecycle Scripts & Integration Tests (GREEN & INTEGRATION)
-- [ ] Task: Implement `realtime-noise-service` daemon
-    - [ ] Implement `crates/service/src/bootstrap.rs` (configuration & engine wiring)
-    - [ ] Implement `crates/service/src/install.rs` (cross-platform service installer/uninstaller logic)
-    - [ ] Implement `crates/service/src/main.rs` (`--run`, `--install-user-service`, `--uninstall-user-service`)
-- [ ] Task: Create platform packaging and service descriptors
-    - [ ] Create `platform/windows/service/register-user-service.ps1`
-    - [ ] Create `platform/windows/service/unregister-user-service.ps1`
-    - [ ] Create `packaging/macos/LaunchAgents/com.clearcore.realtime-noise.plist`
-    - [ ] Create `packaging/linux/systemd/user/realtime-noise.service`
-    - [ ] Create `docs/ipc-v1.md` and `docs/service-lifecycle.md`
-- [ ] Task: Verify service lifecycle tests and release build
-    - [ ] Run `cargo test -p realtime-noise-service --locked --offline` in Docker
-    - [ ] Build release binary: `cargo build -p realtime-noise-service --release --locked --offline` in Docker
+- [x] Task: Implement `realtime-noise-service` daemon
+    - [x] Implement `crates/service/src/bootstrap.rs` (configuration & engine wiring)
+    - [x] Implement `crates/service/src/install.rs` (cross-platform service installer/uninstaller logic)
+    - [x] Implement `crates/service/src/main.rs` (`--run`, `--install-user-service`, `--uninstall-user-service`)
+- [x] Task: Create platform packaging and service descriptors
+    - [x] Create `platform/windows/service/register-user-service.ps1`
+    - [x] Create `platform/windows/service/unregister-user-service.ps1`
+    - [x] Create `packaging/macos/LaunchAgents/com.clearcore.realtime-noise.plist`
+    - [x] Create `packaging/linux/systemd/user/realtime-noise.service`
+    - [x] Create `docs/ipc-v1.md` and `docs/service-lifecycle.md`
+- [x] Task: Verify service lifecycle tests and release build
+    - [x] Run `cargo test -p realtime-noise-service --locked --offline` in Docker
+    - [x] Build release binary: `cargo build -p realtime-noise-service --release --locked --offline` in Docker
 - [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 4: Final Verification, Checkpoint & Track Completion

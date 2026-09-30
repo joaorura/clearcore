@@ -1,0 +1,18 @@
+[Unit]
+Description=Realtime Noise Suppression User Service
+Documentation=https://github.com/clearcore/hippocamp
+After=sound.target pipewire.service pulseaudio.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/realtime-noise-service --run
+Restart=on-failure
+RestartSec=2s
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
