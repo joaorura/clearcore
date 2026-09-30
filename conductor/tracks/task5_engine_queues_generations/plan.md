@@ -1,16 +1,16 @@
 # Implementation Plan: Task 5 Realtime Noise Engine, Queues, Generations & Silence Policy
 
-## Phase 1: Workspace Registration & Contract Tests (RED)
-- [x] Task: Create `crates/engine` crate and register in workspace
+## Phase 1: Workspace Registration & Contract Tests (RED) [checkpoint: 4d7a120]
+- [x] Task: Create `crates/engine` crate and register in workspace [4d7a120]
     - [x] Create `crates/engine/Cargo.toml` with edition 2024 and dependencies on `realtime-noise-contracts`, `realtime-noise-model`
     - [x] Add `crates/engine` to workspace members in root `Cargo.toml`
     - [x] Run `cargo check --workspace --locked --offline` in Docker
-- [x] Task: Write initial failing contract tests (RED)
+- [x] Task: Write initial failing contract tests (RED) [4d7a120]
     - [x] Write `crates/engine/tests/deadline.rs` with test `inference_deadline_miss_closes_generation_and_outputs_silence`
     - [x] Write `crates/engine/tests/generation.rs` with test `bypass_keeps_framing_without_calling_inference_or_raw_fallback`
     - [x] Verify that tests fail cleanly with missing types/methods
     - [x] Commit RED state to Git history with git notes
-- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [4d7a120]
 
 ## Phase 2: Engine Core, Generations & Modes (GREEN)
 - [ ] Task: Implement generation lifecycle & engine types
