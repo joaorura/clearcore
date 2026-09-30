@@ -15,7 +15,7 @@
     "300"
   ],
   "deadline_ms": 10.0,
-  "finished_at_unix_seconds": 1790704078,
+  "finished_at_unix_seconds": 1790793648,
   "git_revision": "unavailable",
   "host": {
     "architecture": "x86_64",
@@ -32,7 +32,7 @@
     "os": "linux",
     "physical_cores": 16,
     "provenance": null,
-    "ram_kib": 7812424,
+    "ram_kib": 7812440,
     "reference_class_qualified": false,
     "rejection_reason": "host evidence was not supplied",
     "sustained_frequency": null,
@@ -142,11 +142,11 @@
   "p99_limit_ms": 7.0,
   "profile": "avx2-minimum",
   "requested_duration_seconds": 300,
-  "run_id": "task4-1790704078",
+  "run_id": "task4-1790793648",
   "runtime": "tract",
   "runtime_version": "0.19.16",
   "schema_version": 1,
-  "started_at_unix_seconds": 1790704078,
+  "started_at_unix_seconds": 1790793648,
   "status": "BLOCKED_UNSUPPORTED_CPU_PROFILE",
   "warm_up_policy": "one ordered pass over every frozen corpus frame",
   "worker_inference_only": true

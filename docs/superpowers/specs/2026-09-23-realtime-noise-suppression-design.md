@@ -291,7 +291,7 @@ A máquina de qualificação mínima para o baseline CPU é normativamente: CPU 
 
 | Requisito | Critério de aceitação |
 |---|---|
-| Algoritmo DFN3 de referência | 40 ms, valor derivado que deve ser verificado contra o ativo aprovado antes de release |
+| Algoritmo DFN3 de referência | 30 ms (1.440 amostras a 48 kHz), verificado empiricamente no ativo aprovado DFN3 v0.5.6 ((fft_size 960 - hop 480) + lookahead 2 * hop 480 = 1.440) |
 | Captura e entrada | Menor ou igual a 10 ms de caminho configurado/medido |
 | Resampler/conversor ativo | Menor ou igual a 5 ms, incluindo group delay quando ativo |
 | Idade de fila | Menor ou igual a 10 ms em geração válida; 20 ms ou 2 hops dispara restart antes de capacidade |
@@ -310,7 +310,7 @@ A máquina de qualificação mínima para o baseline CPU é normativamente: CPU 
 | Derivada | `STFT/iSTFT delay + model lookahead + buffering interno + group delay de resampler de entrada ativo + group delay de conversor de endpoint ativo`, em amostras e ms a 48 kHz |
 | Não observável | Buffering interno e jitter da aplicação consumidora, codec/rede e qualquer buffer downstream; excluídos da métrica de caminho do produto |
 
-O orçamento de produto é `40 ms algoritmo DFN3 de referência + até 10 ms captura/entrada + até 5 ms conversão ativa + até 10 ms idade de fila + até 15 ms saída/endpoint = até 80 ms`. Os 10 ms de deadline de inferência são limite de execução do worker dentro desse orçamento, não parcela adicional a ser somada. O relatório de diagnóstico mostra cada parcela, seu tipo e geração. `STFT/iSTFT delay` e group delays ativos são obrigatórios na parcela derivada. A latência de aplicativo downstream não é inferida nem alegada.
+O orçamento de produto é `30 ms algoritmo DFN3 de referência + até 10 ms captura/entrada + até 5 ms conversão ativa + até 10 ms idade de fila + até 15 ms saída/endpoint = até 70 ms` (com margem de folga dentro do limite p95 <= 80 ms). Os 10 ms de deadline de inferência são limite de execução do worker dentro desse orçamento, não parcela adicional a ser somada. O relatório de diagnóstico mostra cada parcela, seu tipo e geração. `STFT/iSTFT delay` e group delays ativos são obrigatórios na parcela derivada. A latência de aplicativo downstream não é inferida nem alegada.
 
 ## Matriz normativa de suporte simultâneo de GA
 

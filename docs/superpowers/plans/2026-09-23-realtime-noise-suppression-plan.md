@@ -22,7 +22,7 @@
 - Não há bypass raw: `Bypass` preserva framing e endpoint sem inferência, `Mute` publica silêncio, e toda falha publica silêncio até uma geração aquecida válida.
 - Filas têm capacidade 24 hops; watermark de idade de 20 ms ou 2 hops, o que ocorrer primeiro, fecha geração. Em geração válida, idade de fila é menor ou igual a 10 ms.
 - CPU de qualificação é x86_64 AVX2, quatro núcleos físicos, 2,0 GHz sustentados em AC, 8 GB RAM, classe não mais rápida que Intel Core i5-10210U. Apple Silicon requer orçamento CPU caracterizado separado.
-- Orçamento de produto é p95 menor ou igual a 80 ms: 40 ms algoritmo DFN3 derivado, até 10 ms captura, até 5 ms conversão, até 10 ms fila e até 15 ms saída. Inferência CPU tem deadline de 10 ms e p99 menor ou igual a 7 ms.
+- Orçamento de produto é p95 menor ou igual a 80 ms (orçamento nominal de até 70 ms): 30 ms algoritmo DFN3 derivado (1.440 amostras a 48 kHz), até 10 ms captura, até 5 ms conversão, até 10 ms fila e até 15 ms saída. Inferência CPU tem deadline de 10 ms e p99 menor ou igual a 7 ms.
 - Soak controlado de 8 horas exige zero `inference_deadline_miss`, zero callback miss atribuível ao produto, zero restart de geração e zero underrun após warm-up.
 - `EngineSupervisor` usa backoff 1/2/4/8/16 s, no máximo cinco crashes em 15 minutos, depois `TerminalSafeState` com silêncio e diagnóstico preservado.
 - A semântica de sessão é owner lock em Windows/macOS e uma fonte PipeWire por usuário no Linux. Disputa retorna `UnavailableBusy`, nunca preempta nem cruza áudio.
