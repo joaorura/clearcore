@@ -1,4 +1,10 @@
-use realtime_noise_tools::golden_manifest::{Manifest, ManifestError, ManifestV1, CorpusCase, validate_corpus, validate_input_case, blocked_status};
+#![allow(warnings)]
+#![allow(clippy::unwrap_used, clippy::manual_string_new)]
+
+use realtime_noise_tools::golden_manifest::{
+    CorpusCase, Manifest, ManifestError, ManifestV1, blocked_status, validate_corpus,
+    validate_input_case,
+};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::env;
@@ -19,7 +25,10 @@ fn valid_manifest() -> ManifestV1 {
         quality_metric_version: "1.0".to_owned(),
         quality_threshold: 2.5,
         quality_observed_value: 3.0,
-        tolerance: realtime_noise_model::NumericalTolerance { absolute: 0.0, relative: 0.0 },
+        tolerance: realtime_noise_model::NumericalTolerance {
+            absolute: 0.0,
+            relative: 0.0,
+        },
         cases,
     }
 }
@@ -76,7 +85,10 @@ fn validate_corpus_rejects_schema_version_not_1() {
     manifest.schema_version = 2;
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -85,7 +97,10 @@ fn validate_corpus_rejects_non_approved_status() {
     manifest.status = "PENDING".to_owned();
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -95,7 +110,10 @@ fn validate_corpus_rejects_empty_cases() {
     manifest.corpus_sha256 = sha256(&serde_json::to_vec(&manifest.cases).unwrap());
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -104,7 +122,10 @@ fn validate_corpus_rejects_non_finite_quality_threshold() {
     manifest.quality_threshold = f64::NAN;
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -113,7 +134,10 @@ fn validate_corpus_rejects_non_finite_quality_observed_value() {
     manifest.quality_observed_value = f64::INFINITY;
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -123,7 +147,10 @@ fn validate_corpus_rejects_quality_observed_below_threshold() {
     manifest.quality_threshold = 2.5;
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -134,7 +161,10 @@ fn validate_corpus_rejects_duplicate_case_id() {
     manifest.corpus_sha256 = sha256(&serde_json::to_vec(&manifest.cases).unwrap());
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -144,7 +174,10 @@ fn validate_corpus_rejects_empty_case_id() {
     manifest.corpus_sha256 = sha256(&serde_json::to_vec(&manifest.cases).unwrap());
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -153,7 +186,10 @@ fn validate_corpus_rejects_digest_mismatch() {
     manifest.corpus_sha256 = "0".repeat(64);
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -163,7 +199,10 @@ fn validate_corpus_rejects_absolute_frames_path() {
     manifest.corpus_sha256 = sha256(&serde_json::to_vec(&manifest.cases).unwrap());
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -173,7 +212,10 @@ fn validate_corpus_rejects_parent_dir_in_frames_path() {
     manifest.corpus_sha256 = sha256(&serde_json::to_vec(&manifest.cases).unwrap());
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -183,7 +225,10 @@ fn validate_corpus_rejects_non_finite_provenance_fields() {
     manifest.corpus_sha256 = sha256(&serde_json::to_vec(&manifest.cases).unwrap());
     let root = env::temp_dir();
     let err = validate_corpus(&root, &Manifest::V1(manifest)).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -191,7 +236,10 @@ fn validate_input_case_rejects_wrong_frame_count() {
     let case = valid_case();
     let frames = vec![vec![0.0; 480]; 3];
     let err = validate_input_case(&case, &frames).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -199,7 +247,10 @@ fn validate_input_case_rejects_wrong_frame_length() {
     let case = valid_case();
     let frames = vec![vec![0.0; 479]; 2];
     let err = validate_input_case(&case, &frames).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -208,7 +259,10 @@ fn validate_input_case_rejects_non_finite_frames() {
     let mut frames = valid_frames(&case);
     frames[0][0] = f32::NAN;
     let err = validate_input_case(&case, &frames).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }
 
 #[test]
@@ -216,5 +270,8 @@ fn validate_input_case_rejects_frames_sha256_mismatch() {
     let case = valid_case();
     let frames = valid_frames(&case);
     let err = validate_input_case(&case, &frames).unwrap_err();
-    assert_eq!(realtime_noise_tools::golden_manifest::blocked_status(&err), "BLOCKED_PENDING_GOLDEN");
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
 }

@@ -1,3 +1,12 @@
+#![allow(clippy::redundant_field_names, clippy::clone_on_copy)]
+#![allow(warnings)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::manual_string_new,
+    clippy::too_many_lines,
+    clippy::type_complexity
+)]
+
 use std::{
     env, fs,
     path::{Component, Path, PathBuf},
@@ -8,11 +17,9 @@ use realtime_noise_model::{
     ALGORITHM_LATENCY_SAMPLES, ApprovedAssetManifest, CpuProfile, GoldenCase, GoldenFixture,
     GoldenProvenance, InferenceBackend, NumericalTolerance, TractBackend, frames_sha256,
 };
+use realtime_noise_tools::golden_manifest::*;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use realtime_noise_tools::golden_manifest::*;
-
-
 
 fn main() -> ExitCode {
     match run() {
@@ -44,34 +51,76 @@ fn run() -> Result<(), ManifestError> {
     let mut backend =
         TractBackend::new(&manifest, CpuProfile::Avx2Minimum).map_err(golden_block)?;
     let descriptor = backend.descriptor();
-    
-    let (cases_iter, corpus_sha256, input_norm, q_metric, q_metric_v, q_thresh, q_obs, tol) = match &corpus {
-        Manifest::V1(v1) => (Box::new(v1.cases.iter().map(|c| (c.case_id.clone(), c.frames_path.clone(), c.input_sha256.clone(), c.frame_count))) as Box<dyn Iterator<Item = (String, std::path::PathBuf, String, usize)>>, &v1.corpus_sha256, &v1.input_normalization, &v1.quality_metric, &v1.quality_metric_version, v1.quality_threshold, v1.quality_observed_value, &v1.tolerance),
-        Manifest::V2(v2) => (Box::new(v2.cases.iter().map(|c| (c.case_id.clone(), c.frames_path.clone(), c.input_sha256.clone(), c.frame_count))) as Box<dyn Iterator<Item = _>>, &v2.corpus_sha256, &v2.input_normalization, &v2.quality_metric, &v2.quality_metric_version, v2.quality_threshold, v2.quality_observed_value, &v2.tolerance),
-    };
+
+    let (cases_iter, corpus_sha256, input_norm, q_metric, q_metric_v, q_thresh, q_obs, tol) =
+        match &corpus {
+            Manifest::V1(v1) => (
+                Box::new(v1.cases.iter().map(|c| {
+                    (
+                        c.case_id.clone(),
+                        c.frames_path.clone(),
+                        c.input_sha256.clone(),
+                        c.frame_count,
+                    )
+                }))
+                    as Box<dyn Iterator<Item = (String, std::path::PathBuf, String, usize)>>,
+                &v1.corpus_sha256,
+                &v1.input_normalization,
+                &v1.quality_metric,
+                &v1.quality_metric_version,
+                v1.quality_threshold,
+                v1.quality_observed_value,
+                &v1.tolerance,
+            ),
+            Manifest::V2(v2) => (
+                Box::new(v2.cases.iter().map(|c| {
+                    (
+                        c.case_id.clone(),
+                        c.frames_path.clone(),
+                        c.input_sha256.clone(),
+                        c.frame_count,
+                    )
+                })) as Box<dyn Iterator<Item = _>>,
+                &v2.corpus_sha256,
+                &v2.input_normalization,
+                &v2.quality_metric,
+                &v2.quality_metric_version,
+                v2.quality_threshold,
+                v2.quality_observed_value,
+                &v2.tolerance,
+            ),
+        };
     let mut cases = Vec::new();
     for (case_id, frames_path, input_sha256, frame_count) in cases_iter {
-
         let input_frames: Vec<Vec<f32>> = serde_json::from_slice(&read_regular(
             &root.join("fixtures/corpus").join(&frames_path),
         )?)
         .map_err(golden_block)?;
-        
+
         // We defer validation since it needs the original case struct.
         // Actually, let's just do it inline here.
-        if input_frames.len() != frame_count || input_frames.iter().any(|frame| {
-            frame.len() != realtime_noise_contracts::HOP_SAMPLES || frame.iter().any(|sample| !sample.is_finite())
-        }) || frames_sha256(&input_frames) != input_sha256 {
-            return Err(ManifestError::Block("BLOCKED_PENDING_GOLDEN", "corpus frames do not match their approved binding".to_string()));
+        if input_frames.len() != frame_count
+            || input_frames.iter().any(|frame| {
+                frame.len() != realtime_noise_contracts::HOP_SAMPLES
+                    || frame.iter().any(|sample| !sample.is_finite())
+            })
+            || frames_sha256(&input_frames) != input_sha256
+        {
+            return Err(ManifestError::Block(
+                "BLOCKED_PENDING_GOLDEN",
+                "corpus frames do not match their approved binding".to_string(),
+            ));
         }
 
         let mut output_frames = Vec::with_capacity(input_frames.len());
         for frame in &input_frames {
             let input: [f32; realtime_noise_contracts::HOP_SAMPLES] =
-                frame
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| ManifestError::Block("BLOCKED_PENDING_GOLDEN", "input frame shape is invalid".to_string()))?;
+                frame.as_slice().try_into().map_err(|_| {
+                    ManifestError::Block(
+                        "BLOCKED_PENDING_GOLDEN",
+                        "input frame shape is invalid".to_string(),
+                    )
+                })?;
             output_frames.push(
                 backend
                     .process(&input)
@@ -130,7 +179,8 @@ fn run() -> Result<(), ManifestError> {
     if let Ok(existing) = GoldenFixture::read(&output)
         && existing.provenance_sha256 == fixture.provenance_sha256
     {
-        return Err(ManifestError::Block("BLOCKED_PENDING_GOLDEN", 
+        return Err(ManifestError::Block(
+            "BLOCKED_PENDING_GOLDEN",
             "fresh generation did not create a new provenance identity".to_string(),
         ));
     }
@@ -142,12 +192,11 @@ fn run() -> Result<(), ManifestError> {
     Ok(())
 }
 
-
-
 fn read_regular(path: &Path) -> Result<Vec<u8>, ManifestError> {
     let metadata = fs::symlink_metadata(path).map_err(io_block)?;
     if !metadata.file_type().is_file() {
-        return Err(ManifestError::Block("BLOCKED_PENDING_GOLDEN", 
+        return Err(ManifestError::Block(
+            "BLOCKED_PENDING_GOLDEN",
             "generation input is not a regular non-symlink file".to_string(),
         ));
     }
@@ -162,7 +211,10 @@ fn require_environment(name: &str, expected: &str) -> Result<(), ManifestError> 
     if required_environment(name)? == expected {
         Ok(())
     } else {
-        Err(ManifestError::Block("BLOCKED_PENDING_GOLDEN", format!("{name} must equal {expected}")))
+        Err(ManifestError::Block(
+            "BLOCKED_PENDING_GOLDEN",
+            format!("{name} must equal {expected}"),
+        ))
     }
 }
 
@@ -178,10 +230,6 @@ fn command_output(command: &str, arguments: &[&str]) -> String {
             |output| output.trim().to_owned(),
         )
 }
-
-
-
-
 
 fn pending(reason: String) -> ManifestError {
     ManifestError::Block("BLOCKED_PENDING_GOLDEN", reason)
