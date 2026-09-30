@@ -26,7 +26,7 @@
     - [x] Verify that `validate_corpus` passes completely
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [0135f0d]
 
-## Phase 4: Golden Reference Generation & M1 Qualification
+## Phase 4: Golden Reference Generation & M1 Qualification [checkpoint: 605ee00]
 - [x] Task: Golden reference generation [5e1da1b]
     - [x] Execute `generate-golden --fresh` inside offline container
     - [x] Verify creation and integrity of `fixtures/golden/frozen-reference.json`
@@ -37,4 +37,4 @@
 - [x] Task: M1 Milestone Approval Audit [605ee00]
     - [x] Update `task-4-corpus-builder-report.md` and append ruling to `ledger.jsonl`
     - [x] Verify all gates for `M1_APPROVED` are satisfied
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [605ee00]
