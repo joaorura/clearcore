@@ -1,14 +1,14 @@
 # Implementation Plan: Task 6 Framing, Resampling & External Format Adapters
 
-## Phase 1: Workspace Registration & Contract Tests (RED)
-- [ ] Task: Create `crates/format-adapter` crate and register in workspace
-    - [ ] Create `crates/format-adapter/Cargo.toml`
-    - [ ] Add `crates/format-adapter` to workspace members in root `Cargo.toml`
-- [ ] Task: Write initial failing contract tests (RED)
-    - [ ] Write `crates/format-adapter/tests/framing.rs` with test `accumulator_emits_one_480_sample_frame_from_irregular_callbacks`
-    - [ ] Write `crates/format-adapter/tests/formats.rs` with test `unsupported_endpoint_format_fails_instead_of_converting_implicitly`
-    - [ ] Verify tests fail cleanly (RED) in Docker
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+## Phase 1: Workspace Registration & Contract Tests (RED) [checkpoint: 83efb79]
+- [x] Task: Create `crates/format-adapter` crate and register in workspace
+    - [x] Create `crates/format-adapter/Cargo.toml`
+    - [x] Add `crates/format-adapter` to workspace members in root `Cargo.toml`
+- [x] Task: Write initial failing contract tests (RED)
+    - [x] Write `crates/format-adapter/tests/framing.rs` with test `accumulator_emits_one_480_sample_frame_from_irregular_callbacks`
+    - [x] Write `crates/format-adapter/tests/formats.rs` with test `unsupported_endpoint_format_fails_instead_of_converting_implicitly`
+    - [x] Verify tests fail cleanly (RED) in Docker
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 2: Accumulator, Deframer & Format Converter (GREEN)
 - [ ] Task: Implement framing and conversion core
