@@ -28,8 +28,10 @@ pub enum BackendRequest {
     #[default]
     Auto,
     TractCpu,
+    TensorRt,
     Cuda,
     OpenVino,
+    DirectMl,
     CoreMl,
 }
 
@@ -38,8 +40,10 @@ pub enum BackendRequest {
 pub enum BackendSelection {
     #[default]
     TractCpu,
+    TensorRt,
     Cuda,
     OpenVino,
+    DirectMl,
     CoreMl,
 }
 
@@ -48,8 +52,10 @@ impl BackendSelection {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::TractCpu => "tract",
+            Self::TensorRt => "tensorrt",
             Self::Cuda => "cuda",
             Self::OpenVino => "openvino",
+            Self::DirectMl => "directml",
             Self::CoreMl => "coreml",
         }
     }
@@ -57,6 +63,11 @@ impl BackendSelection {
     #[must_use]
     pub const fn is_tract_cpu(&self) -> bool {
         matches!(self, Self::TractCpu)
+    }
+
+    #[must_use]
+    pub const fn is_nvidia(&self) -> bool {
+        matches!(self, Self::TensorRt | Self::Cuda)
     }
 }
 
@@ -157,8 +168,10 @@ pub fn select_auto(report: CalibrationReport) -> BackendSelection {
     }
 
     match report.backend_name.to_ascii_lowercase().as_str() {
-        "cuda" | "tensorrt" => BackendSelection::Cuda,
+        "tensorrt" => BackendSelection::TensorRt,
+        "cuda" | "nvidia" => BackendSelection::Cuda,
         "openvino" | "npu" => BackendSelection::OpenVino,
+        "directml" | "dx12" => BackendSelection::DirectMl,
         "coreml" | "ane" => BackendSelection::CoreMl,
         _ => BackendSelection::TractCpu,
     }
@@ -199,6 +212,16 @@ impl AutoPolicy {
                 report.map_or(BackendSelection::TractCpu, |rep| self.select(rep))
             }
             BackendRequest::TractCpu => BackendSelection::TractCpu,
+            BackendRequest::TensorRt => match report {
+                Some(rep)
+                    if rep.is_promoted()
+                        && (rep.backend_name.eq_ignore_ascii_case("tensorrt")
+                            || rep.backend_name.eq_ignore_ascii_case("cuda")) =>
+                {
+                    BackendSelection::TensorRt
+                }
+                _ => BackendSelection::TractCpu,
+            },
             BackendRequest::Cuda => match report {
                 Some(rep)
                     if rep.is_promoted() && rep.backend_name.eq_ignore_ascii_case("cuda") =>
@@ -212,6 +235,14 @@ impl AutoPolicy {
                     if rep.is_promoted() && rep.backend_name.eq_ignore_ascii_case("openvino") =>
                 {
                     BackendSelection::OpenVino
+                }
+                _ => BackendSelection::TractCpu,
+            },
+            BackendRequest::DirectMl => match report {
+                Some(rep)
+                    if rep.is_promoted() && rep.backend_name.eq_ignore_ascii_case("directml") =>
+                {
+                    BackendSelection::DirectMl
                 }
                 _ => BackendSelection::TractCpu,
             },

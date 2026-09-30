@@ -118,3 +118,68 @@ fn auto_policy_backend_request_auto_respects_calibration() {
         BackendSelection::OpenVino
     );
 }
+
+#[test]
+fn user_can_select_tensorrt_openvino_or_directml_explicitly() {
+    let policy = AutoPolicy::new();
+
+    let passing_tensorrt_report = CalibrationReport {
+        backend_name: "tensorrt".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.35,
+        p95_latency_ms: 0.45,
+        p99_latency_ms: 0.50,
+        max_latency_ms: 0.80,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    // 1. AUTO prioritizes TensorRT when NVIDIA TensorRT passes calibration
+    let selection = policy.resolve_request(BackendRequest::Auto, Some(&passing_tensorrt_report));
+    assert_eq!(selection, BackendSelection::TensorRt);
+    assert_eq!(selection.name(), "tensorrt");
+    assert!(selection.is_nvidia());
+
+    // 2. User explicitly selects TensorRT
+    let explicit_trt = policy.resolve_request(BackendRequest::TensorRt, Some(&passing_tensorrt_report));
+    assert_eq!(explicit_trt, BackendSelection::TensorRt);
+
+    // 3. User explicitly selects OpenVINO (supported on both Linux and Windows)
+    let passing_openvino_report = CalibrationReport {
+        backend_name: "openvino".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.2,
+        p95_latency_ms: 1.8,
+        p99_latency_ms: 2.2,
+        max_latency_ms: 3.1,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+    let explicit_ov = policy.resolve_request(BackendRequest::OpenVino, Some(&passing_openvino_report));
+    assert_eq!(explicit_ov, BackendSelection::OpenVino);
+    assert_eq!(explicit_ov.name(), "openvino");
+
+    // 4. User explicitly selects DirectML (Windows)
+    let passing_directml_report = CalibrationReport {
+        backend_name: "directml".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.5,
+        p95_latency_ms: 2.0,
+        p99_latency_ms: 2.5,
+        max_latency_ms: 3.5,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+    let explicit_dml = policy.resolve_request(BackendRequest::DirectMl, Some(&passing_directml_report));
+    assert_eq!(explicit_dml, BackendSelection::DirectMl);
+    assert_eq!(explicit_dml.name(), "directml");
+}
