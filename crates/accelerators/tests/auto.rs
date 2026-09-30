@@ -314,7 +314,7 @@ fn auto_four_tier_hierarchy_priority() {
         tract_cpu_report.clone(),
     ];
     let sel = select_best(&npu_and_igpu);
-    assert_eq!(sel, BackendSelection::RyzenAi);
+    assert_eq!(sel, BackendSelection::RyzenAiNpu);
     assert_eq!(sel.tier(), DeviceTier::Npu);
     assert!(sel.is_npu());
     assert!(sel.is_amd());
@@ -425,8 +425,8 @@ fn user_can_select_amd_ryzen_ai_on_linux_and_windows() {
     // User explicitly selects Ryzen AI
     let explicit_ryzen =
         policy.resolve_request(BackendRequest::RyzenAi, Some(&passing_ryzenai_report));
-    assert_eq!(explicit_ryzen, BackendSelection::RyzenAi);
-    assert_eq!(explicit_ryzen.name(), "ryzen-ai");
+    assert_eq!(explicit_ryzen, BackendSelection::RyzenAiNpu);
+    assert_eq!(explicit_ryzen.name(), "ryzenai-npu");
     assert!(explicit_ryzen.is_amd());
     assert!(explicit_ryzen.is_npu());
     assert_eq!(explicit_ryzen.tier(), DeviceTier::Npu);
@@ -468,4 +468,109 @@ fn user_can_select_amd_ryzen_ai_on_linux_and_windows() {
     let fallback = policy.resolve_request(BackendRequest::RyzenAi, Some(&failed_ryzenai_report));
     assert_eq!(fallback, BackendSelection::TractCpu);
     assert!(fallback.is_tract_cpu());
+}
+
+#[test]
+fn ryzen_ai_supports_both_npu_and_igpu() {
+    let policy = AutoPolicy::new();
+
+    let passing_npu = CalibrationReport {
+        backend_name: "ryzenai-npu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.90,
+        p95_latency_ms: 1.30,
+        p99_latency_ms: 1.60,
+        max_latency_ms: 2.20,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let passing_igpu = CalibrationReport {
+        backend_name: "ryzenai-gpu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.40,
+        p95_latency_ms: 2.00,
+        p99_latency_ms: 2.60,
+        max_latency_ms: 3.40,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    // 1. AMD NPU reports as Tier 2 (NPU)
+    let sel_npu = policy.resolve_request(BackendRequest::RyzenAiNpu, Some(&passing_npu));
+    assert_eq!(sel_npu, BackendSelection::RyzenAiNpu);
+    assert_eq!(sel_npu.name(), "ryzenai-npu");
+    assert_eq!(sel_npu.tier(), DeviceTier::Npu);
+    assert!(sel_npu.is_npu());
+    assert!(sel_npu.is_amd());
+
+    // 2. AMD iGPU reports as Tier 3 (Integrated GPU)
+    let sel_igpu = policy.resolve_request(BackendRequest::RyzenAiGpu, Some(&passing_igpu));
+    assert_eq!(sel_igpu, BackendSelection::RyzenAiGpu);
+    assert_eq!(sel_igpu.name(), "ryzenai-gpu");
+    assert_eq!(sel_igpu.tier(), DeviceTier::IntegratedGpu);
+    assert!(sel_igpu.is_integrated_gpu());
+    assert!(sel_igpu.is_amd());
+
+    // 3. User requests RyzenAi category: prefers NPU over iGPU
+    let candidates = [passing_igpu, passing_npu];
+    let sel_auto_ryzen = policy.resolve_candidates(BackendRequest::RyzenAi, &candidates);
+    assert_eq!(sel_auto_ryzen, BackendSelection::RyzenAiNpu);
+}
+
+#[test]
+fn intel_cpu_prefers_openvino_over_onnx_tract() {
+    let policy = AutoPolicy::new();
+
+    let openvino_cpu_report = CalibrationReport {
+        backend_name: "openvino-cpu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 2.20,
+        p95_latency_ms: 3.10,
+        p99_latency_ms: 4.00,
+        max_latency_ms: 5.20,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let tract_cpu_report = CalibrationReport {
+        backend_name: "tract".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 4.80,
+        p95_latency_ms: 5.60,
+        p99_latency_ms: 6.20,
+        max_latency_ms: 6.90,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let candidates = [tract_cpu_report, openvino_cpu_report];
+
+    // On Intel CPU, BackendRequest::Cpu prefers OpenVINO CPU (score 60) over ONNX Tract (score 50)
+    let cpu_sel = policy.resolve_candidates(BackendRequest::Cpu, &candidates);
+    assert_eq!(cpu_sel, BackendSelection::OpenVinoCpu);
+    assert_eq!(cpu_sel.name(), "openvino-cpu");
+    assert_eq!(cpu_sel.tier(), DeviceTier::Cpu);
+    assert!(cpu_sel.is_intel());
+
+    // AUTO policy selecting among CPU candidates also prefers OpenVINO CPU
+    let auto_sel = policy.resolve_candidates(BackendRequest::Auto, &candidates);
+    assert_eq!(auto_sel, BackendSelection::OpenVinoCpu);
+
+    // Explicit TractCpu request always returns TractCpu
+    let tract_sel = policy.resolve_candidates(BackendRequest::TractCpu, &candidates);
+    assert_eq!(tract_sel, BackendSelection::TractCpu);
+    assert!(tract_sel.is_tract_cpu());
 }

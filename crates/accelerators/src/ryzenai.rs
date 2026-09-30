@@ -62,6 +62,11 @@ impl RyzenAiBackend {
     }
 
     #[must_use]
+    pub fn new_mock_igpu() -> Self {
+        Self::new("df-compatible-release-asset-v1", "mock-asset-sha256", "GPU")
+    }
+
+    #[must_use]
     pub fn device(&self) -> &str {
         &self.device
     }
