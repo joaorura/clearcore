@@ -10,3 +10,11 @@
   *Link: [./tracks/task6_format_adapters/index.md](./tracks/task6_format_adapters/index.md)*
 - [x] **Track: Task 7 Local IPC, EngineSupervisor & Service Lifecycle**
   *Link: [./tracks/task7_ipc_supervisor_service/index.md](./tracks/task7_ipc_supervisor_service/index.md)*
+- [x] **Track: Task 8 Windows PortCls/WaveRT Driver Spike**
+  *Link: [./tracks/task8_windows_wavert_spike/index.md](./tracks/task8_windows_wavert_spike/index.md)*
+- [x] **Track: Task 9 macOS HAL Audio Server Plug-in Spike**
+  *Link: [./tracks/task9_macos_hal_spike/index.md](./tracks/task9_macos_hal_spike/index.md)*
+- [x] **Track: Task 10 Linux PipeWire Native Helper Spike**
+  *Link: [./tracks/task10_linux_pipewire_spike/index.md](./tracks/task10_linux_pipewire_spike/index.md)*
+
+

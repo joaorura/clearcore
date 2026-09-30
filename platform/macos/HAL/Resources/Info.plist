@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>RealtimeNoiseHAL</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.clearcore.RealtimeNoiseHAL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>RealtimeNoiseHAL</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFPlugInDynamicRegistration</key>
+    <string>NO</string>
+    <key>CFPlugInFactories</key>
+    <dict>
+        <key>9A8C5B32-F22B-4E33-87D9-E54E19C5C501</key>
+        <string>RealtimeNoiseDriverFactory</string>
+    </dict>
+    <key>CFPlugInTypes</key>
+    <dict>
+        <key>443FD8E7-60B1-11D5-BCAC-0030654C991C</key>
+        <array>
+            <string>9A8C5B32-F22B-4E33-87D9-E54E19C5C501</string>
+        </array>
+    </dict>
+</dict>
+</plist>

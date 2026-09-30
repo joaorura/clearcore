@@ -1,0 +1,289 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		300000000000000000000001 /* Plugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* Plugin.swift */; };
+		300000000000000000000002 /* HiddenOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* HiddenOutput.swift */; };
+		300000000000000000000003 /* VisibleInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* VisibleInput.swift */; };
+		300000000000000000000004 /* RingBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* RingBuffer.swift */; };
+		300000000000000000000005 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* Info.plist */; };
+		300000000000000000000007 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* CoreAudio.framework */; };
+		300000000000000000000008 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* AudioToolbox.framework */; };
+		300000000000000000000009 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* CoreFoundation.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* Plugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Plugin.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* HiddenOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenOutput.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* VisibleInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisibleInput.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* RingBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingBuffer.swift; sourceTree = "<group>"; };
+		200000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		200000000000000000000006 /* RealtimeNoiseHAL.driver */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RealtimeNoiseHAL.driver; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000007 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		200000000000000000000008 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		200000000000000000000009 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				300000000000000000000007 /* CoreAudio.framework in Frameworks */,
+				300000000000000000000008 /* AudioToolbox.framework in Frameworks */,
+				300000000000000000000009 /* CoreFoundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000010 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000011 /* Sources */,
+				100000000000000000000012 /* Resources */,
+				100000000000000000000014 /* Frameworks */,
+				100000000000000000000013 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000011 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* Plugin.swift */,
+				200000000000000000000002 /* HiddenOutput.swift */,
+				200000000000000000000003 /* VisibleInput.swift */,
+				200000000000000000000004 /* RingBuffer.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		100000000000000000000012 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000005 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		100000000000000000000013 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000006 /* RealtimeNoiseHAL.driver */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		100000000000000000000014 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000007 /* CoreAudio.framework */,
+				200000000000000000000008 /* AudioToolbox.framework */,
+				200000000000000000000009 /* CoreFoundation.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		100000000000000000000002 /* RealtimeNoiseHAL */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 400000000000000000000004 /* Build configuration list for PBXNativeTarget "RealtimeNoiseHAL" */;
+			buildPhases = (
+				100000000000000000000003 /* Sources */,
+				100000000000000000000004 /* Frameworks */,
+				100000000000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RealtimeNoiseHAL;
+			productName = RealtimeNoiseHAL;
+			productReference = 200000000000000000000006 /* RealtimeNoiseHAL.driver */;
+			productType = "com.apple.product-type.bundle";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		100000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					100000000000000000000002 = {
+						CreatedOnToolsVersion = 14.3;
+					};
+				};
+			};
+			buildConfigurationList = 400000000000000000000001 /* Build configuration list for PBXProject "RealtimeNoiseHAL" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 100000000000000000000010;
+			productRefGroup = 100000000000000000000013 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				100000000000000000000002 /* RealtimeNoiseHAL */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				300000000000000000000005 /* Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				300000000000000000000001 /* Plugin.swift in Sources */,
+				300000000000000000000002 /* HiddenOutput.swift in Sources */,
+				300000000000000000000003 /* VisibleInput.swift in Sources */,
+				300000000000000000000004 /* RingBuffer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		400000000000000000000002 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD)";
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		400000000000000000000003 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD)";
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_OPTIMIZATION_LEVEL = s;
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = "wholemodule";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		400000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MACH_O_TYPE = mh_bundle;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clearcore.RealtimeNoiseHAL;
+				PRODUCT_NAME = RealtimeNoiseHAL;
+				WRAPPER_EXTENSION = driver;
+			};
+			name = Debug;
+		};
+		400000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MACH_O_TYPE = mh_bundle;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clearcore.RealtimeNoiseHAL;
+				PRODUCT_NAME = RealtimeNoiseHAL;
+				WRAPPER_EXTENSION = driver;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		400000000000000000000001 /* Build configuration list for PBXProject "RealtimeNoiseHAL" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				400000000000000000000002 /* Debug */,
+				400000000000000000000003 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		400000000000000000000004 /* Build configuration list for PBXNativeTarget "RealtimeNoiseHAL" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				400000000000000000000005 /* Debug */,
+				400000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = 100000000000000000000001 /* Project object */;
+}

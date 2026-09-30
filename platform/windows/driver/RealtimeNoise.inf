@@ -1,0 +1,149 @@
+;; RealtimeNoise.inf
+;;
+;; Installation file for Project Hippocamp Realtime Noise Suppression
+;; Virtual PortCls/WaveRT Audio Capture Adapter.
+;;
+;; Copyright (c) Project Hippocamp. All rights reserved.
+
+[Version]
+Signature="$Windows NT$"
+Class=MEDIA
+ClassGUID={4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider=%ProviderName%
+CatalogFile=RealtimeNoise.cat
+DriverVer=09/30/2026,1.0.0.0
+PnpLockDown=1
+
+[DestinationDirs]
+DefaultDestDir          = 13
+RealtimeNoise.CopyFiles = 13
+
+[SourceDisksNames]
+1 = %DiskDescription%,,,""
+
+[SourceDisksFiles]
+RealtimeNoise.sys = 1
+
+[Manufacturer]
+%ProviderName% = ProjectHippocamp, NTamd64.10.0...14393
+
+[ProjectHippocamp.NTamd64.10.0...14393]
+%RealtimeNoise.DeviceDesc% = RealtimeNoise_Device, Root\RealtimeNoise
+
+;;======================================================
+;; Device Installation
+;;======================================================
+
+[RealtimeNoise_Device.NTamd64]
+Include    = ks.inf, wdmaudio.inf
+Needs      = KS.Registration, WDMAUDIO.Registration
+CopyFiles  = RealtimeNoise.CopyFiles
+AddReg     = RealtimeNoise.AddReg
+
+[RealtimeNoise.CopyFiles]
+RealtimeNoise.sys
+
+[RealtimeNoise.AddReg]
+HKR,,AssociatedFilters,,"wdmaud,swmidi,redbook"
+HKR,,Driver,,RealtimeNoise.sys
+HKR,Drivers,SubClasses,,"wave,midi,mixer"
+HKR,Drivers\wave\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\midi\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\mixer\wdmaud.drv,Driver,,wdmaud.drv
+HKR,Drivers\wave\wdmaud.drv,Description,,%RealtimeNoise.DeviceDesc%
+HKR,Drivers\midi\wdmaud.drv,Description,,%RealtimeNoise.DeviceDesc%
+HKR,Drivers\mixer\wdmaud.drv,Description,,%RealtimeNoise.DeviceDesc%
+
+;; Endpoint properties & fail-closed digital silence policy flag
+HKR,EP\0,PinName,,%CapturePinName%
+HKR,EP\0,SampleRate,0x00010001,48000
+HKR,EP\0,Channels,0x00010001,1
+HKR,EP\0,BitsPerSample,0x00010001,32
+HKR,EP\0,FailClosedSilence,0x00010001,1
+
+;;======================================================
+;; Device Interfaces
+;;======================================================
+
+[RealtimeNoise_Device.NTamd64.Interfaces]
+AddInterface = %KSCATEGORY_AUDIO%,    %KSNAME_Wave%,     RealtimeNoise.Interface.Wave
+AddInterface = %KSCATEGORY_CAPTURE%,  %KSNAME_Wave%,     RealtimeNoise.Interface.Capture
+AddInterface = %KSCATEGORY_REALTIME%, %KSNAME_Wave%,     RealtimeNoise.Interface.RealTime
+AddInterface = %KSCATEGORY_TOPOLOGY%, %KSNAME_Topology%, RealtimeNoise.Interface.Topology
+
+[RealtimeNoise.Interface.Wave]
+AddReg = RealtimeNoise.Interface.Wave.AddReg
+
+[RealtimeNoise.Interface.Wave.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%RealtimeNoise.Wave.szPname%
+
+[RealtimeNoise.Interface.Capture]
+AddReg = RealtimeNoise.Interface.Capture.AddReg
+
+[RealtimeNoise.Interface.Capture.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%RealtimeNoise.Capture.szPname%
+
+[RealtimeNoise.Interface.RealTime]
+AddReg = RealtimeNoise.Interface.RealTime.AddReg
+
+[RealtimeNoise.Interface.RealTime.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%RealtimeNoise.RealTime.szPname%
+
+[RealtimeNoise.Interface.Topology]
+AddReg = RealtimeNoise.Interface.Topology.AddReg
+
+[RealtimeNoise.Interface.Topology.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%RealtimeNoise.Topology.szPname%
+
+;;======================================================
+;; Service Installation
+;;======================================================
+
+[RealtimeNoise_Device.NTamd64.Services]
+AddService = RealtimeNoise, 0x00000002, RealtimeNoise_Service_Inst
+
+[RealtimeNoise_Service_Inst]
+DisplayName    = %RealtimeNoise.SvcDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 3                  ; SERVICE_DEMAND_START
+ErrorControl   = 1                  ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\RealtimeNoise.sys
+AddReg         = RealtimeNoise_Service_AddReg
+
+[RealtimeNoise_Service_AddReg]
+HKR,Parameters,DirectIoBatchFrames,0x00010001,1
+HKR,Parameters,UnderrunSilencePolicy,0x00010001,1
+HKR,Parameters,ZeroLeakageEnforced,0x00010001,1
+
+;;======================================================
+;; Strings
+;;======================================================
+
+[Strings]
+ProviderName                = "Project Hippocamp"
+DiskDescription             = "Hippocamp Realtime Noise Suppression Driver Installation Disk"
+RealtimeNoise.DeviceDesc    = "Hippocamp Virtual Audio Capture Adapter"
+RealtimeNoise.SvcDesc       = "Hippocamp Virtual Audio WaveRT Driver Service"
+CapturePinName              = "Denoised Capture"
+
+RealtimeNoise.Wave.szPname     = "Hippocamp WaveRT Audio Subdevice"
+RealtimeNoise.Capture.szPname  = "Hippocamp Denoised Virtual Microphone"
+RealtimeNoise.RealTime.szPname = "Hippocamp WaveRT Realtime Stream Subdevice"
+RealtimeNoise.Topology.szPname = "Hippocamp Audio Topology Subdevice"
+
+;; Standard KS Category GUIDs
+KSCATEGORY_AUDIO            = "{6994AD04-93EF-11D0-A3CC-00A0C9223196}"
+KSCATEGORY_CAPTURE          = "{65E8773D-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_REALTIME         = "{EB115FFC-10C8-4964-831D-6DCB02E6F23F}"
+KSCATEGORY_TOPOLOGY         = "{DDA54A40-1E4C-11D1-A050-405705C10000}"
+
+;; KS Names
+KSNAME_Wave                 = "Wave"
+KSNAME_Topology             = "Topology"
+
+;; KS Proxy CLSID
+Proxy.CLSID                 = "{17CCA71B-ECD7-11D0-B908-00A0C9223196}"
