@@ -33,10 +33,10 @@
     - [x] Commit implementation cleanly to Git history with git notes
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [d53fb8c]
 
-## Phase 4: Final Verification, Checkpoint & Track Completion
-- [ ] Task: Run full offline workspace verification in Docker
-    - [ ] Run all workspace tests: `cargo test --workspace --features tract --locked --offline`
-    - [ ] Ensure formatting `cargo fmt --all -- --check` and strict Clippy across all crates
-- [ ] Task: Update ledger and mark track complete
-    - [ ] Append Task 5 completion event to `.omo/start-work/ledger.jsonl`
-    - [ ] Mark track `[x]` in `conductor/tracks.md` and commit
+## Phase 4: Final Verification, Checkpoint & Track Completion [checkpoint: 3669a2a]
+- [x] Task: Run full offline workspace verification in Docker [3669a2a]
+    - [x] Run all workspace tests: `cargo test --workspace --features tract --locked --offline`
+    - [x] Ensure formatting `cargo fmt --all -- --check` and strict Clippy across all crates
+- [x] Task: Update ledger and mark track complete [3669a2a]
+    - [x] Append Task 5 completion event to `.omo/start-work/ledger.jsonl`
+    - [x] Mark track `[x]` in `conductor/tracks.md` and commit

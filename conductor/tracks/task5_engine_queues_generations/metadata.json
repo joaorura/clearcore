@@ -2,7 +2,7 @@
   "track_id": "task5_engine_queues_generations",
   "title": "Task 5: Realtime Noise Engine, Bounded Queues, Generations, and Fail-Closed Silence Policy",
   "type": "feature",
-  "status": "new",
+  "status": "complete",
   "created_at": "2026-09-30T16:13:00Z",
-  "updated_at": "2026-09-30T16:13:00Z"
+  "updated_at": "2026-09-30T19:35:00Z"
 }
