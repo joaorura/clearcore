@@ -16,7 +16,7 @@
     - [x] Generate `fixtures/corpus/source-lock.json` with immutable hashes and licensing metadata
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [0efca0e]
 
-## Phase 3: Audio Normalization & Corpus Manifest V2
+## Phase 3: Audio Normalization & Corpus Manifest V2 [checkpoint: 0135f0d]
 - [x] Task: Test frame serialization & validation (RED) [948705c]
     - [x] Write unit tests for 480-sample `f32` normalized frame JSON parser and digest verification
 - [x] Task: Audio processing and corpus case generation (GREEN) [0135f0d]
@@ -24,7 +24,7 @@
     - [x] Partition into 480-sample hops and emit JSON frame files in `fixtures/corpus/`
     - [x] Generate `fixtures/corpus/corpus-manifest.json` conforming to Schema V2
     - [x] Verify that `validate_corpus` passes completely
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [0135f0d]
 
 ## Phase 4: Golden Reference Generation & M1 Qualification
 - [ ] Task: Golden reference generation
