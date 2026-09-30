@@ -14,16 +14,16 @@
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [checkpoint: caa59dc]
 
 ## Phase 2: Protocol, Supervisor & Backoff Implementation (GREEN)
-- [ ] Task: Implement IPC Protocol and Transport Core
-    - [ ] Implement `crates/ipc/src/protocol.rs` (`realtime-noise.v1`, requests, responses, commands, error codes)
-    - [ ] Implement `crates/ipc/src/server.rs` (local stream server / client transport)
-    - [ ] Re-export in `crates/ipc/src/lib.rs`
-- [ ] Task: Implement Fault-Tolerant EngineSupervisor
-    - [ ] Implement `crates/supervisor/src/backoff.rs` (`BACKOFF_SECONDS: [1, 2, 4, 8, 16]`, `MAX_CRASHES_PER_15_MINUTES: 5`)
-    - [ ] Implement `crates/supervisor/src/supervisor.rs` (`EngineSupervisor`, `SupervisorStatus`, `TerminalSafeState`)
-    - [ ] Re-export in `crates/supervisor/src/lib.rs`
-- [ ] Task: Verify Phase 1 IPC and Supervisor tests pass (GREEN)
-    - [ ] Run `cargo test -p realtime-noise-ipc -p realtime-noise-supervisor --locked --offline` in Docker
+- [x] Task: Implement IPC Protocol and Transport Core
+    - [x] Implement `crates/ipc/src/protocol.rs` (`realtime-noise.v1`, requests, responses, commands, error codes)
+    - [x] Implement `crates/ipc/src/server.rs` (local stream server / client transport)
+    - [x] Re-export in `crates/ipc/src/lib.rs`
+- [x] Task: Implement Fault-Tolerant EngineSupervisor
+    - [x] Implement `crates/supervisor/src/backoff.rs` (`BACKOFF_SECONDS: [1, 2, 4, 8, 16]`, `MAX_CRASHES_PER_15_MINUTES: 5`)
+    - [x] Implement `crates/supervisor/src/supervisor.rs` (`EngineSupervisor`, `SupervisorStatus`, `TerminalSafeState`)
+    - [x] Re-export in `crates/supervisor/src/lib.rs`
+- [x] Task: Verify Phase 1 IPC and Supervisor tests pass (GREEN)
+    - [x] Run `cargo test -p realtime-noise-ipc -p realtime-noise-supervisor --locked --offline` in Docker
 - [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 3: Daemon Binary, Lifecycle Scripts & Integration Tests (GREEN & INTEGRATION)

@@ -4,6 +4,25 @@ use std::io::{self, BufRead, Write};
 use crate::protocol::{handle_request, IpcCommand, IpcRequest, IpcResponse, IpcStatus};
 use serde_json::Value;
 
+pub const DEFAULT_SOCKET_NAME: &str = "realtime-noise.sock";
+pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\realtime-noise";
+
+/// Platform-appropriate default endpoint location.
+#[must_use]
+pub fn default_endpoint_path() -> String {
+    #[cfg(windows)]
+    {
+        DEFAULT_PIPE_NAME.to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("XDG_RUNTIME_DIR").map_or_else(
+            |_| format!("/tmp/{DEFAULT_SOCKET_NAME}"),
+            |runtime_dir| format!("{runtime_dir}/{DEFAULT_SOCKET_NAME}"),
+        )
+    }
+}
+
 pub struct IpcServer;
 
 impl Default for IpcServer {
@@ -13,6 +32,7 @@ impl Default for IpcServer {
 }
 
 impl IpcServer {
+    #[must_use]
     pub const fn new() -> Self {
         Self
     }
@@ -56,5 +76,32 @@ impl IpcServer {
             line.clear();
         }
         Ok(())
+    }
+}
+
+pub struct IpcClient;
+
+impl IpcClient {
+    pub fn send_request<R: BufRead, W: Write>(
+        reader: &mut R,
+        writer: &mut W,
+        request: &IpcRequest,
+    ) -> io::Result<IpcResponse> {
+        let mut req_str = request
+            .to_json()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        req_str.push('\n');
+        writer.write_all(req_str.as_bytes())?;
+        writer.flush()?;
+
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Connection closed by server",
+            ));
+        }
+        IpcResponse::from_json(line.trim())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 }

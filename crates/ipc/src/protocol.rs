@@ -6,6 +6,7 @@ use serde_json::Value;
 pub const PROTOCOL_VERSION: &str = "realtime-noise.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum DenoiseMode {
     Active,
     Bypass,
@@ -13,6 +14,7 @@ pub enum DenoiseMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum IpcStatus {
     Ok,
     VersionMismatch,
@@ -22,6 +24,7 @@ pub enum IpcStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum IpcCommand {
     GetStatus,
     SetMode(DenoiseMode),
@@ -36,7 +39,7 @@ pub struct IpcErrorDetail {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcRequest {
     pub version: String,
     pub request_id: String,
@@ -45,10 +48,15 @@ pub struct IpcRequest {
 }
 
 impl IpcRequest {
+    #[must_use]
     pub fn new(command: IpcCommand, payload: Value) -> Self {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
         Self {
             version: PROTOCOL_VERSION.to_string(),
-            request_id: "req-init".to_string(),
+            request_id: format!("req-{ts}"),
             command,
             payload,
         }
@@ -63,7 +71,7 @@ impl IpcRequest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcResponse {
     pub version: String,
     pub request_id: String,
@@ -73,6 +81,7 @@ pub struct IpcResponse {
 }
 
 impl IpcResponse {
+    #[must_use]
     pub fn success(request_id: impl Into<String>, payload: Value) -> Self {
         Self {
             version: PROTOCOL_VERSION.to_string(),
@@ -83,6 +92,7 @@ impl IpcResponse {
         }
     }
 
+    #[must_use]
     pub fn error(
         request_id: impl Into<String>,
         status: IpcStatus,
@@ -101,11 +111,32 @@ impl IpcResponse {
         }
     }
 
+    #[must_use]
     pub fn version_mismatch(request_id: impl Into<String>, message: impl Into<String>) -> Self {
         Self::error(
             request_id,
             IpcStatus::VersionMismatch,
             "VERSION_MISMATCH",
+            message,
+        )
+    }
+
+    #[must_use]
+    pub fn invalid_command(request_id: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::error(
+            request_id,
+            IpcStatus::InvalidCommand,
+            "INVALID_COMMAND",
+            message,
+        )
+    }
+
+    #[must_use]
+    pub fn internal_error(request_id: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::error(
+            request_id,
+            IpcStatus::InternalError,
+            "INTERNAL_ERROR",
             message,
         )
     }
@@ -119,12 +150,19 @@ impl IpcResponse {
     }
 }
 
-/// Dispatches an IPC request to a handler.
-/// NOTE: In Phase 1 RED, version validation is intentionally omitted so the test fails.
+/// Dispatches an IPC request to a handler, enforcing strict protocol version checks.
 pub fn handle_request<F>(req: &IpcRequest, mut handler: F) -> IpcResponse
 where
     F: FnMut(&IpcCommand, &Value) -> IpcResponse,
 {
-    // RED: version check is NOT performed yet
+    if req.version != PROTOCOL_VERSION {
+        return IpcResponse::version_mismatch(
+            &req.request_id,
+            format!(
+                "Incompatible protocol version '{}', expected '{}'",
+                req.version, PROTOCOL_VERSION
+            ),
+        );
+    }
     handler(&req.command, &req.payload)
 }
