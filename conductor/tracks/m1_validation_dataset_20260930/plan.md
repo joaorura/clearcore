@@ -17,13 +17,13 @@
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [0efca0e]
 
 ## Phase 3: Audio Normalization & Corpus Manifest V2
-- [ ] Task: Test frame serialization & validation (RED)
-    - [ ] Write unit tests for 480-sample `f32` normalized frame JSON parser and digest verification
-- [ ] Task: Audio processing and corpus case generation (GREEN)
-    - [ ] Normalize sources via FFmpeg/soxr to 48 kHz mono `f32`
-    - [ ] Partition into 480-sample hops and emit JSON frame files in `fixtures/corpus/`
-    - [ ] Generate `fixtures/corpus/corpus-manifest.json` conforming to Schema V2
-    - [ ] Verify that `validate_corpus` passes completely
+- [x] Task: Test frame serialization & validation (RED) [948705c]
+    - [x] Write unit tests for 480-sample `f32` normalized frame JSON parser and digest verification
+- [x] Task: Audio processing and corpus case generation (GREEN) [0135f0d]
+    - [x] Normalize sources via FFmpeg/soxr to 48 kHz mono `f32`
+    - [x] Partition into 480-sample hops and emit JSON frame files in `fixtures/corpus/`
+    - [x] Generate `fixtures/corpus/corpus-manifest.json` conforming to Schema V2
+    - [x] Verify that `validate_corpus` passes completely
 - [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 4: Golden Reference Generation & M1 Qualification
