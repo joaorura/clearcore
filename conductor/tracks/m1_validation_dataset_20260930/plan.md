@@ -1,11 +1,11 @@
 # Implementation Plan: M1 Filter Validation Dataset & Task 4 Golden Harness Resolution
 
-## Phase 1: Schema V1/V2 Manifest Consolidation & Verification
+## Phase 1: Schema V1/V2 Manifest Consolidation & Verification [checkpoint: 87bfd1b]
 - [x] Task: Stage and verify extracted `golden_manifest` module [87bfd1b]
     - [x] Run `cargo test -p realtime-noise-tools --locked --offline` in Docker container
     - [x] Verify Clippy `-D warnings` and formatting on all tools crate targets
     - [x] Commit schema unblock changes cleanly to Git history
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [87bfd1b]
 
 ## Phase 2: Speech & Noise Source Lock Binding
 - [ ] Task: Test-first verification of source-lock parser (RED)
