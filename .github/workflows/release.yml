@@ -1,0 +1,25 @@
+name: Production Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Build & Release Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+      - name: Build SBOM
+        run: |
+          scripts/build-sbom.sh --generate
+          scripts/build-sbom.sh --check
+      - name: Scan Artifacts
+        run: scripts/scan-artifacts.sh --artifact-dir dist
+      - name: GA Release Gate
+        run: scripts/qualify-ga.sh --evidence docs/evidence/ga-matrix.md

@@ -10,6 +10,9 @@ members = [
     "crates/ipc",
     "crates/supervisor",
     "crates/service",
+    "crates/diagnostics",
+    "crates/accelerators",
+    "crates/app-tauri/src-tauri",
     "platform/windows/host",
     "platform/linux/host",
 ]

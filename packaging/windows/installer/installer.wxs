@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product Id="*" 
+             Name="Clearcore Realtime Noise" 
+             Language="1033" 
+             Version="0.1.0.0" 
+             Manufacturer="Clearcore Inc." 
+             UpgradeCode="A28F1B82-5D1C-4B9E-8625-D2B96AC40DF7">
+        <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+        <MajorUpgrade DowngradeErrorMessage="A newer version of Clearcore Realtime Noise is already installed." />
+        <MediaTemplate EmbedCab="yes" />
+
+        <Feature Id="ProductFeature" Title="Clearcore Realtime Noise" Level="1">
+            <ComponentGroupRef Id="ProductComponents" />
+            <ComponentGroupRef Id="DriverComponents" />
+        </Feature>
+    </Product>
+
+    <Fragment>
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Directory Id="ProgramFiles64Folder">
+                <Directory Id="ClearcoreFolder" Name="Clearcore">
+                    <Directory Id="INSTALLFOLDER" Name="RealtimeNoise" />
+                </Directory>
+            </Directory>
+            <Directory Id="DriversFolder" Name="Drivers" />
+        </Directory>
+    </Fragment>
+
+    <Fragment>
+        <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+            <Component Id="ServiceBinary" Guid="F39D54C2-98AA-4DF6-9B38-8B775C9FBE41" Win64="yes">
+                <File Id="ServiceExe" Source="$(var.BinDir)\realtime-noise-service.exe" KeyPath="yes" />
+            </Component>
+            <Component Id="TrayApp" Guid="6A4BE589-FE64-4CE1-A6B4-783E4C6D7091" Win64="yes">
+                <File Id="AppExe" Source="$(var.BinDir)\realtime-noise-app-tauri.exe" KeyPath="yes" />
+            </Component>
+        </ComponentGroup>
+
+        <ComponentGroup Id="DriverComponents" Directory="INSTALLFOLDER">
+            <Component Id="WaveRtDriver" Guid="5B33F7D1-9874-4C2E-892A-4C29DF3E7B82" Win64="yes">
+                <File Id="DriverInf" Source="$(var.DriverDir)\RealtimeNoise.inf" KeyPath="yes" />
+                <File Id="DriverSys" Source="$(var.DriverDir)\RealtimeNoise.sys" />
+            </Component>
+        </ComponentGroup>
+    </Fragment>
+</Wix>

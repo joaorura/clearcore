@@ -1,0 +1,10 @@
+Package: realtime-noise
+Version: 0.1.0
+Section: sound
+Priority: optional
+Architecture: amd64
+Depends: pipewire (>= 0.3.0), wireplumber (>= 0.4.0)
+Maintainer: Clearcore Packaging Team <packaging@clearcore.com>
+Description: High-performance low-latency realtime noise suppression platform
+ Clearcore Realtime Noise provides continuous noise suppression with < 10ms
+ processing latency via PipeWire native integration and tract inference engine.

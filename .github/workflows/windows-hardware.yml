@@ -1,0 +1,18 @@
+name: Windows Hardware Staging Qualification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  windows-hlk-verifier:
+    runs-on: [self-hosted, windows, hlk-rack]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Driver Verifier
+        shell: powershell
+        run: platform/windows/tests/driver_verifier.ps1
+      - name: Run WaveRT Spike Tests
+        shell: powershell
+        run: platform/windows/tests/endpoint-spike.ps1 -Phase Integration

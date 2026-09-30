@@ -13,6 +13,7 @@ tract = ["realtime-noise-model/tract"]
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-model = { path = "../model", default-features = false, features = ["tract"] }
+realtime-noise-accelerators = { path = "../accelerators" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
 sha2 = { version = "=0.10.9", default-features = false, features = ["std"] }

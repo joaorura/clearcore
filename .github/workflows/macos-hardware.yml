@@ -1,0 +1,14 @@
+name: macOS Hardware Staging Qualification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  macos-hal-coreaudio:
+    runs-on: [self-hosted, macOS, apple-silicon]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & Run HAL Endpoint Spike
+        run: platform/macos/tests/endpoint-spike.sh integration

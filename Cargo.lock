@@ -871,8 +871,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "realtime-noise-accelerators"
+version = "0.1.0"
+dependencies = [
+ "realtime-noise-contracts",
+ "realtime-noise-model",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "realtime-noise-app-tauri"
+version = "0.1.0"
+dependencies = [
+ "realtime-noise-ipc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "realtime-noise-contracts"
 version = "0.1.0"
+
+[[package]]
+name = "realtime-noise-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "realtime-noise-contracts",
+ "realtime-noise-ipc",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "realtime-noise-engine"
@@ -960,6 +989,7 @@ dependencies = [
 name = "realtime-noise-tools"
 version = "0.1.0"
 dependencies = [
+ "realtime-noise-accelerators",
  "realtime-noise-contracts",
  "realtime-noise-model",
  "serde",

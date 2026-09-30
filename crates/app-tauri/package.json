@@ -1,0 +1,29 @@
+{
+  "name": "realtime-noise-app",
+  "version": "0.1.0",
+  "packageManager": "npm@10.9.2",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "test:smoke": "npm run build && npm run prepare:sidecar && npm run tauri build -- --no-bundle",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.0.0",
+    "@tauri-apps/plugin-shell": "2.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.0.0",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "5.6.3",
+    "vite": "5.4.10",
+    "vitest": "2.1.4"
+  }
+}

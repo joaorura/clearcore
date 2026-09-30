@@ -22,6 +22,11 @@
   *Link: [./tracks/task12_macos_production_adapter/index.md](./tracks/task12_macos_production_adapter/index.md)*
 - [x] **Track: Task 13 Production Linux PipeWire Host Adapter**
   *Link: [./tracks/task13_linux_production_adapter/index.md](./tracks/task13_linux_production_adapter/index.md)*
-
-
-
+- [x] **Track: Task 14 UI Tauri, Tray & Consented Diagnostics**
+  *Link: [./tracks/task14_ui_tauri_diagnostics/index.md](./tracks/task14_ui_tauri_diagnostics/index.md)*
+- [x] **Track: Task 15 Accelerator Plugins & AUTO Policy**
+  *Link: [./tracks/task15_accelerator_plugins/index.md](./tracks/task15_accelerator_plugins/index.md)*
+- [x] **Track: Task 16 Packaging, Signing, Updates & SBOM**
+  *Link: [./tracks/task16_packaging_signing/index.md](./tracks/task16_packaging_signing/index.md)*
+- [x] **Track: Task 17 GA Qualification Matrix**
+  *Link: [./tracks/task17_ga_qualification/index.md](./tracks/task17_ga_qualification/index.md)*

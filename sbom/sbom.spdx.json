@@ -1,0 +1,1593 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "Project Hippocamp - Realtime Noise Suppression",
+  "documentNamespace": "https://clearcore.internal/spdx/hippocamp-0.1.0",
+  "creationInfo": {
+    "creators": [
+      "Organization: Clearcore",
+      "Tool: Hippocamp-SBOM-Builder-1.0"
+    ],
+    "created": "2026-09-30T22:50:38Z"
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-Hippocamp",
+      "name": "hippocamp",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright (c) 2026 Clearcore",
+      "description": "High-performance low-latency realtime noise suppression platform"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-adler2-2.0.1",
+      "name": "adler2",
+      "versionInfo": "2.0.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-ahash-0.7.8",
+      "name": "ahash",
+      "versionInfo": "0.7.8",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-aho-corasick-1.1.5",
+      "name": "aho-corasick",
+      "versionInfo": "1.1.5",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-anyhow-1.0.104",
+      "name": "anyhow",
+      "versionInfo": "1.0.104",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-anymap2-0.13.0",
+      "name": "anymap2",
+      "versionInfo": "0.13.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-autocfg-1.5.1",
+      "name": "autocfg",
+      "versionInfo": "1.5.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-base64-0.22.1",
+      "name": "base64",
+      "versionInfo": "0.22.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-base64ct-1.8.3",
+      "name": "base64ct",
+      "versionInfo": "1.8.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-bit-set-0.5.3",
+      "name": "bit-set",
+      "versionInfo": "0.5.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-bit-vec-0.6.3",
+      "name": "bit-vec",
+      "versionInfo": "0.6.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-bitflags-2.13.2",
+      "name": "bitflags",
+      "versionInfo": "2.13.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-block-buffer-0.10.4",
+      "name": "block-buffer",
+      "versionInfo": "0.10.4",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-byteorder-1.5.0",
+      "name": "byteorder",
+      "versionInfo": "1.5.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-bytes-1.12.1",
+      "name": "bytes",
+      "versionInfo": "1.12.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-cc-1.5.1",
+      "name": "cc",
+      "versionInfo": "1.5.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-cfg-if-1.0.5",
+      "name": "cfg-if",
+      "versionInfo": "1.0.5",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-const-oid-0.9.6",
+      "name": "const-oid",
+      "versionInfo": "0.9.6",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-const-random-0.1.18",
+      "name": "const-random",
+      "versionInfo": "0.1.18",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-const-random-macro-0.1.16",
+      "name": "const-random-macro",
+      "versionInfo": "0.1.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-cpufeatures-0.2.17",
+      "name": "cpufeatures",
+      "versionInfo": "0.2.17",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-crc32fast-1.5.2",
+      "name": "crc32fast",
+      "versionInfo": "1.5.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-crunchy-0.2.4",
+      "name": "crunchy",
+      "versionInfo": "0.2.4",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-crypto-common-0.1.7",
+      "name": "crypto-common",
+      "versionInfo": "0.1.7",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-curve25519-dalek-4.1.3",
+      "name": "curve25519-dalek",
+      "versionInfo": "4.1.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-curve25519-dalek-derive-0.1.1",
+      "name": "curve25519-dalek-derive",
+      "versionInfo": "0.1.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-deep_filter-0.5.6",
+      "name": "deep_filter",
+      "versionInfo": "0.5.6",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-der-0.7.10",
+      "name": "der",
+      "versionInfo": "0.7.10",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-deranged-0.5.8",
+      "name": "deranged",
+      "versionInfo": "0.5.8",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-derive-new-0.5.9",
+      "name": "derive-new",
+      "versionInfo": "0.5.9",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-digest-0.10.7",
+      "name": "digest",
+      "versionInfo": "0.10.7",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-dlv-list-0.5.2",
+      "name": "dlv-list",
+      "versionInfo": "0.5.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-downcast-rs-1.2.1",
+      "name": "downcast-rs",
+      "versionInfo": "1.2.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-dyn-clone-1.0.20",
+      "name": "dyn-clone",
+      "versionInfo": "1.0.20",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-ed25519-2.2.3",
+      "name": "ed25519",
+      "versionInfo": "2.2.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-ed25519-dalek-2.2.0",
+      "name": "ed25519-dalek",
+      "versionInfo": "2.2.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-educe-0.4.23",
+      "name": "educe",
+      "versionInfo": "0.4.23",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-either-1.18.0",
+      "name": "either",
+      "versionInfo": "1.18.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-enum-ordinalize-3.1.15",
+      "name": "enum-ordinalize",
+      "versionInfo": "3.1.15",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-errno-0.3.14",
+      "name": "errno",
+      "versionInfo": "0.3.14",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-fastrand-2.5.0",
+      "name": "fastrand",
+      "versionInfo": "2.5.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-fiat-crypto-0.2.9",
+      "name": "fiat-crypto",
+      "versionInfo": "0.2.9",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-filetime-0.2.29",
+      "name": "filetime",
+      "versionInfo": "0.2.29",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-find-msvc-tools-0.1.14",
+      "name": "find-msvc-tools",
+      "versionInfo": "0.1.14",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-flate2-1.1.10",
+      "name": "flate2",
+      "versionInfo": "1.1.10",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-generic-array-0.14.7",
+      "name": "generic-array",
+      "versionInfo": "0.14.7",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-getrandom-0.2.17",
+      "name": "getrandom",
+      "versionInfo": "0.2.17",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-half-2.7.1",
+      "name": "half",
+      "versionInfo": "2.7.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-hashbrown-0.11.2",
+      "name": "hashbrown",
+      "versionInfo": "0.11.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-hashbrown-0.13.2",
+      "name": "hashbrown",
+      "versionInfo": "0.13.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-itertools-0.10.5",
+      "name": "itertools",
+      "versionInfo": "0.10.5",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-itertools-0.14.0",
+      "name": "itertools",
+      "versionInfo": "0.14.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-itoa-1.0.18",
+      "name": "itoa",
+      "versionInfo": "1.0.18",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-kstring-2.0.2",
+      "name": "kstring",
+      "versionInfo": "2.0.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-lazy_static-1.5.0",
+      "name": "lazy_static",
+      "versionInfo": "1.5.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-libc-0.2.189",
+      "name": "libc",
+      "versionInfo": "0.2.189",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-libm-0.2.16",
+      "name": "libm",
+      "versionInfo": "0.2.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-linux-raw-sys-0.12.1",
+      "name": "linux-raw-sys",
+      "versionInfo": "0.12.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-liquid-0.26.11",
+      "name": "liquid",
+      "versionInfo": "0.26.11",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-liquid-core-0.26.11",
+      "name": "liquid-core",
+      "versionInfo": "0.26.11",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-liquid-derive-0.26.10",
+      "name": "liquid-derive",
+      "versionInfo": "0.26.10",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-liquid-lib-0.26.11",
+      "name": "liquid-lib",
+      "versionInfo": "0.26.11",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-log-0.4.34",
+      "name": "log",
+      "versionInfo": "0.4.34",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-maplit-1.0.2",
+      "name": "maplit",
+      "versionInfo": "1.0.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-matrixmultiply-0.3.11",
+      "name": "matrixmultiply",
+      "versionInfo": "0.3.11",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-memchr-2.8.3",
+      "name": "memchr",
+      "versionInfo": "2.8.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-memmap2-0.5.10",
+      "name": "memmap2",
+      "versionInfo": "0.5.10",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-minimal-lexical-0.2.1",
+      "name": "minimal-lexical",
+      "versionInfo": "0.2.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-miniz_oxide-0.9.1",
+      "name": "miniz_oxide",
+      "versionInfo": "0.9.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-ndarray-0.15.6",
+      "name": "ndarray",
+      "versionInfo": "0.15.6",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-nom-7.1.3",
+      "name": "nom",
+      "versionInfo": "7.1.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-num-bigint-0.4.8",
+      "name": "num-bigint",
+      "versionInfo": "0.4.8",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-num-complex-0.4.6",
+      "name": "num-complex",
+      "versionInfo": "0.4.6",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-num-conv-0.2.2",
+      "name": "num-conv",
+      "versionInfo": "0.2.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-num-integer-0.1.47",
+      "name": "num-integer",
+      "versionInfo": "0.1.47",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-num-traits-0.2.19",
+      "name": "num-traits",
+      "versionInfo": "0.2.19",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-once_cell-1.21.4",
+      "name": "once_cell",
+      "versionInfo": "1.21.4",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-ordered-multimap-0.6.0",
+      "name": "ordered-multimap",
+      "versionInfo": "0.6.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-paste-1.0.15",
+      "name": "paste",
+      "versionInfo": "1.0.15",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-percent-encoding-2.3.2",
+      "name": "percent-encoding",
+      "versionInfo": "2.3.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-pest-2.9.2",
+      "name": "pest",
+      "versionInfo": "2.9.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-pest_derive-2.9.2",
+      "name": "pest_derive",
+      "versionInfo": "2.9.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-pest_generator-2.9.2",
+      "name": "pest_generator",
+      "versionInfo": "2.9.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-pest_meta-2.9.2",
+      "name": "pest_meta",
+      "versionInfo": "2.9.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-pkcs8-0.10.2",
+      "name": "pkcs8",
+      "versionInfo": "0.10.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-powerfmt-0.2.0",
+      "name": "powerfmt",
+      "versionInfo": "0.2.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-ppv-lite86-0.2.21",
+      "name": "ppv-lite86",
+      "versionInfo": "0.2.21",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-primal-check-0.3.4",
+      "name": "primal-check",
+      "versionInfo": "0.3.4",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-proc-macro2-1.0.107",
+      "name": "proc-macro2",
+      "versionInfo": "1.0.107",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-prost-0.11.9",
+      "name": "prost",
+      "versionInfo": "0.11.9",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-prost-derive-0.11.9",
+      "name": "prost-derive",
+      "versionInfo": "0.11.9",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-quote-1.0.47",
+      "name": "quote",
+      "versionInfo": "1.0.47",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rand-0.8.8",
+      "name": "rand",
+      "versionInfo": "0.8.8",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rand_chacha-0.3.1",
+      "name": "rand_chacha",
+      "versionInfo": "0.3.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rand_core-0.6.4",
+      "name": "rand_core",
+      "versionInfo": "0.6.4",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rand_distr-0.4.3",
+      "name": "rand_distr",
+      "versionInfo": "0.4.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rawpointer-0.2.1",
+      "name": "rawpointer",
+      "versionInfo": "0.2.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realfft-3.5.0",
+      "name": "realfft",
+      "versionInfo": "3.5.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-contracts-0.1.0",
+      "name": "realtime-noise-contracts",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-engine-0.1.0",
+      "name": "realtime-noise-engine",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-format-adapter-0.1.0",
+      "name": "realtime-noise-format-adapter",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-ipc-0.1.0",
+      "name": "realtime-noise-ipc",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-linux-host-0.1.0",
+      "name": "realtime-noise-linux-host",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-model-0.1.0",
+      "name": "realtime-noise-model",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-qualification-0.1.0",
+      "name": "realtime-noise-qualification",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-service-0.1.0",
+      "name": "realtime-noise-service",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-supervisor-0.1.0",
+      "name": "realtime-noise-supervisor",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-tools-0.1.0",
+      "name": "realtime-noise-tools",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-realtime-noise-windows-host-0.1.0",
+      "name": "realtime-noise-windows-host",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-regex-1.13.1",
+      "name": "regex",
+      "versionInfo": "1.13.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-regex-automata-0.4.18",
+      "name": "regex-automata",
+      "versionInfo": "0.4.18",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-regex-syntax-0.8.11",
+      "name": "regex-syntax",
+      "versionInfo": "0.8.11",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rubato-0.14.1",
+      "name": "rubato",
+      "versionInfo": "0.14.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rust-ini-0.19.0",
+      "name": "rust-ini",
+      "versionInfo": "0.19.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rustc_version-0.4.1",
+      "name": "rustc_version",
+      "versionInfo": "0.4.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rustfft-6.4.1",
+      "name": "rustfft",
+      "versionInfo": "6.4.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-rustix-1.1.5",
+      "name": "rustix",
+      "versionInfo": "1.1.5",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-ryu-1.0.23",
+      "name": "ryu",
+      "versionInfo": "1.0.23",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-same-file-1.0.6",
+      "name": "same-file",
+      "versionInfo": "1.0.6",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-scan_fmt-0.2.6",
+      "name": "scan_fmt",
+      "versionInfo": "0.2.6",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-semver-1.0.28",
+      "name": "semver",
+      "versionInfo": "1.0.28",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-serde-1.0.229",
+      "name": "serde",
+      "versionInfo": "1.0.229",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-serde_core-1.0.229",
+      "name": "serde_core",
+      "versionInfo": "1.0.229",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-serde_derive-1.0.229",
+      "name": "serde_derive",
+      "versionInfo": "1.0.229",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-serde_json-1.0.145",
+      "name": "serde_json",
+      "versionInfo": "1.0.145",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-sha2-0.10.9",
+      "name": "sha2",
+      "versionInfo": "0.10.9",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-shlex-2.0.1",
+      "name": "shlex",
+      "versionInfo": "2.0.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-signature-2.2.0",
+      "name": "signature",
+      "versionInfo": "2.2.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-simd-adler32-0.3.10",
+      "name": "simd-adler32",
+      "versionInfo": "0.3.10",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-smallvec-1.16.2",
+      "name": "smallvec",
+      "versionInfo": "1.16.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-spki-0.7.3",
+      "name": "spki",
+      "versionInfo": "0.7.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-static_assertions-1.1.0",
+      "name": "static_assertions",
+      "versionInfo": "1.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-stats_alloc-0.1.10",
+      "name": "stats_alloc",
+      "versionInfo": "0.1.10",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-strength_reduce-0.2.4",
+      "name": "strength_reduce",
+      "versionInfo": "0.2.4",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-string-interner-0.14.0",
+      "name": "string-interner",
+      "versionInfo": "0.14.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-subtle-2.6.1",
+      "name": "subtle",
+      "versionInfo": "2.6.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-syn-1.0.109",
+      "name": "syn",
+      "versionInfo": "1.0.109",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-syn-2.0.119",
+      "name": "syn",
+      "versionInfo": "2.0.119",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-syn-3.0.6",
+      "name": "syn",
+      "versionInfo": "3.0.6",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tar-0.4.46",
+      "name": "tar",
+      "versionInfo": "0.4.46",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tempfile-3.23.0",
+      "name": "tempfile",
+      "versionInfo": "3.23.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-thiserror-1.0.69",
+      "name": "thiserror",
+      "versionInfo": "1.0.69",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-thiserror-impl-1.0.69",
+      "name": "thiserror-impl",
+      "versionInfo": "1.0.69",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-time-0.3.55",
+      "name": "time",
+      "versionInfo": "0.3.55",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-time-core-0.1.9",
+      "name": "time-core",
+      "versionInfo": "0.1.9",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-time-macros-0.2.32",
+      "name": "time-macros",
+      "versionInfo": "0.2.32",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tiny-keccak-2.0.2",
+      "name": "tiny-keccak",
+      "versionInfo": "2.0.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tinyvec-1.13.3",
+      "name": "tinyvec",
+      "versionInfo": "1.13.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-core-0.19.16",
+      "name": "tract-core",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-data-0.19.16",
+      "name": "tract-data",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-hir-0.19.16",
+      "name": "tract-hir",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-linalg-0.19.16",
+      "name": "tract-linalg",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-nnef-0.19.16",
+      "name": "tract-nnef",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-onnx-0.19.16",
+      "name": "tract-onnx",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-onnx-opl-0.19.16",
+      "name": "tract-onnx-opl",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-pulse-0.19.16",
+      "name": "tract-pulse",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-tract-pulse-opl-0.19.16",
+      "name": "tract-pulse-opl",
+      "versionInfo": "0.19.16",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-transpose-0.2.3",
+      "name": "transpose",
+      "versionInfo": "0.2.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-typenum-1.20.1",
+      "name": "typenum",
+      "versionInfo": "1.20.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-ucd-trie-0.1.7",
+      "name": "ucd-trie",
+      "versionInfo": "0.1.7",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-unicode-ident-1.0.26",
+      "name": "unicode-ident",
+      "versionInfo": "1.0.26",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-unicode-normalization-0.1.25",
+      "name": "unicode-normalization",
+      "versionInfo": "0.1.25",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-unicode-segmentation-1.13.3",
+      "name": "unicode-segmentation",
+      "versionInfo": "1.13.3",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-version_check-0.9.5",
+      "name": "version_check",
+      "versionInfo": "0.9.5",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-walkdir-2.5.0",
+      "name": "walkdir",
+      "versionInfo": "2.5.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-wasi-0.11.1+wasi-snapshot-preview1",
+      "name": "wasi",
+      "versionInfo": "0.11.1+wasi-snapshot-preview1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-winapi-util-0.1.11",
+      "name": "winapi-util",
+      "versionInfo": "0.1.11",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-windows-link-0.2.1",
+      "name": "windows-link",
+      "versionInfo": "0.2.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-windows-sys-0.61.2",
+      "name": "windows-sys",
+      "versionInfo": "0.61.2",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-workspace-policy-0.1.0",
+      "name": "workspace-policy",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-xattr-1.6.1",
+      "name": "xattr",
+      "versionInfo": "1.6.1",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-zerocopy-0.8.59",
+      "name": "zerocopy",
+      "versionInfo": "0.8.59",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-zerocopy-derive-0.8.59",
+      "name": "zerocopy-derive",
+      "versionInfo": "0.8.59",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-zeroize-1.9.0",
+      "name": "zeroize",
+      "versionInfo": "1.9.0",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+    ,{
+      "SPDXID": "SPDXRef-Package-zlib-rs-0.6.8",
+      "name": "zlib-rs",
+      "versionInfo": "0.6.8",
+      "downloadLocation": "NONE",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "NOASSERTION"
+    }
+  ]
+}

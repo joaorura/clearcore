@@ -1,0 +1,15 @@
+[package]
+name = "realtime-noise-app-tauri"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+realtime-noise-ipc = { path = "../../ipc" }
+serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

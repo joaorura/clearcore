@@ -1,0 +1,16 @@
+name: Linux Hardware Staging Qualification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  linux-pipewire-wireplumber:
+    runs-on: [self-hosted, linux, fedora-or-ubuntu]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Endpoint Spike Check
+        run: platform/linux/tests/endpoint-spike.sh green
+      - name: Run Rebind & Contention Check
+        run: platform/linux/tests/rebind-check.sh
