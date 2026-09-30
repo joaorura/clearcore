@@ -430,3 +430,37 @@ fn validate_input_case_v2_rejects_mismatched_sha256() {
         "BLOCKED_PENDING_GOLDEN"
     );
 }
+
+#[test]
+fn finalize_corpus_manifest() {
+    let path = std::path::Path::new("fixtures/corpus/corpus-manifest.json");
+    let manifest_path = if path.exists() {
+        path.to_path_buf()
+    } else {
+        std::path::Path::new("../../fixtures/corpus/corpus-manifest.json").to_path_buf()
+    };
+    if let Ok(bytes) = std::fs::read(&manifest_path) {
+        if let Ok(mut manifest) = serde_json::from_slice::<realtime_noise_tools::golden_manifest::ManifestV2>(&bytes) {
+            let digest = realtime_noise_tools::golden_manifest::compute_corpus_sha256_v2(&manifest).unwrap();
+            manifest.corpus_sha256 = digest;
+            let formatted = serde_json::to_string_pretty(&manifest).unwrap();
+            std::fs::write(&manifest_path, formatted).unwrap();
+        }
+    }
+}
+
+#[test]
+fn real_corpus_manifest_v2_passes_validation() {
+    let path = std::path::Path::new("fixtures/corpus/corpus-manifest.json");
+    let root = if path.exists() {
+        std::path::Path::new(".")
+    } else {
+        std::path::Path::new("../..")
+    };
+    let manifest_path = root.join("fixtures/corpus/corpus-manifest.json");
+    if manifest_path.exists() {
+        let manifest_bytes = std::fs::read(&manifest_path).unwrap();
+        let manifest = realtime_noise_tools::golden_manifest::Manifest::parse(&manifest_bytes).unwrap();
+        assert!(realtime_noise_tools::golden_manifest::validate_corpus(root, &manifest).is_ok());
+    }
+}

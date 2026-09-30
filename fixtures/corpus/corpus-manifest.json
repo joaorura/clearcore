@@ -1,0 +1,145 @@
+{
+  "schema_version": 2,
+  "status": "APPROVED",
+  "corpus_sha256": "67f6cad676714dce29d7de45d1ae76ae7c50ec17d3fbaa026495886418b32ce6",
+  "input_normalization": "f32-unit-range",
+  "quality_metric": "PESQ",
+  "quality_metric_version": "1.0",
+  "quality_threshold": 2.5,
+  "quality_observed_value": 3.0,
+  "tolerance": {
+    "absolute": 0.0001,
+    "relative": 0.0001
+  },
+  "source_lock_sha256": "9a19cf2a9d7919153a0295ae9490100261181e7d01df91a8c8e4d35458c88066",
+  "sources": [
+    {
+      "source_id": "edacc-c06",
+      "origin": "https://datashare.ed.ac.uk/bitstream/handle/10283/8983/edacc_v1.0.tar.gz",
+      "revision": "v1.0",
+      "source_sha256": "e173f720a2bd36da6db10fe70730f4450334ec613b9a895a6d4e50e9c34374bc",
+      "license": "CC-BY-SA-4.0",
+      "redistribution_terms": "Permitted under CC BY-SA 4.0 provided same license and attribution",
+      "processing_authorization": "Approved for acoustic noise qualification",
+      "attribution": "Sanabria et al. (University of Edinburgh)"
+    },
+    {
+      "source_id": "homula-rir",
+      "origin": "https://zenodo.org/api/records/15053008/files/HOMULA-RIR.zip/content",
+      "revision": "10.5281/zenodo.15053008",
+      "source_sha256": "180bb5b75239b0819286620843198eaa1a92f79c709f62629c4e80cb60fcc763",
+      "license": "CC-BY-4.0",
+      "redistribution_terms": "Permitted under CC-BY-4.0 with attribution",
+      "processing_authorization": "Approved for acoustic noise qualification",
+      "attribution": "Zenodo Record 15053008 (HOMULA consortium)"
+    },
+    {
+      "source_id": "chopin-waltz",
+      "origin": "https://upload.wikimedia.org/wikipedia/commons/1/17/Chopin-waltz-op-64-no-2-in-c-sharp-minor.oga",
+      "revision": "commons-1943806",
+      "source_sha256": "7e9ec2e01058375f338efa0e952a09e13eac1fd6a310baca78035292b30c3825",
+      "license": "CC0-1.0",
+      "redistribution_terms": "Public Domain dedication under Creative Commons Zero 1.0",
+      "processing_authorization": "Approved for acoustic noise qualification",
+      "attribution": "Frédéric Chopin; Musopen via Wikimedia Commons"
+    },
+    {
+      "source_id": "highway",
+      "origin": "https://upload.wikimedia.org/wikipedia/commons/5/5c/Highway_from_bridge_center.ogg",
+      "revision": "commons-1589146",
+      "source_sha256": "ea297ed2f608b54104c1b49e073929f24a8e63ca8e3428ef62b42b1808f79695",
+      "license": "Public Domain",
+      "redistribution_terms": "Public Domain",
+      "processing_authorization": "Approved for acoustic noise qualification",
+      "attribution": "stephan via Wikimedia Commons"
+    },
+    {
+      "source_id": "keyboard",
+      "origin": "https://upload.wikimedia.org/wikipedia/commons/9/9a/Keyboard_noise.ogg",
+      "revision": "commons-2470725",
+      "source_sha256": "6ea35619328adda2e0b93bdbdb2a0d04a81354c886fcff4aa9fe6dfdc039d86a",
+      "license": "Public Domain",
+      "redistribution_terms": "Public Domain",
+      "processing_authorization": "Approved for acoustic noise qualification",
+      "attribution": "Yuyudevil via Wikimedia Commons"
+    },
+    {
+      "source_id": "att-copper-fan",
+      "origin": "https://upload.wikimedia.org/wikipedia/commons/4/42/AT%26T_copper_fan_small_box.ogg",
+      "revision": "commons-2680456",
+      "source_sha256": "58110cf52a407132d732cdb48d6cc99352c2d9128c5d39496b17dc088331020d",
+      "license": "CC0-1.0",
+      "redistribution_terms": "Public Domain dedication under Creative Commons Zero 1.0",
+      "processing_authorization": "Approved for acoustic noise qualification",
+      "attribution": "Ranch9613 via Wikimedia Commons"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "case-001-speech",
+      "frames_path": "cases/case-001-speech.json",
+      "input_sha256": "fc9fd17f3e264e88d02cb050720f421916d74e543964e71f959010d7528dc5d2",
+      "source_id": "edacc-c06",
+      "transcription_applicability": "speech",
+      "snr_noise_class": "clean",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "frame_count": 50
+    },
+    {
+      "case_id": "case-002-fan",
+      "frames_path": "cases/case-002-fan.json",
+      "input_sha256": "311685c48222aeb9e93750d523dcb18d468597bf245e118f7394caa6f08d202f",
+      "source_id": "att-copper-fan",
+      "transcription_applicability": "none",
+      "snr_noise_class": "fan",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "frame_count": 50
+    },
+    {
+      "case_id": "case-003-keyboard",
+      "frames_path": "cases/case-003-keyboard.json",
+      "input_sha256": "7d592a93ae550fbd2ad9a67db65a926b43a48281925ef69a22f00822d7dd99fd",
+      "source_id": "keyboard",
+      "transcription_applicability": "none",
+      "snr_noise_class": "keyboard",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "frame_count": 50
+    },
+    {
+      "case_id": "case-004-traffic",
+      "frames_path": "cases/case-004-traffic.json",
+      "input_sha256": "056d66699071733c0aa50e89917c0e6aac36591f7734d4dcb43af57c8d48dd33",
+      "source_id": "highway",
+      "transcription_applicability": "none",
+      "snr_noise_class": "traffic",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "frame_count": 50
+    },
+    {
+      "case_id": "case-005-music",
+      "frames_path": "cases/case-005-music.json",
+      "input_sha256": "906258da17676d65fb56de1e9cb69d53fbb6277b0e66254aac580caf5afe2338",
+      "source_id": "chopin-waltz",
+      "transcription_applicability": "none",
+      "snr_noise_class": "music",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "frame_count": 50
+    },
+    {
+      "case_id": "case-006-silence",
+      "frames_path": "cases/case-006-silence.json",
+      "input_sha256": "55873fecc61a79e87ca550c7072e38ccdd7ecb600ace286fe4717952a97c42b0",
+      "source_id": "edacc-c06",
+      "transcription_applicability": "none",
+      "snr_noise_class": "silence",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "frame_count": 50
+    }
+  ]
+}

@@ -313,40 +313,7 @@ pub fn validate_corpus(root: &Path, manifest: &Manifest) -> Result<(), ManifestE
                 previous = Some(case.case_id.as_str());
             }
 
-            // payload for digest V2
-            #[derive(Serialize)]
-            struct PayloadV2<'a> {
-                schema_version: u32,
-                status: &'a String,
-                input_normalization: &'a String,
-                quality_metric: &'a String,
-                quality_metric_version: &'a String,
-                quality_threshold: f64,
-                quality_observed_value: f64,
-                tolerance: &'a realtime_noise_model::NumericalTolerance,
-                source_lock_sha256: &'a String,
-                sources: &'a Vec<SourceRecord>,
-                cases: &'a Vec<CorpusCaseV2>,
-            }
-            let payload = PayloadV2 {
-                schema_version: corpus.schema_version,
-                status: &corpus.status,
-                input_normalization: &corpus.input_normalization,
-                quality_metric: &corpus.quality_metric,
-                quality_metric_version: &corpus.quality_metric_version,
-                quality_threshold: corpus.quality_threshold,
-                quality_observed_value: corpus.quality_observed_value,
-                tolerance: &corpus.tolerance,
-                source_lock_sha256: &corpus.source_lock_sha256,
-                sources: &corpus.sources,
-                cases: &corpus.cases,
-            };
-            let payload_bytes = serde_json::to_vec(&payload)
-                .map_err(|e| ManifestError::Block("BLOCKED_PENDING_GOLDEN", e.to_string()))?;
-            let mut prefix = b"hippocamp-corpus-v2:".to_vec();
-            prefix.extend_from_slice(&payload_bytes);
-            let digest = sha256(&prefix);
-
+            let digest = compute_corpus_sha256_v2(corpus)?;
             if digest != corpus.corpus_sha256 {
                 return Err(ManifestError::Block(
                     "BLOCKED_PENDING_GOLDEN",
@@ -356,6 +323,41 @@ pub fn validate_corpus(root: &Path, manifest: &Manifest) -> Result<(), ManifestE
             Ok(())
         }
     }
+}
+
+pub fn compute_corpus_sha256_v2(corpus: &ManifestV2) -> Result<String, ManifestError> {
+    #[derive(Serialize)]
+    struct PayloadV2<'a> {
+        schema_version: u32,
+        status: &'a String,
+        input_normalization: &'a String,
+        quality_metric: &'a String,
+        quality_metric_version: &'a String,
+        quality_threshold: f64,
+        quality_observed_value: f64,
+        tolerance: &'a realtime_noise_model::NumericalTolerance,
+        source_lock_sha256: &'a String,
+        sources: &'a Vec<SourceRecord>,
+        cases: &'a Vec<CorpusCaseV2>,
+    }
+    let payload = PayloadV2 {
+        schema_version: corpus.schema_version,
+        status: &corpus.status,
+        input_normalization: &corpus.input_normalization,
+        quality_metric: &corpus.quality_metric,
+        quality_metric_version: &corpus.quality_metric_version,
+        quality_threshold: corpus.quality_threshold,
+        quality_observed_value: corpus.quality_observed_value,
+        tolerance: &corpus.tolerance,
+        source_lock_sha256: &corpus.source_lock_sha256,
+        sources: &corpus.sources,
+        cases: &corpus.cases,
+    };
+    let payload_bytes = serde_json::to_vec(&payload)
+        .map_err(|e| ManifestError::Block("BLOCKED_PENDING_GOLDEN", e.to_string()))?;
+    let mut prefix = b"hippocamp-corpus-v2:".to_vec();
+    prefix.extend_from_slice(&payload_bytes);
+    Ok(sha256(&prefix))
 }
 
 pub fn validate_input_case(case: &CorpusCase, frames: &[Vec<f32>]) -> Result<(), ManifestError> {
