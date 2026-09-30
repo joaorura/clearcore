@@ -12,15 +12,15 @@
     - [x] Commit RED state to Git history with git notes
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [4d7a120]
 
-## Phase 2: Engine Core, Generations & Modes (GREEN)
-- [x] Task: Implement generation lifecycle & engine types
+## Phase 2: Engine Core, Generations & Modes (GREEN) [checkpoint: 2f38ab1]
+- [x] Task: Implement generation lifecycle & engine types [2f38ab1]
     - [x] Implement `crates/engine/src/generation.rs` with `Generation`, `GenerationId`, and warm-up state machine
     - [x] Implement `crates/engine/src/lib.rs` exporting public types
     - [x] Implement `crates/engine/src/engine.rs` with `DenoiseEngine`, `DenoiseMode`, `EngineStatus`, and `EngineError`
-- [x] Task: Verify Phase 1 tests pass (GREEN)
+- [x] Task: Verify Phase 1 tests pass (GREEN) [2f38ab1]
     - [x] Run `cargo test -p realtime-noise-engine --locked --offline` in Docker
     - [x] Commit GREEN state to Git history with git notes
-- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [2f38ab1]
 
 ## Phase 3: Bounded Queues, Backpressure & Worker Off-Thread (GREEN & STRESS)
 - [ ] Task: Implement bounded queues and backpressure
