@@ -110,9 +110,11 @@ impl Resampler for LinearResampler {
         }
 
         let ratio = f64::from(self.source_rate_hz) / f64::from(self.target_rate_hz);
+        let expected_out_len = ((input.len() as f64) / ratio).round() as usize;
+        let out_count = expected_out_len.min(output.len());
         let max_src_idx = input.len().saturating_sub(1);
 
-        for (out_idx, out_sample) in output.iter_mut().enumerate() {
+        for (out_idx, out_sample) in output[..out_count].iter_mut().enumerate() {
             let src_pos = (out_idx as f64) * ratio;
             let src_idx = src_pos.floor() as usize;
             let frac = (src_pos - (src_idx as f64)) as f32;
@@ -122,10 +124,10 @@ impl Resampler for LinearResampler {
             } else {
                 let s0 = input[src_idx];
                 let s1 = input[src_idx + 1];
-                *out_sample = s0 + frac * (s1 - s0);
+                *out_sample = frac.mul_add(s1 - s0, s0);
             }
         }
 
-        Ok(output.len())
+        Ok(out_count)
     }
 }

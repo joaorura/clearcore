@@ -2,11 +2,13 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_const_for_fn)]
 
 pub mod endpoint_converter;
+pub mod format_worker;
 pub mod input_accumulator;
 pub mod output_deframer;
 pub mod resampler;
 
 pub use endpoint_converter::EndpointFormatConverter;
+pub use format_worker::FormatAdapterWorker;
 pub use input_accumulator::{ACCUMULATOR_CAPACITY_SAMPLES, InputAccumulator};
 pub use output_deframer::{DEFRAMER_CAPACITY_SAMPLES, OutputDeframer};
 pub use resampler::{IdentityResampler, LinearResampler, Resampler};
