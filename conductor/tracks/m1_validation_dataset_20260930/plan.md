@@ -7,14 +7,14 @@
     - [x] Commit schema unblock changes cleanly to Git history
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [87bfd1b]
 
-## Phase 2: Speech & Noise Source Lock Binding
+## Phase 2: Speech & Noise Source Lock Binding [checkpoint: 0efca0e]
 - [x] Task: Test-first verification of source-lock parser (RED) [49d8119]
     - [x] Write unit test verifying `source_lock_sha256` matching against temp lockfile
 - [x] Task: Audio asset inspection & source-lock generation (GREEN) [0efca0e]
     - [x] Acquire and verify EdAcc v1.0 adult speech clips (male and female voices)
     - [x] Verify noise assets (keyboard, fan, traffic, piano, stationary, digital silence, HOMULA-RIR)
     - [x] Generate `fixtures/corpus/source-lock.json` with immutable hashes and licensing metadata
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [0efca0e]
 
 ## Phase 3: Audio Normalization & Corpus Manifest V2
 - [ ] Task: Test frame serialization & validation (RED)
