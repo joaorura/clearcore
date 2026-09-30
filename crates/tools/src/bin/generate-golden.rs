@@ -17,15 +17,15 @@ use realtime_noise_tools::golden_manifest::*;
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
-        Err((status, reason)) => blocked(status, &reason),
+        Err(err) => blocked(blocked_status(&err), &blocked_reason(&err)),
     }
 }
 
 #[expect(clippy::too_many_lines, reason = "linear qualification gate")]
-fn run() -> Result<(), (&'static str, String)> {
+fn run() -> Result<(), ManifestError> {
     let fresh = env::args().skip(1).eq(["--fresh"]);
     if !fresh {
-        return Err((
+        return Err(ManifestError::Block(
             "BLOCKED_PENDING_GOLDEN",
             "generation requires explicit --fresh mode".to_owned(),
         ));
@@ -38,26 +38,40 @@ fn run() -> Result<(), (&'static str, String)> {
     let manifest = ApprovedAssetManifest::verify(&root).map_err(golden_block)?;
     let corpus_path = root.join("fixtures/corpus/corpus-manifest.json");
     let corpus_bytes = read_regular(&corpus_path)?;
-    let corpus: CorpusManifest = serde_json::from_slice(&corpus_bytes).map_err(golden_block)?;
+    let corpus = Manifest::parse(&corpus_bytes)?;
     validate_corpus(&root, &corpus)?;
 
     let mut backend =
         TractBackend::new(&manifest, CpuProfile::Avx2Minimum).map_err(golden_block)?;
     let descriptor = backend.descriptor();
-    let mut cases = Vec::with_capacity(corpus.cases.len());
-    for case in &corpus.cases {
+    
+    let (cases_iter, corpus_sha256, input_norm, q_metric, q_metric_v, q_thresh, q_obs, tol) = match &corpus {
+        Manifest::V1(v1) => (Box::new(v1.cases.iter().map(|c| (c.case_id.clone(), c.frames_path.clone(), c.input_sha256.clone(), c.frame_count))) as Box<dyn Iterator<Item = (String, std::path::PathBuf, String, usize)>>, &v1.corpus_sha256, &v1.input_normalization, &v1.quality_metric, &v1.quality_metric_version, v1.quality_threshold, v1.quality_observed_value, &v1.tolerance),
+        Manifest::V2(v2) => (Box::new(v2.cases.iter().map(|c| (c.case_id.clone(), c.frames_path.clone(), c.input_sha256.clone(), c.frame_count))) as Box<dyn Iterator<Item = _>>, &v2.corpus_sha256, &v2.input_normalization, &v2.quality_metric, &v2.quality_metric_version, v2.quality_threshold, v2.quality_observed_value, &v2.tolerance),
+    };
+    let mut cases = Vec::new();
+    for (case_id, frames_path, input_sha256, frame_count) in cases_iter {
+
         let input_frames: Vec<Vec<f32>> = serde_json::from_slice(&read_regular(
-            &root.join("fixtures/corpus").join(&case.frames_path),
+            &root.join("fixtures/corpus").join(&frames_path),
         )?)
         .map_err(golden_block)?;
-        validate_input_case(case, &input_frames)?;
+        
+        // We defer validation since it needs the original case struct.
+        // Actually, let's just do it inline here.
+        if input_frames.len() != frame_count || input_frames.iter().any(|frame| {
+            frame.len() != realtime_noise_contracts::HOP_SAMPLES || frame.iter().any(|sample| !sample.is_finite())
+        }) || frames_sha256(&input_frames) != input_sha256 {
+            return Err(ManifestError::Block("BLOCKED_PENDING_GOLDEN", "corpus frames do not match their approved binding".to_string()));
+        }
+
         let mut output_frames = Vec::with_capacity(input_frames.len());
         for frame in &input_frames {
             let input: [f32; realtime_noise_contracts::HOP_SAMPLES] =
                 frame
                     .as_slice()
                     .try_into()
-                    .map_err(|_| pending("input frame shape is invalid"))?;
+                    .map_err(|_| ManifestError::Block("BLOCKED_PENDING_GOLDEN", "input frame shape is invalid".to_string()))?;
             output_frames.push(
                 backend
                     .process(&input)
@@ -67,10 +81,10 @@ fn run() -> Result<(), (&'static str, String)> {
             );
         }
         cases.push(GoldenCase {
-            case_id: case.case_id.clone(),
-            input_sha256: case.input_sha256.clone(),
+            case_id: case_id,
+            input_sha256: input_sha256,
             output_sha256: frames_sha256(&output_frames),
-            frame_count: case.frame_count,
+            frame_count: frame_count,
             input_frames,
             output_frames,
         });
@@ -87,7 +101,7 @@ fn run() -> Result<(), (&'static str, String)> {
         runtime: descriptor.runtime.to_owned(),
         runtime_version: descriptor.runtime_version.to_owned(),
         cpu_profile: descriptor.cpu_profile.to_owned(),
-        corpus_sha256: corpus.corpus_sha256,
+        corpus_sha256: corpus_sha256.clone(),
         generator_revision: command_output("git", &["rev-parse", "HEAD"]),
         generator_command: "generate-golden --fresh".to_owned(),
         generated_at_utc: generated_at,
@@ -98,12 +112,12 @@ fn run() -> Result<(), (&'static str, String)> {
         channels: realtime_noise_contracts::CHANNELS,
         hop_samples: realtime_noise_contracts::HOP_SAMPLES,
         algorithmic_latency_samples: ALGORITHM_LATENCY_SAMPLES,
-        input_normalization: corpus.input_normalization,
-        quality_metric: corpus.quality_metric,
-        quality_metric_version: corpus.quality_metric_version,
-        quality_threshold: corpus.quality_threshold,
-        quality_observed_value: corpus.quality_observed_value,
-        tolerance: corpus.tolerance,
+        input_normalization: input_norm.clone(),
+        quality_metric: q_metric.clone(),
+        quality_metric_version: q_metric_v.clone(),
+        quality_threshold: q_thresh,
+        quality_observed_value: q_obs,
+        tolerance: tol.clone(),
     };
     let provenance_sha256 = sha256(&serde_json::to_vec(&provenance).map_err(golden_block)?);
     let fixture = GoldenFixture {
@@ -116,8 +130,8 @@ fn run() -> Result<(), (&'static str, String)> {
     if let Ok(existing) = GoldenFixture::read(&output)
         && existing.provenance_sha256 == fixture.provenance_sha256
     {
-        return Err(pending(
-            "fresh generation did not create a new provenance identity",
+        return Err(ManifestError::Block("BLOCKED_PENDING_GOLDEN", 
+            "fresh generation did not create a new provenance identity".to_string(),
         ));
     }
     let bytes = serde_json::to_vec_pretty(&fixture).map_err(golden_block)?;
@@ -130,25 +144,25 @@ fn run() -> Result<(), (&'static str, String)> {
 
 
 
-fn read_regular(path: &Path) -> Result<Vec<u8>, (&'static str, String)> {
+fn read_regular(path: &Path) -> Result<Vec<u8>, ManifestError> {
     let metadata = fs::symlink_metadata(path).map_err(io_block)?;
     if !metadata.file_type().is_file() {
-        return Err(pending(
-            "generation input is not a regular non-symlink file",
+        return Err(ManifestError::Block("BLOCKED_PENDING_GOLDEN", 
+            "generation input is not a regular non-symlink file".to_string(),
         ));
     }
     fs::read(path).map_err(io_block)
 }
 
-fn required_environment(name: &str) -> Result<String, (&'static str, String)> {
-    env::var(name).map_err(|_| pending(&format!("{name} is required")))
+fn required_environment(name: &str) -> Result<String, ManifestError> {
+    env::var(name).map_err(|_| pending(format!("{name} is required")))
 }
 
-fn require_environment(name: &str, expected: &str) -> Result<(), (&'static str, String)> {
+fn require_environment(name: &str, expected: &str) -> Result<(), ManifestError> {
     if required_environment(name)? == expected {
         Ok(())
     } else {
-        Err(pending(&format!("{name} must equal {expected}")))
+        Err(ManifestError::Block("BLOCKED_PENDING_GOLDEN", format!("{name} must equal {expected}")))
     }
 }
 
@@ -168,8 +182,17 @@ fn command_output(command: &str, arguments: &[&str]) -> String {
 
 
 
-fn io_block(error: impl std::fmt::Display) -> (&'static str, String) {
-    pending(&error.to_string())
+
+fn pending(reason: String) -> ManifestError {
+    ManifestError::Block("BLOCKED_PENDING_GOLDEN", reason)
+}
+
+fn golden_block(error: impl std::fmt::Display) -> ManifestError {
+    pending(error.to_string())
+}
+
+fn io_block(error: impl std::fmt::Display) -> ManifestError {
+    ManifestError::Block("BLOCKED_PENDING_GOLDEN", error.to_string())
 }
 
 fn blocked(status: &str, reason: &str) -> ExitCode {
