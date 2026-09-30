@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_const_for_fn)]
 
+use crate::ServiceDaemon;
+use realtime_noise_ipc::default_endpoint_path;
 use std::io;
 use std::path::PathBuf;
-use realtime_noise_ipc::default_endpoint_path;
-use crate::ServiceDaemon;
 
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
@@ -63,7 +63,10 @@ impl ServiceBootstrap {
         }
 
         let listener = std::os::unix::net::UnixListener::bind(socket_path)?;
-        println!("Service listening on unix domain socket: {}", socket_path.display());
+        println!(
+            "Service listening on unix domain socket: {}",
+            socket_path.display()
+        );
 
         for stream_res in listener.incoming() {
             if self.daemon.is_shutdown() {
@@ -92,7 +95,10 @@ impl ServiceBootstrap {
 
     #[cfg(not(unix))]
     pub fn run(&mut self) -> io::Result<()> {
-        eprintln!("Named pipe service listener initialized on {}", self.config.endpoint_path.display());
+        eprintln!(
+            "Named pipe service listener initialized on {}",
+            self.config.endpoint_path.display()
+        );
         // For non-unix targets (e.g. Windows), named pipe listener placeholder
         Ok(())
     }

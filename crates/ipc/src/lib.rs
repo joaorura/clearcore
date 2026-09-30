@@ -5,7 +5,9 @@ pub mod protocol;
 pub mod server;
 
 pub use protocol::{
-    handle_request, DenoiseMode, IpcCommand, IpcErrorDetail, IpcRequest, IpcResponse, IpcStatus,
-    PROTOCOL_VERSION,
+    DenoiseMode, IpcCommand, IpcErrorDetail, IpcRequest, IpcResponse, IpcStatus, PROTOCOL_VERSION,
+    handle_request,
 };
-pub use server::{default_endpoint_path, IpcClient, IpcServer, DEFAULT_PIPE_NAME, DEFAULT_SOCKET_NAME};
+pub use server::{
+    DEFAULT_PIPE_NAME, DEFAULT_SOCKET_NAME, IpcClient, IpcServer, default_endpoint_path,
+};

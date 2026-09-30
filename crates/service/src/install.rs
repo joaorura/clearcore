@@ -83,7 +83,9 @@ pub fn install_user_service() -> io::Result<()> {
             let content = generate_systemd_unit(&current_exe);
             fs::write(&unit_file, content)?;
             println!("Installed systemd user service to {}", unit_file.display());
-            println!("To activate now, run: systemctl --user daemon-reload && systemctl --user enable --now {SYSTEMD_SERVICE_NAME}");
+            println!(
+                "To activate now, run: systemctl --user daemon-reload && systemctl --user enable --now {SYSTEMD_SERVICE_NAME}"
+            );
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -101,7 +103,10 @@ pub fn install_user_service() -> io::Result<()> {
             let content = generate_launchd_plist(&current_exe);
             fs::write(&plist_file, content)?;
             println!("Installed LaunchAgent to {}", plist_file.display());
-            println!("To activate now, run: launchctl load {}", plist_file.display());
+            println!(
+                "To activate now, run: launchctl load {}",
+                plist_file.display()
+            );
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -119,7 +124,10 @@ pub fn install_user_service() -> io::Result<()> {
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
-        println!("Unsupported platform for automated service installation. Current binary: {}", current_exe.display());
+        println!(
+            "Unsupported platform for automated service installation. Current binary: {}",
+            current_exe.display()
+        );
     }
 
     Ok(())
@@ -156,7 +164,9 @@ pub fn uninstall_user_service() -> io::Result<()> {
 
     #[cfg(target_os = "windows")]
     {
-        println!("To unregister Windows scheduled task, run: schtasks.exe /delete /tn \"{WINDOWS_TASK_NAME}\" /f");
+        println!(
+            "To unregister Windows scheduled task, run: schtasks.exe /delete /tn \"{WINDOWS_TASK_NAME}\" /f"
+        );
     }
 
     Ok(())

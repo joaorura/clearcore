@@ -46,7 +46,10 @@ impl BackoffTracker {
     #[must_use]
     pub fn crashes_in_window(&self, now: Instant) -> usize {
         let cutoff = now.checked_sub(FIFTEEN_MINUTES).unwrap_or(now);
-        self.crash_timestamps.iter().filter(|&&t| t >= cutoff).count()
+        self.crash_timestamps
+            .iter()
+            .filter(|&&t| t >= cutoff)
+            .count()
     }
 
     #[must_use]

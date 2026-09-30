@@ -1,16 +1,22 @@
 #![forbid(unsafe_code)]
 
-use std::env;
-use std::process::ExitCode;
 use realtime_noise_service::bootstrap::ServiceBootstrap;
 use realtime_noise_service::install::{install_user_service, uninstall_user_service};
+use std::env;
+use std::process::ExitCode;
 
 fn print_usage() {
     println!("realtime-noise-service - Standalone User Daemon");
     println!("Usage:");
-    println!("  realtime-noise-service --run                    Run daemon supervisor and IPC loop");
-    println!("  realtime-noise-service --install-user-service   Install per-user autostart service");
-    println!("  realtime-noise-service --uninstall-user-service Uninstall per-user autostart service");
+    println!(
+        "  realtime-noise-service --run                    Run daemon supervisor and IPC loop"
+    );
+    println!(
+        "  realtime-noise-service --install-user-service   Install per-user autostart service"
+    );
+    println!(
+        "  realtime-noise-service --uninstall-user-service Uninstall per-user autostart service"
+    );
     println!("  realtime-noise-service --help                   Show this help message");
 }
 

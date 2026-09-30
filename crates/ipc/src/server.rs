@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-use std::io::{self, BufRead, Write};
-use crate::protocol::{handle_request, IpcCommand, IpcRequest, IpcResponse, IpcStatus};
+use crate::protocol::{IpcCommand, IpcRequest, IpcResponse, IpcStatus, handle_request};
 use serde_json::Value;
+use std::io::{self, BufRead, Write};
 
 pub const DEFAULT_SOCKET_NAME: &str = "realtime-noise.sock";
 pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\realtime-noise";
@@ -58,7 +58,12 @@ impl IpcServer {
         }
     }
 
-    pub fn handle_stream<R, W, F>(&self, mut reader: R, mut writer: W, mut handler: F) -> io::Result<()>
+    pub fn handle_stream<R, W, F>(
+        &self,
+        mut reader: R,
+        mut writer: W,
+        mut handler: F,
+    ) -> io::Result<()>
     where
         R: BufRead,
         W: Write,

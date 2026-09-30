@@ -1,16 +1,22 @@
 #![forbid(unsafe_code)]
 
+use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
+use realtime_noise_engine::DenoiseMode;
 use std::fmt;
 use std::time::Instant;
-use realtime_noise_engine::DenoiseMode;
-use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SupervisorState {
     Running,
     EngineUnavailable,
-    Restarting { attempt: usize, next_retry_ms: u64 },
-    TerminalSafeState { reason: String, diagnostic: Option<String> },
+    Restarting {
+        attempt: usize,
+        next_retry_ms: u64,
+    },
+    TerminalSafeState {
+        reason: String,
+        diagnostic: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,7 +124,9 @@ impl EngineSupervisor {
         let limit_exceeded = self.backoff.record_crash(timestamp);
         if limit_exceeded {
             self.state = SupervisorState::TerminalSafeState {
-                reason: format!("Exceeded crash limit ({MAX_CRASHES_PER_15_MINUTES} crashes per 15 minutes)"),
+                reason: format!(
+                    "Exceeded crash limit ({MAX_CRASHES_PER_15_MINUTES} crashes per 15 minutes)"
+                ),
                 diagnostic: Some(reason.to_string()),
             };
         } else {

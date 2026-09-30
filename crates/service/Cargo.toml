@@ -6,10 +6,6 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
-[[bin]]
-name = "realtime-noise-service"
-path = "src/main.rs"
-
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-engine = { path = "../engine" }

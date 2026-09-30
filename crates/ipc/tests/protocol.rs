@@ -1,16 +1,12 @@
 #![forbid(unsafe_code)]
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic
-)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::io::Cursor;
 use realtime_noise_ipc::{
-    handle_request, DenoiseMode, IpcCommand, IpcRequest, IpcResponse, IpcServer, IpcStatus,
-    PROTOCOL_VERSION,
+    DenoiseMode, IpcCommand, IpcRequest, IpcResponse, IpcServer, IpcStatus, PROTOCOL_VERSION,
+    handle_request,
 };
 use serde_json::json;
+use std::io::Cursor;
 
 #[test]
 fn incompatible_ipc_version_is_rejected_closed() {
@@ -93,9 +89,7 @@ fn roundtrip_over_stream_transport() {
 fn malformed_json_returns_invalid_command() {
     let server = IpcServer::new();
     let raw = "not a json string";
-    let resp_str = server.handle_line(raw, |_cmd, _payload| {
-        IpcResponse::success("x", json!({}))
-    });
+    let resp_str = server.handle_line(raw, |_cmd, _payload| IpcResponse::success("x", json!({})));
 
     let resp = IpcResponse::from_json(&resp_str).expect("parse error response");
     assert_eq!(resp.status, IpcStatus::InvalidCommand);

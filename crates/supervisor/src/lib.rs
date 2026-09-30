@@ -6,6 +6,6 @@ pub mod supervisor;
 
 pub use backoff::{BACKOFF_SECONDS, BackoffTracker, FIFTEEN_MINUTES, MAX_CRASHES_PER_15_MINUTES};
 pub use supervisor::{
-    convert_engine_mode_to_ipc, convert_ipc_mode_to_engine, EngineSupervisor, SupervisorError,
-    SupervisorState, SupervisorStatus,
+    EngineSupervisor, SupervisorError, SupervisorState, SupervisorStatus,
+    convert_engine_mode_to_ipc, convert_ipc_mode_to_engine,
 };

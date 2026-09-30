@@ -6,11 +6,11 @@
     clippy::float_cmp
 )]
 
-use std::time::{Duration, Instant};
 use realtime_noise_engine::DenoiseMode;
 use realtime_noise_supervisor::{
-    BackoffTracker, EngineSupervisor, SupervisorState, BACKOFF_SECONDS,
+    BACKOFF_SECONDS, BackoffTracker, EngineSupervisor, SupervisorState,
 };
+use std::time::{Duration, Instant};
 
 #[test]
 fn sixth_crash_in_fifteen_minutes_enters_terminal_safe_state() {
