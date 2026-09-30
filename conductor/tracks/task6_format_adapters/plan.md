@@ -10,16 +10,16 @@
     - [x] Verify tests fail cleanly (RED) in Docker
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
-## Phase 2: Accumulator, Deframer & Format Converter (GREEN)
-- [ ] Task: Implement framing and conversion core
-    - [ ] Implement `crates/format-adapter/src/input_accumulator.rs`
-    - [ ] Implement `crates/format-adapter/src/output_deframer.rs`
-    - [ ] Implement `crates/format-adapter/src/endpoint_converter.rs`
-    - [ ] Implement `crates/format-adapter/src/resampler.rs`
-    - [ ] Export public types in `crates/format-adapter/src/lib.rs`
-- [ ] Task: Verify Phase 1 contract tests pass (GREEN)
-    - [ ] Run `cargo test -p realtime-noise-format-adapter --locked --offline` in Docker
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+## Phase 2: Accumulator, Deframer & Format Converter (GREEN) [checkpoint: fbde482]
+- [x] Task: Implement framing and conversion core
+    - [x] Implement `crates/format-adapter/src/input_accumulator.rs`
+    - [x] Implement `crates/format-adapter/src/output_deframer.rs`
+    - [x] Implement `crates/format-adapter/src/endpoint_converter.rs`
+    - [x] Implement `crates/format-adapter/src/resampler.rs`
+    - [x] Export public types in `crates/format-adapter/src/lib.rs`
+- [x] Task: Verify Phase 1 contract tests pass (GREEN)
+    - [x] Run `cargo test -p realtime-noise-format-adapter --locked --offline` in Docker
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 3: Adapter Worker & Multi-Format Stress Tests (GREEN & STRESS)
 - [ ] Task: Implement format adapter worker and comprehensive tests
