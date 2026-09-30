@@ -6,18 +6,17 @@
 )]
 
 use core::fmt;
-use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use realtime_noise_contracts::{
-    AudioFrame, Discontinuity, FrameEnvelope, HOP_SAMPLES, RealtimeTransport, TransportFull,
-};
+use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES, RealtimeTransport};
 use realtime_noise_model::{InferenceBackend, InferenceError};
 
 use crate::generation::{Generation, GenerationId};
+use crate::queue::BoundedQueueTransport;
+use crate::worker::DenoiseWorker;
 
 /// Hard deadline for inference processing per hop (10.0 ms @ 48 kHz).
 pub const INFERENCE_HARD_DEADLINE: Duration = Duration::from_millis(10);
@@ -116,62 +115,15 @@ impl fmt::Display for EngineError {
 
 impl Error for EngineError {}
 
-/// Internal queue transport for standalone mode.
-struct InternalQueueTransport {
-    capacity: usize,
-    queue: Mutex<VecDeque<FrameEnvelope>>,
-}
-
-impl InternalQueueTransport {
-    fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            queue: Mutex::new(VecDeque::with_capacity(capacity)),
-        }
-    }
-}
-
-impl RealtimeTransport for InternalQueueTransport {
-    fn try_push(&self, frame: FrameEnvelope) -> Result<(), TransportFull> {
-        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
-        if queue.len() >= self.capacity {
-            return Err(TransportFull);
-        }
-        queue.push_back(frame);
-        drop(queue);
-        Ok(())
-    }
-
-    fn try_pop(&self) -> Option<FrameEnvelope> {
-        self.queue
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pop_front()
-    }
-
-    fn capacity_hops(&self) -> usize {
-        self.capacity
-    }
-
-    fn backlog_hops(&self) -> usize {
-        self.queue
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .len()
-    }
-
-    fn close_generation(&self, _generation: u64) {}
-}
-
 /// Shared internal state between the engine coordinator and worker thread.
-struct EngineSharedState {
-    state: EngineState,
-    mode: DenoiseMode,
-    backend: Option<Box<dyn InferenceBackend>>,
-    pending_backend: Option<Box<dyn InferenceBackend>>,
-    generation: Generation,
-    deadline_miss_count: u64,
-    is_running: bool,
+pub(crate) struct EngineSharedState {
+    pub(crate) state: EngineState,
+    pub(crate) mode: DenoiseMode,
+    pub(crate) backend: Option<Box<dyn InferenceBackend>>,
+    pub(crate) pending_backend: Option<Box<dyn InferenceBackend>>,
+    pub(crate) generation: Generation,
+    pub(crate) deadline_miss_count: u64,
+    pub(crate) is_running: bool,
 }
 
 /// Real-time noise suppression engine coordinator.
@@ -223,8 +175,8 @@ impl DenoiseEngine {
     /// Creates a new standalone `DenoiseEngine` with internal default queues.
     #[must_use]
     pub fn new_standalone(backend: Box<dyn InferenceBackend>, mode: DenoiseMode) -> Self {
-        let input = Arc::new(InternalQueueTransport::new(24));
-        let output = Arc::new(InternalQueueTransport::new(24));
+        let input = Arc::new(BoundedQueueTransport::new());
+        let output = Arc::new(BoundedQueueTransport::new());
         Self::with_mode(input, output, backend, mode)
     }
 
@@ -247,7 +199,7 @@ impl DenoiseEngine {
         let handle = thread::Builder::new()
             .name("realtime-noise-worker".to_owned())
             .spawn(move || {
-                Self::worker_loop(&shared_clone, &input_clone, &output_clone);
+                DenoiseWorker::run_loop(&shared_clone, &input_clone, &output_clone);
             })
             .map_err(|e| EngineError::InvalidConfiguration(e.to_string()))?;
 
@@ -361,138 +313,6 @@ impl DenoiseEngine {
                 }
             }
         }
-    }
-
-    /// Worker thread main loop.
-    fn worker_loop(
-        shared: &Arc<Mutex<EngineSharedState>>,
-        input: &Arc<dyn RealtimeTransport>,
-        output: &Arc<dyn RealtimeTransport>,
-    ) {
-        while {
-            let state = shared.lock().unwrap_or_else(PoisonError::into_inner);
-            state.is_running
-        } {
-            if let Some(frame) = input.try_pop() {
-                Self::worker_process_frame(shared, output, &frame);
-            } else {
-                thread::sleep(Duration::from_micros(200));
-            }
-        }
-    }
-
-    /// Processes a single frame inside the worker thread.
-    fn worker_process_frame(
-        shared: &Arc<Mutex<EngineSharedState>>,
-        output: &Arc<dyn RealtimeTransport>,
-        input_frame: &FrameEnvelope,
-    ) {
-        let mut state = shared.lock().unwrap_or_else(PoisonError::into_inner);
-
-        // Apply any pending backend switch at hop boundary
-        if let Some(pending) = state.pending_backend.take() {
-            state.backend = Some(pending);
-        }
-
-        let mode = state.mode;
-        let output_samples: AudioFrame;
-        let output_discontinuity: Discontinuity;
-        let output_generation: u64;
-
-        match mode {
-            DenoiseMode::Mute => {
-                output_samples = [0.0; HOP_SAMPLES];
-                output_discontinuity = input_frame.discontinuity;
-                output_generation = state.generation.id().get();
-            }
-            DenoiseMode::Bypass => {
-                output_samples = input_frame.samples;
-                output_discontinuity = input_frame.discontinuity;
-                output_generation = state.generation.id().get();
-            }
-            DenoiseMode::Active => {
-                let start = Instant::now();
-                let process_result = state.backend.as_mut().map_or_else(
-                    || {
-                        Err(InferenceError::UnsupportedCpuProfile(
-                            "no backend available".to_owned(),
-                        ))
-                    },
-                    |backend| backend.process(&input_frame.samples),
-                );
-                let elapsed = start.elapsed();
-
-                if elapsed > INFERENCE_HARD_DEADLINE {
-                    // Fail-closed silence policy on deadline miss
-                    state.deadline_miss_count = state.deadline_miss_count.saturating_add(1);
-                    let old_id = state.generation.id().get();
-                    state.generation.close(ResetReason::InferenceDeadlineMiss);
-                    let next_id = state.generation.id().next();
-                    state.generation = Generation::active(next_id);
-                    drop(state);
-
-                    output.close_generation(old_id);
-
-                    output_samples = [0.0; HOP_SAMPLES];
-                    output_discontinuity = input_frame.discontinuity
-                        | Discontinuity::INFERENCE_DEADLINE_MISS
-                        | Discontinuity::GENERATION_CHANGE;
-                    output_generation = next_id.get();
-
-                    let envelope = FrameEnvelope {
-                        samples: output_samples,
-                        sequence: input_frame.sequence,
-                        capture_monotonic_ns: input_frame.capture_monotonic_ns,
-                        generation: output_generation,
-                        discontinuity: output_discontinuity,
-                    };
-                    let _ = output.try_push(envelope);
-                    return;
-                }
-
-                let Ok(processed_frame) = process_result else {
-                    state.deadline_miss_count = state.deadline_miss_count.saturating_add(1);
-                    let old_id = state.generation.id().get();
-                    state.generation.close(ResetReason::InferenceDeadlineMiss);
-                    let next_id = state.generation.id().next();
-                    state.generation = Generation::active(next_id);
-                    drop(state);
-
-                    output.close_generation(old_id);
-
-                    output_samples = [0.0; HOP_SAMPLES];
-                    output_discontinuity = input_frame.discontinuity
-                        | Discontinuity::INFERENCE_DEADLINE_MISS
-                        | Discontinuity::GENERATION_CHANGE;
-                    output_generation = next_id.get();
-
-                    let envelope = FrameEnvelope {
-                        samples: output_samples,
-                        sequence: input_frame.sequence,
-                        capture_monotonic_ns: input_frame.capture_monotonic_ns,
-                        generation: output_generation,
-                        discontinuity: output_discontinuity,
-                    };
-                    let _ = output.try_push(envelope);
-                    return;
-                };
-
-                output_samples = processed_frame.samples;
-                output_discontinuity = input_frame.discontinuity;
-                output_generation = state.generation.id().get();
-            }
-        }
-
-        drop(state);
-
-        let envelope = FrameEnvelope {
-            samples: output_samples,
-            sequence: input_frame.sequence,
-            capture_monotonic_ns: input_frame.capture_monotonic_ns,
-            generation: output_generation,
-            discontinuity: output_discontinuity,
-        };
-        let _ = output.try_push(envelope);
     }
 }
 

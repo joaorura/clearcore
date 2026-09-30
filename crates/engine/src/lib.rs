@@ -3,9 +3,13 @@
 
 pub mod engine;
 pub mod generation;
+pub mod queue;
+pub mod worker;
 
 pub use engine::{
     DenoiseEngine, DenoiseMode, EngineError, EngineState, EngineStatus, INFERENCE_HARD_DEADLINE,
     ResetReason,
 };
 pub use generation::{Generation, GenerationId, GenerationState};
+pub use queue::{BoundedQueueTransport, DEFAULT_WATERMARK_HOPS};
+pub use worker::DenoiseWorker;

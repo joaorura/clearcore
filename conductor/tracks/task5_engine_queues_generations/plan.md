@@ -23,15 +23,15 @@
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [2f38ab1]
 
 ## Phase 3: Bounded Queues, Backpressure & Worker Off-Thread (GREEN & STRESS)
-- [ ] Task: Implement bounded queues and backpressure
-    - [ ] Implement `crates/engine/src/queue.rs` with 24-hop bounded queue and 20 ms / 2-hop age watermark
-    - [ ] Implement `crates/engine/src/worker.rs` with off-thread worker loop and backend switching on hop boundary
-    - [ ] Write `crates/engine/tests/backpressure.rs` verifying frame drop, discontinuity flags, and fail-closed silence
-- [ ] Task: Run full engine test suite & stress tests in Docker
-    - [ ] Run `cargo test -p realtime-noise-engine`
-    - [ ] Run `cargo clippy -p realtime-noise-engine -- -D warnings`
-    - [ ] Commit implementation cleanly to Git history with git notes
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Implement bounded queues and backpressure
+    - [x] Implement `crates/engine/src/queue.rs` with 24-hop bounded queue and 20 ms / 2-hop age watermark
+    - [x] Implement `crates/engine/src/worker.rs` with off-thread worker loop and backend switching on hop boundary
+    - [x] Write `crates/engine/tests/backpressure.rs` verifying frame drop, discontinuity flags, and fail-closed silence
+- [x] Task: Run full engine test suite & stress tests in Docker
+    - [x] Run `cargo test -p realtime-noise-engine`
+    - [x] Run `cargo clippy -p realtime-noise-engine -- -D warnings`
+    - [x] Commit implementation cleanly to Git history with git notes
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 4: Final Verification, Checkpoint & Track Completion
 - [ ] Task: Run full offline workspace verification in Docker
