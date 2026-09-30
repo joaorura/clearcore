@@ -27,10 +27,10 @@
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [0135f0d]
 
 ## Phase 4: Golden Reference Generation & M1 Qualification
-- [ ] Task: Golden reference generation
-    - [ ] Execute `generate-golden --fresh` inside offline container
-    - [ ] Verify creation and integrity of `fixtures/golden/frozen-reference.json`
-- [ ] Task: Latency contract & benchmark qualification
+- [x] Task: Golden reference generation [5e1da1b]
+    - [x] Execute `generate-golden --fresh` inside offline container
+    - [x] Verify creation and integrity of `fixtures/golden/frozen-reference.json`
+- [~] Task: Latency contract & benchmark qualification
     - [ ] Document 30 ms algorithmic latency amendment in spec and architecture notes
     - [ ] Run benchmark qualification with 300-second sustained frequency observation
     - [ ] Record hardware observation with development host waiver
