@@ -9,9 +9,9 @@
 
 use realtime_noise_contracts::{EndpointError, HOP_SAMPLES, SAMPLE_RATE_HZ};
 use realtime_noise_windows_host::formats::{
-    audio_frame_to_f32_bytes, audio_frame_to_pcm16_bytes, canonical_f32_to_pcm16,
-    f32_bytes_to_audio_frame, pcm16_bytes_to_audio_frame, pcm16_to_canonical_f32, validate_format,
-    AudioEndpointFormat,
+    AudioEndpointFormat, audio_frame_to_f32_bytes, audio_frame_to_pcm16_bytes,
+    canonical_f32_to_pcm16, f32_bytes_to_audio_frame, pcm16_bytes_to_audio_frame,
+    pcm16_to_canonical_f32, validate_format,
 };
 
 #[test]

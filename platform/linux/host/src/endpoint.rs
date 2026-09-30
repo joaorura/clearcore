@@ -1,13 +1,13 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_const_for_fn)]
 
-use std::collections::HashMap;
-use std::path::PathBuf;
 use realtime_noise_contracts::{
     AudioFrame, EndpointError, EndpointStatus, HOP_SAMPLES, VirtualMicrophone,
 };
 use realtime_noise_engine::{DenoiseMode, GenerationId, GenerationState};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Engine supervisor state mirrored for endpoint gating and fail-closed silence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,8 +37,8 @@ pub struct HelperProcessConfig {
 
 impl Default for HelperProcessConfig {
     fn default() -> Self {
-        let lock_dir = std::env::var("XDG_RUNTIME_DIR")
-            .map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from);
+        let lock_dir =
+            std::env::var("XDG_RUNTIME_DIR").map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from);
         Self {
             binary_path: PathBuf::from("platform/linux/helper/build/pipewire_helper"),
             node_name: "realtime-noise-source".to_string(),

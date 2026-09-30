@@ -53,10 +53,7 @@ pub fn validate_format(
 ///
 /// Returns [`EndpointError::UnsupportedFormat`] if source and destination slice lengths differ.
 #[allow(clippy::cast_precision_loss)]
-pub fn pcm16_to_canonical_f32(
-    pcm16: &[i16],
-    f32_out: &mut [f32],
-) -> Result<(), EndpointError> {
+pub fn pcm16_to_canonical_f32(pcm16: &[i16], f32_out: &mut [f32]) -> Result<(), EndpointError> {
     if pcm16.len() != f32_out.len() {
         return Err(EndpointError::UnsupportedFormat(format!(
             "PCM16 to Float32 buffer length mismatch: expected {}, got {}",
@@ -84,10 +81,7 @@ pub fn pcm16_to_canonical_f32(
 ///
 /// Returns [`EndpointError::UnsupportedFormat`] if source and destination slice lengths differ.
 #[allow(clippy::cast_possible_truncation)]
-pub fn canonical_f32_to_pcm16(
-    f32_in: &[f32],
-    pcm16_out: &mut [i16],
-) -> Result<(), EndpointError> {
+pub fn canonical_f32_to_pcm16(f32_in: &[f32], pcm16_out: &mut [i16]) -> Result<(), EndpointError> {
     if f32_in.len() != pcm16_out.len() {
         return Err(EndpointError::UnsupportedFormat(format!(
             "Float32 to PCM16 buffer length mismatch: expected {}, got {}",

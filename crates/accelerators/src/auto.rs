@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![allow(clippy::doc_markdown)]
 
 use serde::{Deserialize, Serialize};
 
@@ -22,28 +23,62 @@ impl PromotionDecision {
     }
 }
 
+/// Hardware execution device tier for AUTO prioritization.
+/// Priority order:
+/// 1. Dedicated GPU (`TensorRT` specific runtime, fallback to `DirectML`/`Vulkan` general runtime)
+/// 2. NPU (Intel NPU via `OpenVINO`, AMD NPU via Ryzen AI / XDNA, Apple Neural Engine via `CoreML`)
+/// 3. Integrated GPU (Intel Arc / iGPU via `OpenVINO` GPU, AMD iGPU via `Vulkan`/`DirectML`)
+/// 4. CPU (Tract CPU pure Rust fail-safe baseline, or `OpenVINO` CPU)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum DeviceTier {
+    DedicatedGpu = 1,
+    Npu = 2,
+    IntegratedGpu = 3,
+    Cpu = 4,
+}
+
 /// Requested backend mode.
+///
+/// Allows the user to select by category (`DedicatedGpu`, `Npu`, `IntegratedGpu`, `Cpu`)
+/// or by specific runtime (`TensorRt`, `DirectMl`, `Vulkan`, `RyzenAi`, `OpenVinoNpu`, `OpenVinoGpu`, `OpenVinoCpu`, `CoreMl`, `TractCpu`),
+/// or leave on Auto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BackendRequest {
     #[default]
     Auto,
-    TractCpu,
+    // Device Category Requests
+    DedicatedGpu,
+    Npu,
+    IntegratedGpu,
+    Cpu,
+    // Specific Runtime Requests
     TensorRt,
     Cuda,
-    OpenVino,
     DirectMl,
+    Vulkan,
+    RyzenAi,
+    OpenVinoNpu,
+    OpenVinoGpu,
+    OpenVinoCpu,
+    OpenVino,
     CoreMl,
+    TractCpu,
 }
 
-/// Backend selected by the AUTO policy or direct request.
+/// Backend selected by the AUTO policy or direct user request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BackendSelection {
     #[default]
     TractCpu,
     TensorRt,
     Cuda,
-    OpenVino,
     DirectMl,
+    Vulkan,
+    RyzenAi,
+    OpenVinoNpu,
+    OpenVinoGpu,
+    OpenVinoCpu,
+    OpenVino,
     CoreMl,
 }
 
@@ -54,9 +89,24 @@ impl BackendSelection {
             Self::TractCpu => "tract",
             Self::TensorRt => "tensorrt",
             Self::Cuda => "cuda",
-            Self::OpenVino => "openvino",
             Self::DirectMl => "directml",
+            Self::Vulkan => "vulkan",
+            Self::RyzenAi => "ryzen-ai",
+            Self::OpenVinoNpu => "openvino-npu",
+            Self::OpenVinoGpu => "openvino-gpu",
+            Self::OpenVinoCpu => "openvino-cpu",
+            Self::OpenVino => "openvino",
             Self::CoreMl => "coreml",
+        }
+    }
+
+    #[must_use]
+    pub const fn tier(&self) -> DeviceTier {
+        match self {
+            Self::TensorRt | Self::Cuda | Self::DirectMl | Self::Vulkan => DeviceTier::DedicatedGpu,
+            Self::RyzenAi | Self::OpenVinoNpu | Self::CoreMl => DeviceTier::Npu,
+            Self::OpenVinoGpu => DeviceTier::IntegratedGpu,
+            Self::OpenVinoCpu | Self::TractCpu | Self::OpenVino => DeviceTier::Cpu,
         }
     }
 
@@ -68,6 +118,37 @@ impl BackendSelection {
     #[must_use]
     pub const fn is_nvidia(&self) -> bool {
         matches!(self, Self::TensorRt | Self::Cuda)
+    }
+
+    #[must_use]
+    pub const fn is_dedicated_gpu(&self) -> bool {
+        matches!(
+            self,
+            Self::TensorRt | Self::Cuda | Self::DirectMl | Self::Vulkan
+        )
+    }
+
+    #[must_use]
+    pub const fn is_npu(&self) -> bool {
+        matches!(self, Self::RyzenAi | Self::OpenVinoNpu | Self::CoreMl)
+    }
+
+    #[must_use]
+    pub const fn is_amd(&self) -> bool {
+        matches!(self, Self::RyzenAi)
+    }
+
+    #[must_use]
+    pub const fn is_integrated_gpu(&self) -> bool {
+        matches!(self, Self::OpenVinoGpu)
+    }
+
+    #[must_use]
+    pub const fn is_gpu(&self) -> bool {
+        matches!(
+            self,
+            Self::TensorRt | Self::Cuda | Self::DirectMl | Self::Vulkan | Self::OpenVinoGpu
+        )
     }
 }
 
@@ -96,6 +177,56 @@ impl CalibrationReport {
             && self.max_latency_ms <= QUALIFICATION_MAX_DEADLINE_MS
             && self.deadline_miss_count == 0
             && self.discontinuities == 0
+    }
+}
+
+/// Priority score for candidate backends in AUTO selection.
+/// Higher score indicates higher selection priority:
+/// - Dedicated GPU (Specific runtime: `TensorRT` score 100; General runtimes: `Vulkan` 90, `DirectML` 85)
+/// - NPU (Intel NPU via `OpenVINO` score 80; AMD NPU via Ryzen AI / XDNA score 80; Apple Neural Engine via `CoreML` 75)
+/// - Integrated GPU (Intel Arc / iGPU via `OpenVINO` GPU score 70)
+/// - CPU (`OpenVINO` CPU AMX/VNNI score 60; Tract pure Rust CPU baseline score 50)
+#[must_use]
+pub fn backend_priority_score(backend_name: &str) -> u32 {
+    match backend_name.to_ascii_lowercase().as_str() {
+        // Tier 1: Dedicated GPU - Specific runtime (NVIDIA TensorRT)
+        "tensorrt" => 100,
+        // Tier 1: Dedicated GPU - Specific runtime (CUDA)
+        "cuda" | "nvidia" => 95,
+        // Tier 1: Dedicated GPU - General runtime (Vulkan)
+        "vulkan" => 90,
+        // Tier 1: Dedicated GPU - General runtime (DirectML / DirectX 12)
+        "directml" | "dx12" => 85,
+        // Tier 2: NPU (Intel NPU via OpenVINO, AMD NPU via Ryzen AI / XDNA)
+        "openvino-npu" | "intel-npu" | "npu" | "ryzen-ai" | "ryzenai" | "amd-npu" | "vitisai"
+        | "xdna" => 80,
+        // Tier 2: Apple Neural Engine via CoreML
+        "coreml" | "ane" => 75,
+        // Tier 3: Integrated GPU (Intel Arc / iGPU via OpenVINO GPU, AMD iGPU)
+        "openvino-gpu" | "intel-gpu" | "arc" => 70,
+        "openvino" => 65,
+        // Tier 4: CPU (OpenVINO CPU AMX/VNNI, Tract CPU)
+        "openvino-cpu" | "intel-cpu" => 60,
+        "tract" | "cpu" => 50,
+        _ => 10,
+    }
+}
+
+/// Maps a backend name to its canonical `BackendSelection`.
+#[must_use]
+pub fn backend_selection_from_name(backend_name: &str) -> BackendSelection {
+    match backend_name.to_ascii_lowercase().as_str() {
+        "tensorrt" => BackendSelection::TensorRt,
+        "cuda" | "nvidia" => BackendSelection::Cuda,
+        "vulkan" => BackendSelection::Vulkan,
+        "directml" | "dx12" => BackendSelection::DirectMl,
+        "ryzen-ai" | "ryzenai" | "amd-npu" | "vitisai" | "xdna" => BackendSelection::RyzenAi,
+        "openvino-npu" | "intel-npu" | "npu" => BackendSelection::OpenVinoNpu,
+        "openvino-gpu" | "intel-gpu" | "arc" => BackendSelection::OpenVinoGpu,
+        "openvino-cpu" | "intel-cpu" => BackendSelection::OpenVinoCpu,
+        "openvino" => BackendSelection::OpenVino,
+        "coreml" | "ane" => BackendSelection::CoreMl,
+        _ => BackendSelection::TractCpu,
     }
 }
 
@@ -166,15 +297,24 @@ pub fn select_auto(report: CalibrationReport) -> BackendSelection {
     if !report.is_promoted() {
         return BackendSelection::TractCpu;
     }
+    backend_selection_from_name(&report.backend_name)
+}
 
-    match report.backend_name.to_ascii_lowercase().as_str() {
-        "tensorrt" => BackendSelection::TensorRt,
-        "cuda" | "nvidia" => BackendSelection::Cuda,
-        "openvino" | "npu" => BackendSelection::OpenVino,
-        "directml" | "dx12" => BackendSelection::DirectMl,
-        "coreml" | "ane" => BackendSelection::CoreMl,
-        _ => BackendSelection::TractCpu,
-    }
+/// Evaluates a list of candidate calibration reports and selects the best promoted backend
+/// according to the 4-tier hierarchy:
+/// 1. Dedicated GPU (`TensorRT` specific runtime > `DirectML` / `Vulkan` general runtime)
+/// 2. NPU (Intel NPU via `OpenVINO` / AMD NPU via Ryzen AI / Apple Neural Engine)
+/// 3. Integrated GPU (Intel Arc / iGPU via `OpenVINO` GPU, AMD iGPU)
+/// 4. CPU (Tract CPU baseline)
+#[must_use]
+pub fn select_best(reports: &[CalibrationReport]) -> BackendSelection {
+    reports
+        .iter()
+        .filter(|r| r.is_promoted())
+        .max_by_key(|r| backend_priority_score(&r.backend_name))
+        .map_or(BackendSelection::TractCpu, |r| {
+            backend_selection_from_name(&r.backend_name)
+        })
 }
 
 /// AUTO backend policy manager.
@@ -202,58 +342,149 @@ impl AutoPolicy {
     }
 
     #[must_use]
+    pub fn select_best(&self, candidates: &[CalibrationReport]) -> BackendSelection {
+        select_best(candidates)
+    }
+
+    #[must_use]
+    #[allow(clippy::too_many_lines)]
+    pub fn resolve_candidates(
+        &self,
+        request: BackendRequest,
+        candidates: &[CalibrationReport],
+    ) -> BackendSelection {
+        match request {
+            BackendRequest::Auto => select_best(candidates),
+            BackendRequest::DedicatedGpu => candidates
+                .iter()
+                .filter(|r| {
+                    if !r.is_promoted() {
+                        return false;
+                    }
+                    backend_selection_from_name(&r.backend_name).is_dedicated_gpu()
+                })
+                .max_by_key(|r| backend_priority_score(&r.backend_name))
+                .map_or(BackendSelection::TractCpu, |r| {
+                    backend_selection_from_name(&r.backend_name)
+                }),
+            BackendRequest::Npu => candidates
+                .iter()
+                .filter(|r| {
+                    if !r.is_promoted() {
+                        return false;
+                    }
+                    let sel = backend_selection_from_name(&r.backend_name);
+                    sel.is_npu() || r.backend_name.eq_ignore_ascii_case("openvino")
+                })
+                .max_by_key(|r| backend_priority_score(&r.backend_name))
+                .map_or(BackendSelection::TractCpu, |r| {
+                    let sel = backend_selection_from_name(&r.backend_name);
+                    if matches!(sel, BackendSelection::OpenVino) {
+                        BackendSelection::OpenVinoNpu
+                    } else {
+                        sel
+                    }
+                }),
+            BackendRequest::IntegratedGpu => candidates
+                .iter()
+                .filter(|r| {
+                    if !r.is_promoted() {
+                        return false;
+                    }
+                    backend_selection_from_name(&r.backend_name).is_integrated_gpu()
+                })
+                .max_by_key(|r| backend_priority_score(&r.backend_name))
+                .map_or(BackendSelection::TractCpu, |r| {
+                    backend_selection_from_name(&r.backend_name)
+                }),
+            BackendRequest::Cpu | BackendRequest::TractCpu => BackendSelection::TractCpu,
+            BackendRequest::TensorRt => candidates
+                .iter()
+                .find(|r| {
+                    r.is_promoted()
+                        && (r.backend_name.eq_ignore_ascii_case("tensorrt")
+                            || r.backend_name.eq_ignore_ascii_case("cuda"))
+                })
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::TensorRt),
+            BackendRequest::Cuda => candidates
+                .iter()
+                .find(|r| r.is_promoted() && r.backend_name.eq_ignore_ascii_case("cuda"))
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::Cuda),
+            BackendRequest::DirectMl => candidates
+                .iter()
+                .find(|r| r.is_promoted() && r.backend_name.eq_ignore_ascii_case("directml"))
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::DirectMl),
+            BackendRequest::Vulkan => candidates
+                .iter()
+                .find(|r| r.is_promoted() && r.backend_name.eq_ignore_ascii_case("vulkan"))
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::Vulkan),
+            BackendRequest::RyzenAi => candidates
+                .iter()
+                .find(|r| {
+                    r.is_promoted()
+                        && (r.backend_name.eq_ignore_ascii_case("ryzen-ai")
+                            || r.backend_name.eq_ignore_ascii_case("ryzenai")
+                            || r.backend_name.eq_ignore_ascii_case("amd-npu")
+                            || r.backend_name.eq_ignore_ascii_case("vitisai")
+                            || r.backend_name.eq_ignore_ascii_case("xdna"))
+                })
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::RyzenAi),
+            BackendRequest::OpenVinoNpu => candidates
+                .iter()
+                .find(|r| {
+                    r.is_promoted()
+                        && (r.backend_name.eq_ignore_ascii_case("openvino-npu")
+                            || r.backend_name.eq_ignore_ascii_case("npu")
+                            || r.backend_name.eq_ignore_ascii_case("intel-npu")
+                            || r.backend_name.eq_ignore_ascii_case("openvino"))
+                })
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::OpenVinoNpu),
+            BackendRequest::OpenVinoGpu => candidates
+                .iter()
+                .find(|r| {
+                    r.is_promoted()
+                        && (r.backend_name.eq_ignore_ascii_case("openvino-gpu")
+                            || r.backend_name.eq_ignore_ascii_case("intel-gpu")
+                            || r.backend_name.eq_ignore_ascii_case("arc"))
+                })
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::OpenVinoGpu),
+            BackendRequest::OpenVinoCpu => candidates
+                .iter()
+                .find(|r| {
+                    r.is_promoted()
+                        && (r.backend_name.eq_ignore_ascii_case("openvino-cpu")
+                            || r.backend_name.eq_ignore_ascii_case("intel-cpu"))
+                })
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::OpenVinoCpu),
+            BackendRequest::OpenVino => candidates
+                .iter()
+                .find(|r| {
+                    r.is_promoted()
+                        && (r.backend_name.eq_ignore_ascii_case("openvino")
+                            || r.backend_name.eq_ignore_ascii_case("openvino-npu")
+                            || r.backend_name.eq_ignore_ascii_case("openvino-gpu")
+                            || r.backend_name.eq_ignore_ascii_case("npu"))
+                })
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::OpenVino),
+            BackendRequest::CoreMl => candidates
+                .iter()
+                .find(|r| {
+                    r.is_promoted()
+                        && (r.backend_name.eq_ignore_ascii_case("coreml")
+                            || r.backend_name.eq_ignore_ascii_case("ane"))
+                })
+                .map_or(BackendSelection::TractCpu, |_| BackendSelection::CoreMl),
+        }
+    }
+
+    #[must_use]
     pub fn resolve_request(
         &self,
         request: BackendRequest,
         report: Option<&CalibrationReport>,
     ) -> BackendSelection {
-        match request {
-            BackendRequest::Auto => {
-                report.map_or(BackendSelection::TractCpu, |rep| self.select(rep))
-            }
-            BackendRequest::TractCpu => BackendSelection::TractCpu,
-            BackendRequest::TensorRt => match report {
-                Some(rep)
-                    if rep.is_promoted()
-                        && (rep.backend_name.eq_ignore_ascii_case("tensorrt")
-                            || rep.backend_name.eq_ignore_ascii_case("cuda")) =>
-                {
-                    BackendSelection::TensorRt
-                }
-                _ => BackendSelection::TractCpu,
-            },
-            BackendRequest::Cuda => match report {
-                Some(rep)
-                    if rep.is_promoted() && rep.backend_name.eq_ignore_ascii_case("cuda") =>
-                {
-                    BackendSelection::Cuda
-                }
-                _ => BackendSelection::TractCpu,
-            },
-            BackendRequest::OpenVino => match report {
-                Some(rep)
-                    if rep.is_promoted() && rep.backend_name.eq_ignore_ascii_case("openvino") =>
-                {
-                    BackendSelection::OpenVino
-                }
-                _ => BackendSelection::TractCpu,
-            },
-            BackendRequest::DirectMl => match report {
-                Some(rep)
-                    if rep.is_promoted() && rep.backend_name.eq_ignore_ascii_case("directml") =>
-                {
-                    BackendSelection::DirectMl
-                }
-                _ => BackendSelection::TractCpu,
-            },
-            BackendRequest::CoreMl => match report {
-                Some(rep)
-                    if rep.is_promoted() && rep.backend_name.eq_ignore_ascii_case("coreml") =>
-                {
-                    BackendSelection::CoreMl
-                }
-                _ => BackendSelection::TractCpu,
-            },
-        }
+        report.map_or(BackendSelection::TractCpu, |rep| {
+            self.resolve_candidates(request, std::slice::from_ref(rep))
+        })
     }
 }

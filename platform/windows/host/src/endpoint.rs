@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use realtime_noise_contracts::{
-    EndpointError, EndpointStatus, FrameEnvelope, VirtualMicrophone, WireFrameEnvelopeV1,
-    HOP_SAMPLES,
+    EndpointError, EndpointStatus, FrameEnvelope, HOP_SAMPLES, VirtualMicrophone,
+    WireFrameEnvelopeV1,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,10 +35,7 @@ pub enum SupervisorState {
     /// Engine process or inference subsystem is unavailable.
     EngineUnavailable,
     /// Engine is currently restarting after a recoverable failure.
-    Restarting {
-        attempt: usize,
-        next_retry_ms: u64,
-    },
+    Restarting { attempt: usize, next_retry_ms: u64 },
     /// Unrecoverable crash loop reached; explicit user intervention required.
     TerminalSafeState {
         reason: String,

@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use realtime_noise_accelerators::{
     CalibrationReport, CoreMlBackend, CudaBackend, OpenVINOBackend, PromotionDecision,
-    QUALIFICATION_MAX_DEADLINE_MS, QUALIFICATION_MAX_P99_MS, evaluate_calibration,
+    QUALIFICATION_MAX_DEADLINE_MS, QUALIFICATION_MAX_P99_MS, RyzenAiBackend, evaluate_calibration,
 };
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_model::InferenceBackend;
@@ -78,9 +78,13 @@ fn parse_args() -> Result<CliArgs, String> {
                 println!("Usage: calibrate-backend [OPTIONS]");
                 println!();
                 println!("Options:");
-                println!("  --duration-minutes <MINUTES>  Calibration duration in audio minutes [default: 5]");
+                println!(
+                    "  --duration-minutes <MINUTES>  Calibration duration in audio minutes [default: 5]"
+                );
                 println!("  --duration-seconds <SECONDS>  Calibration duration in audio seconds");
-                println!("  --backend <NAME>              Backend to calibrate (cuda, openvino, coreml) [default: cuda]");
+                println!(
+                    "  --backend <NAME>              Backend to calibrate (cuda, openvino, coreml) [default: cuda]"
+                );
                 println!("  --output <PATH>               Path to save JSON calibration report");
                 println!("  --json                        Print report as JSON to stdout");
                 println!("  --force-promote               Override staging gate for testing");
@@ -112,19 +116,27 @@ fn calculate_percentile(sorted_samples: &[f64], pct: f64) -> f64 {
 }
 
 fn run_calibration(cli: &CliArgs) -> Result<CalibrationReport, String> {
-    let effective_seconds = cli
-        .duration_seconds
-        .unwrap_or(cli.duration_minutes * 60.0);
+    let effective_seconds = cli.duration_seconds.unwrap_or(cli.duration_minutes * 60.0);
     // In real-time audio at 48kHz with 480 samples per hop, 1 second = 100 hops.
     let total_hops = (effective_seconds * 100.0).round() as usize;
     // We calibrate over sample frames (up to 30,000 hops for 5 minutes, or minimum 100 hops)
     let hops_to_benchmark = total_hops.clamp(100, 30_000);
 
-    let mut backend_instance: Box<dyn InferenceBackend> = match cli.backend.to_lowercase().as_str() {
+    let mut backend_instance: Box<dyn InferenceBackend> = match cli.backend.to_lowercase().as_str()
+    {
         "cuda" | "tensorrt" => Box::new(CudaBackend::new_mock()),
-        "openvino" | "npu" => Box::new(OpenVINOBackend::new_mock()),
+        "ryzenai" | "ryzen-ai" | "vitisai" | "xdna" | "amd-npu" => {
+            Box::new(RyzenAiBackend::new_mock_npu())
+        }
+        "openvino" | "npu" | "openvino-npu" => Box::new(OpenVINOBackend::new_mock_npu()),
+        "openvino-gpu" | "gpu" => Box::new(OpenVINOBackend::new_mock_gpu()),
+        "openvino-cpu" | "cpu" => Box::new(OpenVINOBackend::new_mock_cpu()),
         "coreml" | "ane" => Box::new(CoreMlBackend::new_mock()),
-        other => return Err(format!("unsupported accelerator backend for calibration: {other}")),
+        other => {
+            return Err(format!(
+                "unsupported accelerator backend for calibration: {other}"
+            ));
+        }
     };
 
     let sample_frame: AudioFrame = [0.0; HOP_SAMPLES];

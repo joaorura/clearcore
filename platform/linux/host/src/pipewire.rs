@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_const_for_fn)]
 
-use std::collections::HashMap;
 use realtime_noise_contracts::{AudioBackend, DeviceStatus, EndpointError};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Detailed device descriptor for `PipeWire` input/capture endpoints.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,7 +64,8 @@ impl PipeWireAudioBackend {
 
     pub fn unregister_device(&mut self, device_id: &str) {
         self.known_devices.remove(device_id);
-        if self.current_device.as_deref() == Some(device_id) && self.status == DeviceStatus::Active {
+        if self.current_device.as_deref() == Some(device_id) && self.status == DeviceStatus::Active
+        {
             self.status = DeviceStatus::WaitingForDevice;
         }
     }
@@ -85,7 +86,10 @@ impl PipeWireAudioBackend {
         if let Some(dev) = self.known_devices.get_mut(device_id) {
             dev.is_busy = busy;
         }
-        if self.current_device.as_deref() == Some(device_id) && busy && self.status == DeviceStatus::Active {
+        if self.current_device.as_deref() == Some(device_id)
+            && busy
+            && self.status == DeviceStatus::Active
+        {
             self.status = DeviceStatus::UnavailableBusy;
         }
     }
@@ -179,6 +183,9 @@ mod tests {
     fn test_device_not_found() {
         let mut backend = PipeWireAudioBackend::new();
         let res = backend.start_capture("non-existent");
-        assert_eq!(res, Err(EndpointError::DeviceNotFound("non-existent".to_string())));
+        assert_eq!(
+            res,
+            Err(EndpointError::DeviceNotFound("non-existent".to_string()))
+        );
     }
 }

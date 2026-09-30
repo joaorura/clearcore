@@ -11,7 +11,8 @@ fn diagnostic_export_excludes_pcm_embeddings_and_meeting_names() {
         device_id: "hw-mic-usb-046d-0825-device-serial-999".to_string(),
         generation: 42,
         causes: vec![
-            "Crash: buffer overrun during 'Quarterly Board Meeting (Confidential)' session".to_string(),
+            "Crash: buffer overrun during 'Quarterly Board Meeting (Confidential)' session"
+                .to_string(),
             "Transcript leak test: 'We need to fire the CFO immediately'".to_string(),
         ],
         last_attempt: Some(3),

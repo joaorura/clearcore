@@ -1,9 +1,16 @@
 #![forbid(unsafe_code)]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::float_cmp,
+    clippy::similar_names,
+    clippy::too_many_lines,
+    clippy::redundant_clone
+)]
 
 use realtime_noise_accelerators::{
-    AutoPolicy, BackendRequest, BackendSelection, CalibrationReport, PromotionDecision,
-    select_auto,
+    AutoPolicy, BackendRequest, BackendSelection, CalibrationReport, DeviceTier, PromotionDecision,
+    select_auto, select_best,
 };
 
 #[test]
@@ -61,7 +68,10 @@ fn auto_uses_warmed_tract_when_plugin_fails_quality_gate() {
         decision: PromotionDecision::Promoted,
         reason: None,
     };
-    assert_eq!(select_auto(discontinuity_report), BackendSelection::TractCpu);
+    assert_eq!(
+        select_auto(discontinuity_report),
+        BackendSelection::TractCpu
+    );
 
     // 4. Test AutoPolicy struct selection behavior
     let policy = AutoPolicy::new();
@@ -144,7 +154,8 @@ fn user_can_select_tensorrt_openvino_or_directml_explicitly() {
     assert!(selection.is_nvidia());
 
     // 2. User explicitly selects TensorRT
-    let explicit_trt = policy.resolve_request(BackendRequest::TensorRt, Some(&passing_tensorrt_report));
+    let explicit_trt =
+        policy.resolve_request(BackendRequest::TensorRt, Some(&passing_tensorrt_report));
     assert_eq!(explicit_trt, BackendSelection::TensorRt);
 
     // 3. User explicitly selects OpenVINO (supported on both Linux and Windows)
@@ -161,7 +172,8 @@ fn user_can_select_tensorrt_openvino_or_directml_explicitly() {
         decision: PromotionDecision::Promoted,
         reason: None,
     };
-    let explicit_ov = policy.resolve_request(BackendRequest::OpenVino, Some(&passing_openvino_report));
+    let explicit_ov =
+        policy.resolve_request(BackendRequest::OpenVino, Some(&passing_openvino_report));
     assert_eq!(explicit_ov, BackendSelection::OpenVino);
     assert_eq!(explicit_ov.name(), "openvino");
 
@@ -179,7 +191,281 @@ fn user_can_select_tensorrt_openvino_or_directml_explicitly() {
         decision: PromotionDecision::Promoted,
         reason: None,
     };
-    let explicit_dml = policy.resolve_request(BackendRequest::DirectMl, Some(&passing_directml_report));
+    let explicit_dml =
+        policy.resolve_request(BackendRequest::DirectMl, Some(&passing_directml_report));
     assert_eq!(explicit_dml, BackendSelection::DirectMl);
     assert_eq!(explicit_dml.name(), "directml");
+}
+
+#[test]
+fn auto_four_tier_hierarchy_priority() {
+    let trt_report = CalibrationReport {
+        backend_name: "tensorrt".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.35,
+        p95_latency_ms: 0.45,
+        p99_latency_ms: 0.50,
+        max_latency_ms: 0.80,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let vulkan_report = CalibrationReport {
+        backend_name: "vulkan".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.80,
+        p95_latency_ms: 1.20,
+        p99_latency_ms: 1.50,
+        max_latency_ms: 2.00,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let ryzenai_npu_report = CalibrationReport {
+        backend_name: "ryzen-ai".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.90,
+        p95_latency_ms: 1.30,
+        p99_latency_ms: 1.60,
+        max_latency_ms: 2.20,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let openvino_npu_report = CalibrationReport {
+        backend_name: "openvino-npu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.00,
+        p95_latency_ms: 1.40,
+        p99_latency_ms: 1.70,
+        max_latency_ms: 2.30,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let openvino_gpu_report = CalibrationReport {
+        backend_name: "openvino-gpu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.50,
+        p95_latency_ms: 2.10,
+        p99_latency_ms: 2.80,
+        max_latency_ms: 3.50,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let tract_cpu_report = CalibrationReport {
+        backend_name: "tract".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 4.80,
+        p95_latency_ms: 5.60,
+        p99_latency_ms: 6.20,
+        max_latency_ms: 6.90,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    // 1. All candidates present: Tier 1 Specific (TensorRT) wins
+    let all_candidates = [
+        trt_report.clone(),
+        vulkan_report.clone(),
+        ryzenai_npu_report.clone(),
+        openvino_npu_report.clone(),
+        openvino_gpu_report.clone(),
+        tract_cpu_report.clone(),
+    ];
+    let sel = select_best(&all_candidates);
+    assert_eq!(sel, BackendSelection::TensorRt);
+    assert_eq!(sel.tier(), DeviceTier::DedicatedGpu);
+
+    // 2. If TensorRT is absent/fails, Tier 1 General (Vulkan) wins over NPU, iGPU, and CPU
+    let no_trt = [
+        vulkan_report.clone(),
+        ryzenai_npu_report.clone(),
+        openvino_gpu_report.clone(),
+        tract_cpu_report.clone(),
+    ];
+    let sel = select_best(&no_trt);
+    assert_eq!(sel, BackendSelection::Vulkan);
+    assert_eq!(sel.tier(), DeviceTier::DedicatedGpu);
+
+    // 3. If all Dedicated GPUs fail/absent, Tier 2 (NPU: Ryzen AI or OpenVINO NPU) wins over iGPU and CPU
+    let npu_and_igpu = [
+        ryzenai_npu_report.clone(),
+        openvino_gpu_report.clone(),
+        tract_cpu_report.clone(),
+    ];
+    let sel = select_best(&npu_and_igpu);
+    assert_eq!(sel, BackendSelection::RyzenAi);
+    assert_eq!(sel.tier(), DeviceTier::Npu);
+    assert!(sel.is_npu());
+    assert!(sel.is_amd());
+
+    // 4. If NPU is also absent/fails, Tier 3 (Integrated GPU: OpenVINO GPU) wins over CPU
+    let igpu_and_cpu = [openvino_gpu_report.clone(), tract_cpu_report.clone()];
+    let sel = select_best(&igpu_and_cpu);
+    assert_eq!(sel, BackendSelection::OpenVinoGpu);
+    assert_eq!(sel.tier(), DeviceTier::IntegratedGpu);
+    assert!(sel.is_integrated_gpu());
+
+    // 5. If iGPU also fails/absent, Tier 4 (CPU: Tract) is selected safely
+    let cpu_only = [tract_cpu_report];
+    let sel = select_best(&cpu_only);
+    assert_eq!(sel, BackendSelection::TractCpu);
+    assert_eq!(sel.tier(), DeviceTier::Cpu);
+    assert!(sel.is_tract_cpu());
+}
+
+#[test]
+fn user_can_select_by_device_category() {
+    let policy = AutoPolicy::new();
+
+    let trt_report = CalibrationReport {
+        backend_name: "tensorrt".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.35,
+        p95_latency_ms: 0.45,
+        p99_latency_ms: 0.50,
+        max_latency_ms: 0.80,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let openvino_npu = CalibrationReport {
+        backend_name: "openvino-npu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.00,
+        p95_latency_ms: 1.40,
+        p99_latency_ms: 1.70,
+        max_latency_ms: 2.30,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let openvino_gpu = CalibrationReport {
+        backend_name: "openvino-gpu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.50,
+        p95_latency_ms: 2.10,
+        p99_latency_ms: 2.80,
+        max_latency_ms: 3.50,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let candidates = [trt_report, openvino_npu, openvino_gpu];
+
+    // User forces Dedicated GPU
+    assert_eq!(
+        policy.resolve_candidates(BackendRequest::DedicatedGpu, &candidates),
+        BackendSelection::TensorRt
+    );
+
+    // User forces NPU (skipping Dedicated GPU)
+    let npu_sel = policy.resolve_candidates(BackendRequest::Npu, &candidates);
+    assert_eq!(npu_sel, BackendSelection::OpenVinoNpu);
+    assert!(npu_sel.is_npu());
+
+    // User forces Integrated GPU (skipping dGPU and NPU)
+    let igpu_sel = policy.resolve_candidates(BackendRequest::IntegratedGpu, &candidates);
+    assert_eq!(igpu_sel, BackendSelection::OpenVinoGpu);
+    assert!(igpu_sel.is_integrated_gpu());
+
+    // User forces CPU
+    let cpu_sel = policy.resolve_candidates(BackendRequest::Cpu, &candidates);
+    assert_eq!(cpu_sel, BackendSelection::TractCpu);
+    assert!(cpu_sel.is_tract_cpu());
+}
+
+#[test]
+fn user_can_select_amd_ryzen_ai_on_linux_and_windows() {
+    let policy = AutoPolicy::new();
+
+    let passing_ryzenai_report = CalibrationReport {
+        backend_name: "ryzen-ai".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.95,
+        p95_latency_ms: 1.40,
+        p99_latency_ms: 1.75,
+        max_latency_ms: 2.50,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    // User explicitly selects Ryzen AI
+    let explicit_ryzen =
+        policy.resolve_request(BackendRequest::RyzenAi, Some(&passing_ryzenai_report));
+    assert_eq!(explicit_ryzen, BackendSelection::RyzenAi);
+    assert_eq!(explicit_ryzen.name(), "ryzen-ai");
+    assert!(explicit_ryzen.is_amd());
+    assert!(explicit_ryzen.is_npu());
+    assert_eq!(explicit_ryzen.tier(), DeviceTier::Npu);
+
+    // User explicitly selects Vulkan for AMD iGPU or dGPU
+    let passing_vulkan_report = CalibrationReport {
+        backend_name: "vulkan".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.10,
+        p95_latency_ms: 1.60,
+        p99_latency_ms: 2.00,
+        max_latency_ms: 2.80,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+    let explicit_vulkan =
+        policy.resolve_request(BackendRequest::Vulkan, Some(&passing_vulkan_report));
+    assert_eq!(explicit_vulkan, BackendSelection::Vulkan);
+    assert_eq!(explicit_vulkan.name(), "vulkan");
+    assert!(explicit_vulkan.is_dedicated_gpu());
+
+    // If Ryzen AI report fails quality gate, falls back to TractCpu safely
+    let failed_ryzenai_report = CalibrationReport {
+        backend_name: "ryzen-ai".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 2.0,
+        p95_latency_ms: 5.0,
+        p99_latency_ms: 12.0, // > 10.0 ms
+        max_latency_ms: 15.0,
+        deadline_miss_count: 2,
+        discontinuities: 0,
+        decision: PromotionDecision::NotPromoted,
+        reason: Some("Exceeded latency budget".to_owned()),
+    };
+    let fallback = policy.resolve_request(BackendRequest::RyzenAi, Some(&failed_ryzenai_report));
+    assert_eq!(fallback, BackendSelection::TractCpu);
+    assert!(fallback.is_tract_cpu());
 }

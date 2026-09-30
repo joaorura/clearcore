@@ -15,12 +15,7 @@ fn qualification_enforces_p99_latency_threshold() {
 
     // Latency within threshold passes (if all else passes)
     let at_threshold = evaluate_calibration(
-        "cuda",
-        300.0,
-        30_000,
-        2.0,
-        5.0,
-        10.0, // p99 == 10.0 ms
+        "cuda", 300.0, 30_000, 2.0, 5.0, 10.0, // p99 == 10.0 ms
         10.0, // max == 10.0 ms
         0,    // deadline misses
         0,    // discontinuities
@@ -29,15 +24,8 @@ fn qualification_enforces_p99_latency_threshold() {
 
     // Latency exceeding 10.0 ms fails
     let over_threshold = evaluate_calibration(
-        "cuda",
-        300.0,
-        30_000,
-        2.0,
-        5.0,
-        10.001, // p99 > 10.0 ms
-        10.001,
-        0,
-        0,
+        "cuda", 300.0, 30_000, 2.0, 5.0, 10.001, // p99 > 10.0 ms
+        10.001, 0, 0,
     );
     assert_eq!(over_threshold.decision, PromotionDecision::NotPromoted);
     assert!(
@@ -52,15 +40,7 @@ fn qualification_enforces_p99_latency_threshold() {
 #[test]
 fn qualification_enforces_zero_discontinuities() {
     let with_discontinuity = evaluate_calibration(
-        "openvino",
-        300.0,
-        30_000,
-        1.0,
-        2.0,
-        3.0,
-        4.0,
-        0,
-        1, // 1 discontinuity
+        "openvino", 300.0, 30_000, 1.0, 2.0, 3.0, 4.0, 0, 1, // 1 discontinuity
     );
     assert_eq!(with_discontinuity.decision, PromotionDecision::NotPromoted);
     assert!(
@@ -75,14 +55,7 @@ fn qualification_enforces_zero_discontinuities() {
 #[test]
 fn qualification_enforces_zero_deadline_misses() {
     let with_deadline_miss = evaluate_calibration(
-        "coreml",
-        300.0,
-        30_000,
-        1.0,
-        2.0,
-        3.0,
-        11.5,
-        1, // 1 deadline miss
+        "coreml", 300.0, 30_000, 1.0, 2.0, 3.0, 11.5, 1, // 1 deadline miss
         0,
     );
     assert_eq!(with_deadline_miss.decision, PromotionDecision::NotPromoted);

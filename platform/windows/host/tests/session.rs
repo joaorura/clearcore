@@ -1,9 +1,14 @@
 #![forbid(unsafe_code)]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::float_cmp)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::float_cmp
+)]
 
 use realtime_noise_contracts::{
-    Discontinuity, EndpointError, EndpointStatus, FrameEnvelope, VirtualMicrophone,
-    WireFrameEnvelopeV1, HOP_SAMPLES,
+    Discontinuity, EndpointError, EndpointStatus, FrameEnvelope, HOP_SAMPLES, VirtualMicrophone,
+    WireFrameEnvelopeV1,
 };
 use realtime_noise_windows_host::endpoint::{SupervisorState, WindowsVirtualMicrophone};
 
@@ -23,7 +28,9 @@ fn session_contention_returns_device_busy_or_unavailable_busy() {
     assert_eq!(mic1.status(), EndpointStatus::Active);
 
     // mic2 attempts to acquire session on the same device path while mic1 is active
-    let err = mic2.start().expect_err("mic2 must fail due to session contention");
+    let err = mic2
+        .start()
+        .expect_err("mic2 must fail due to session contention");
     assert_eq!(
         err,
         EndpointError::DeviceBusy,

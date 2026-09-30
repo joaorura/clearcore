@@ -1,7 +1,7 @@
-# Hardware Accelerator Qualification & Staging Gate Report
+# Hardware Accelerator Qualification & Architecture Report
 
 **Project:** Hippocamp Realtime Audio Intelligence  
-**Document Revision:** 1.0 (2026-09-30)  
+**Document Revision:** 2.0 (2026-09-30)  
 **Host Hardware:** Intel(R) Core(TM) Ultra 7 265H (16 physical cores, AVX2 / AVX-VNNI)  
 **Discrete GPU:** NVIDIA RTX PRO 1000 Blackwell Generation Laptop GPU (`GB207GLM`, `sm_120`, Compute Capability 12.0)  
 **Integrated NPU:** Intel Core Ultra 200H Series NPU (`/dev/accel/accel0`, `intel_vpu`)  
@@ -11,36 +11,71 @@
 
 ## 1. Executive Summary
 
-This qualification document records the evaluation of hardware acceleration plugins (`CudaBackend`, `OpenVINOBackend`, `CoreMlBackend`) and the conservative `AUTO` selection policy implemented in Wave 6 / Task 15 (`realtime-noise-accelerators`).
+This qualification document records the evaluation of hardware acceleration plugins (`CudaBackend` / `TensorRt`, `RyzenAiBackend`, `OpenVINOBackend`, `CoreMlBackend`) and the multi-tier `AUTO` and explicit user selection policy implemented in Wave 6 / Task 15 (`realtime-noise-accelerators`).
 
 For the current General Availability (GA) release:
-- **Tract CPU Reference Baseline (`tract` 0.19.16, x86_64 AVX2)** is designated as the **exclusive, fully qualified production backend**.
-- **NVIDIA Blackwell GPU (`sm_120`)** and **Intel NPU** are recorded as **`NOT_PROMOTED` / `GATED_STAGING`**.
-
-The conservative `AUTO` selection policy strictly enforces this hardware gate, guaranteeing that all production deployments default and fall back to the pre-warmed tract CPU backend.
+- **Tract CPU Reference Baseline (`tract` 0.19.16, x86_64 AVX2)** is designated as the **exclusive, fully qualified production default**.
+- **Hardware Acceleration Hierarchy (4 Tiers)**:
+  1. **Tier 1: Dedicated GPU (dGPU)**
+     - Specific runtime prioritized: **NVIDIA TensorRT** (`tensorrt` on Linux and Windows).
+     - General runtime fallback: **Vulkan** (`vulkan` for AMD/NVIDIA/Intel on Linux & Windows) and **DirectML** (`directml` for Windows).
+  2. **Tier 2: NPU (Neural Processing Unit)**
+     - **Intel NPU** via OpenVINO (`openvino-npu`, `/dev/accel/accel0` on Linux, NPU driver on Windows).
+     - **AMD NPU** via AMD Ryzen AI Software (`ryzen-ai`, `amdnpu` / `amdxdna` driver on Linux, `VitisAI` on Windows for Ryzen 7040 / 8040 / AI 300 series).
+     - **Apple Neural Engine** via CoreML (`coreml` / `ane` on macOS Apple Silicon).
+  3. **Tier 3: Integrated GPU (iGPU)**
+     - **Intel Arc / iGPU** via OpenVINO GPU (`openvino-gpu` on Linux & Windows).
+     - **AMD Radeon iGPU** via Vulkan (`vulkan` on Linux) or DirectML (`directml` on Windows).
+  4. **Tier 4: CPU (Central Processing Unit)**
+     - **Tract CPU** (`tract`, 100% Rust pure safe `#![forbid(unsafe_code)]` baseline).
+     - **OpenVINO CPU** (`openvino-cpu` with AVX-VNNI / AMX acceleration).
 
 ```
-+---------------------------------------------------------------------------------------+
-|                                HIPPOCAMP ENGINE ROUTING                               |
-|                                                                                       |
-|   +---------------------+   +---------------------------+   +---------------------+   |
-|   |    Intel CPU        |   |    NVIDIA Blackwell GPU   |   |      Intel NPU      |   |
-|   | Core Ultra 7 265H   |   |   RTX PRO 1000 Laptop     |   |   Core Ultra 200H   |   |
-|   | (16 physical cores) |   |    (GB207GLM, sm_120)     |   |  (/dev/accel/accel0)|   |
-|   +----------+----------+   +-------------+-------------+   +----------+----------+   |
-|              |                            |                            |              |
-|              v                            v                            v              |
-|        tract Runtime             TensorRT 11.3 Engine            OpenVINO / NPU       |
-|    - Default GA Reference     - Sub-millisecond latency      - Ultra-low power        |
-|    - Zero external driver     - Extreme burst throughput     - Battery preservation   |
-|    - 100% deterministic       - Studio quality suppression   - Continuous background  |
-|    [QUALIFIED_GA_DEFAULT]         [GATED_STAGING]                [GATED_STAGING]      |
-+---------------------------------------------------------------------------------------+
++---------------------------------------------------------------------------------------------------------+
+|                                    HIPPOCAMP ACCELERATION TAXONOMY                                      |
+|                                                                                                         |
+|   +---------------------------------------+   +---------------------------------------+                 |
+|   |         TIER 1: DEDICATED GPU         |   |             TIER 2: NPU               |                 |
+|   | 1st: TensorRT (NVIDIA Dedicated)      |   | - Intel NPU (OpenVINO NPU, Linux/Win) |                 |
+|   | 2nd: Vulkan / DirectML (General dGPU) |   | - AMD NPU (Ryzen AI / XDNA, Linux/Win)|                 |
+|   |                                       |   | - Apple Neural Engine (CoreML, macOS) |                 |
+|   +-------------------+-------------------+   +-------------------+-------------------+                 |
+|                       |                                           |                                     |
+|                       v                                           v                                     |
+|   +---------------------------------------+   +---------------------------------------+                 |
+|   |        TIER 3: INTEGRATED GPU         |   |              TIER 4: CPU              |                 |
+|   | - Intel Arc / iGPU (OpenVINO GPU)     |   | - Tract CPU (100% Safe Rust Baseline) |                 |
+|   | - AMD Radeon iGPU (Vulkan / DirectML) |   | - OpenVINO CPU (AMX / AVX-VNNI)       |                 |
+|   +---------------------------------------+   +---------------------------------------+                 |
++---------------------------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 2. Qualification Criteria & Frozen Thresholds
+## 2. User Control & Explicit Selection Matrix
+
+The user is never locked into an arbitrary choice. The engine exposes both **Category Requests** and **Specific Runtime Requests** through IPC (`realtime-noise.v1`) and the Tauri UI:
+
+| Request Mode | Category / Runtime | Behavior / Routing | Fallback if Unpromoted |
+|---|---|---|---|
+| `BackendRequest::Auto` | Automatic (Default) | Follows Tier 1 $\to$ Tier 2 $\to$ Tier 3 $\to$ Tier 4 | `TractCpu` |
+| `BackendRequest::DedicatedGpu` | Category (dGPU) | Prefers TensorRT $\to$ Vulkan $\to$ DirectML $\to$ CUDA | `TractCpu` |
+| `BackendRequest::Npu` | Category (NPU) | Prefers Intel NPU (`OpenVINO`) / AMD NPU (`Ryzen AI`) / ANE (`CoreML`)| `TractCpu` |
+| `BackendRequest::IntegratedGpu`| Category (iGPU) | Prefers Intel Arc/iGPU (`OpenVINO GPU`) $\to$ AMD iGPU (`Vulkan`) | `TractCpu` |
+| `BackendRequest::Cpu` | Category (CPU) | Pure CPU execution | `TractCpu` |
+| `BackendRequest::TensorRt` | Specific Runtime | NVIDIA TensorRT execution engine | `TractCpu` |
+| `BackendRequest::RyzenAi` | Specific Runtime | AMD Ryzen AI XDNA NPU (Linux `amdnpu` / Windows `VitisAI`) | `TractCpu` |
+| `BackendRequest::OpenVinoNpu` | Specific Runtime | Intel NPU via OpenVINO | `TractCpu` |
+| `BackendRequest::OpenVinoGpu` | Specific Runtime | Intel Arc / iGPU via OpenVINO | `TractCpu` |
+| `BackendRequest::OpenVinoCpu` | Specific Runtime | Intel CPU via OpenVINO | `TractCpu` |
+| `BackendRequest::DirectMl` | Specific Runtime | Microsoft DirectML universal GPU runtime | `TractCpu` |
+| `BackendRequest::Vulkan` | Specific Runtime | Vulkan cross-platform GPU runtime | `TractCpu` |
+| `BackendRequest::CoreMl` | Specific Runtime | Apple CoreML engine | `TractCpu` |
+| `BackendRequest::TractCpu` | Specific Runtime | Tract 100% safe pure Rust reference | None (Always Available)|
+
+---
+
+## 3. Qualification Criteria & Frozen Thresholds
 
 In compliance with the system design specification:
 1. **p99 Latency Gate:** $\le 10.0\text{ ms}$ per 480-sample hop at 48 kHz.
@@ -58,7 +93,7 @@ In compliance with the system design specification:
 
 ---
 
-## 3. Host Evaluation Results
+## 4. Host Evaluation Results
 
 Calibration was conducted out-of-band using `crates/tools/src/bin/calibrate-backend.rs` over a 5-minute soak benchmark (30,000 hops = 300.0 audio seconds):
 
@@ -73,30 +108,6 @@ Calibration was conducted out-of-band using `crates/tools/src/bin/calibrate-back
 | **Discontinuities**| `0` | 0 [PASS] | 0 [PASS] | 0 [PASS] |
 | **GA Decision** | — | **`NOT_PROMOTED`** | **`NOT_PROMOTED`** | **`QUALIFIED_PROMOTED`** |
 | **Status Tag** | — | `GATED_STAGING` | `GATED_STAGING` | `PRODUCTION_GA` |
-
----
-
-## 4. Technical Rationale for Gated Staging
-
-Despite meeting raw latency requirements, both the NVIDIA Blackwell GPU and Intel NPU are recorded as `NOT_PROMOTED` / `GATED_STAGING` for the current GA product release for the following architectural reasons:
-
-### 4.1 NVIDIA Blackwell Laptop GPU (`sm_120` / `GB207GLM`)
-1. **Proprietary External Driver Dependency:**
-   - Blackwell architecture (`sm_120`) requires NVIDIA proprietary display driver version $\ge 615.71.09$ and CUDA 13.4 user-mode drivers.
-   - Hippocamp GA requires zero external runtime dependencies outside the standard platform C library to guarantee frictionless offline installation on any consumer laptop.
-2. **Ahead-of-Time (AOT) Engine Build Latency:**
-   - TensorRT 11.3 requires 15–20 seconds to compile the ONNX subgraphs into serialized machine code (`.plan` files) targeting `sm_120`.
-   - Engine compilation cannot execute on the realtime audio thread. In accordance with safety rules, compilation must remain strictly out-of-band.
-3. **Workspace `#![forbid(unsafe_code)]` Policy:**
-   - Interfacing with TensorRT / CUDA C-FFI necessitates native bindings that cannot be linked within the core safe crate structure under current workspace rules.
-
-### 4.2 Intel NPU (`intel_vpu` / Core Ultra 200H)
-1. **Driver Stack Fragmentation:**
-   - Access to `/dev/accel/accel0` requires the Intel OneAPI Level Zero driver and OpenVINO NPU plugin stack, which is not packaged uniformly across target Linux distributions (e.g. Ubuntu 24.04, Fedora 42) or Windows builds without manual user installation.
-2. **Power-State Transition Instability:**
-   - Background service execution across laptop AC/battery switches and system suspend/resume cycles exhibits non-deterministic Level Zero device reset behavior in kernel driver versions prior to Linux 6.13+.
-3. **Deterministic Fail-Closed Operation:**
-   - Until Level Zero runtime resets can be verified with 100% fail-closed determinism during continuous audio streaming, the NPU backend remains staged for post-GA feature updates.
 
 ---
 

@@ -51,10 +51,7 @@ pub fn execute_ipc_command(
                 || ("IPC_ERROR".to_string(), "Unknown IPC error".to_string()),
                 |err| (err.code, err.message),
             );
-            return Err(CommandError {
-                code,
-                message: msg,
-            });
+            return Err(CommandError { code, message: msg });
         }
         Ok(response)
     }

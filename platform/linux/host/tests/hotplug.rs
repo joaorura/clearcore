@@ -1,9 +1,5 @@
 #![forbid(unsafe_code)]
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::redundant_clone
-)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::redundant_clone)]
 
 use realtime_noise_contracts::{AudioBackend, DeviceStatus};
 use realtime_noise_linux_host::pipewire::{PipeWireAudioBackend, PipeWireDeviceInfo};

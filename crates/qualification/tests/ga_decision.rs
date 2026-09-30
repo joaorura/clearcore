@@ -1,4 +1,4 @@
-use realtime_noise_qualification::{aggregate, GaDecision, PlatformStatus};
+use realtime_noise_qualification::{GaDecision, PlatformStatus, aggregate};
 
 #[test]
 fn one_platform_failure_blocks_simultaneous_ga() {

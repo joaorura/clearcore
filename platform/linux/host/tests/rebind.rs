@@ -18,7 +18,8 @@ fn recreated_source_requires_rebind_before_audio_is_observed() {
     // Connect a consumer stream (e.g. Teams, OBS)
     let consumer_id = "teams-client";
     mic.register_consumer(consumer_id);
-    mic.rebind_consumer(consumer_id).expect("initial bind should succeed");
+    mic.rebind_consumer(consumer_id)
+        .expect("initial bind should succeed");
 
     // Warm initial generation and push active audio frame
     mic.set_generation(GenerationId::new(1), GenerationState::Active);
@@ -27,7 +28,10 @@ fn recreated_source_requires_rebind_before_audio_is_observed() {
 
     // Initial state: consumer bound and generation active -> audio is observed
     let audio = mic.read_frame_for_consumer(consumer_id);
-    assert_eq!(audio, test_frame, "consumer should observe active audio before recreation");
+    assert_eq!(
+        audio, test_frame,
+        "consumer should observe active audio before recreation"
+    );
 
     // Recreate PipeWire virtual source node (simulating helper restart / node recreation)
     let new_node_id = mic.recreate_source();
@@ -42,13 +46,13 @@ fn recreated_source_requires_rebind_before_audio_is_observed() {
     // BEFORE rebind: consumer MUST receive fail-closed digital silence
     let silence_before_rebind = mic.read_frame_for_consumer(consumer_id);
     assert_eq!(
-        silence_before_rebind,
-        [0.0; HOP_SAMPLES],
+        silence_before_rebind, [0.0; HOP_SAMPLES],
         "consumer stream must receive digital silence before rebind"
     );
 
     // Rebind consumer to the new node ID
-    mic.rebind_consumer(consumer_id).expect("rebind should succeed");
+    mic.rebind_consumer(consumer_id)
+        .expect("rebind should succeed");
     assert!(
         !mic.consumer_needs_rebind(consumer_id),
         "consumer should no longer need rebind after rebind operation"
@@ -61,8 +65,7 @@ fn recreated_source_requires_rebind_before_audio_is_observed() {
     );
     let silence_during_warming = mic.read_frame_for_consumer(consumer_id);
     assert_eq!(
-        silence_during_warming,
-        [0.0; HOP_SAMPLES],
+        silence_during_warming, [0.0; HOP_SAMPLES],
         "consumer stream must receive digital silence during generation warming"
     );
 
@@ -77,8 +80,7 @@ fn recreated_source_requires_rebind_before_audio_is_observed() {
     // AFTER valid warmed generation: consumer now receives processed audio!
     let active_audio = mic.read_frame_for_consumer(consumer_id);
     assert_eq!(
-        active_audio,
-        test_frame,
+        active_audio, test_frame,
         "consumer stream must observe valid audio only after rebind and valid warmed generation"
     );
 }

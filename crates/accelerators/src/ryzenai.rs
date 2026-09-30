@@ -6,15 +6,16 @@ use realtime_noise_model::{
     InferenceError, ProcessedFrame,
 };
 
-/// `OpenVINO` acceleration backend targeting Intel NPU, GPU (Arc / iGPU), or CPU devices.
+/// AMD Ryzen AI acceleration backend targeting AMD XDNA NPU (and RDNA iGPU/dGPU)
+/// on both Linux (`amdnpu` / `amdxdna` kernel driver + XRT) and Windows (`VitisAI`).
 #[derive(Debug, Clone)]
-pub struct OpenVINOBackend {
+pub struct RyzenAiBackend {
     descriptor: BackendDescriptor,
     device: String,
     simulated_failure: bool,
 }
 
-impl OpenVINOBackend {
+impl RyzenAiBackend {
     pub fn new(
         asset_id: impl Into<String>,
         asset_sha256: impl Into<String>,
@@ -22,16 +23,15 @@ impl OpenVINOBackend {
     ) -> Self {
         let dev = device.into();
         let (runtime, cpu_profile) = match dev.to_ascii_uppercase().as_str() {
-            "GPU" => ("openvino-gpu", "intel-gpu"),
-            "CPU" => ("openvino-cpu", "intel-cpu"),
-            _ => ("openvino-npu", "intel-npu"),
+            "GPU" => ("ryzenai-gpu", "amd-rdna-igpu"),
+            _ => ("ryzenai-npu", "amd-xdna-npu"),
         };
         Self {
             descriptor: BackendDescriptor {
-                backend: "openvino",
-                backend_version: "2024.4.0",
+                backend: "ryzenai",
+                backend_version: "1.2.0",
                 runtime,
-                runtime_version: "2024.4.0",
+                runtime_version: "1.2.0",
                 asset_id: asset_id.into(),
                 asset_sha256: asset_sha256.into(),
                 cpu_profile,
@@ -62,11 +62,6 @@ impl OpenVINOBackend {
     }
 
     #[must_use]
-    pub fn new_mock_cpu() -> Self {
-        Self::new("df-compatible-release-asset-v1", "mock-asset-sha256", "CPU")
-    }
-
-    #[must_use]
     pub fn device(&self) -> &str {
         &self.device
     }
@@ -76,7 +71,7 @@ impl OpenVINOBackend {
     }
 }
 
-impl InferenceBackend for OpenVINOBackend {
+impl InferenceBackend for RyzenAiBackend {
     fn descriptor(&self) -> BackendDescriptor {
         self.descriptor.clone()
     }
@@ -84,7 +79,7 @@ impl InferenceBackend for OpenVINOBackend {
     fn process(&mut self, input: &AudioFrame) -> Result<ProcessedFrame, InferenceError> {
         if self.simulated_failure {
             return Err(InferenceError::InferenceExecution(
-                "OpenVINO hardware execution failed".to_owned(),
+                "Ryzen AI hardware execution failed".to_owned(),
             ));
         }
 
@@ -94,7 +89,6 @@ impl InferenceBackend for OpenVINOBackend {
             ));
         }
 
-        // Process audio frame preserving contracts
         let output = *input;
         ProcessedFrame::checked(output, ALGORITHM_LATENCY_SAMPLES, self.descriptor())
     }
