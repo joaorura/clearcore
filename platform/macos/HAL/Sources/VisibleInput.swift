@@ -7,8 +7,8 @@
 // Features:
 // - Exposed to system as 48kHz Float32 mono microphone input.
 // - Realtime I/O callback reads directly from `RingBuffer.swift`.
-// - Zero memory allocation, zero blocking locks, zero synchronous RPCs in callback.
-// - Fail-closed: outputs digital silence (zeros) on underrun or absence.
+// - Strictly zero memory allocations, zero blocking locks, zero synchronous RPCs in callback.
+// - Fail-closed: outputs digital silence (zeros) on underrun, generation mismatch, or absence.
 // - Zero raw audio leakage: hardware microphone audio is never bridged directly.
 //
 //===----------------------------------------------------------------------===//
@@ -54,61 +54,118 @@ public final class VisibleInputEndpoint {
         mReserved: 0
     )
 
-    // MARK: - Internal State
+    // MARK: - Realtime Atomic State (Pre-allocated, Lock-Free)
 
-    private let stateLock = os_unfair_lock_t.allocate(capacity: 1)
-    private var isRunning: Bool = false
+    private let expectedGenerationPtr: UnsafeMutablePointer<UInt64>
+    private let volumePtr: UnsafeMutablePointer<Float32>
+    private let isMutedPtr: UnsafeMutablePointer<UInt32>
+    private let isRunningPtr: UnsafeMutablePointer<UInt32>
+    private let bufferFrameSizePtr: UnsafeMutablePointer<UInt32>
+
+    // Control-plane lock (used ONLY out-of-callback)
+    private let controlLock = os_unfair_lock_t.allocate(capacity: 1)
     private var activeClientCount: Int = 0
-    private var volume: Float32 = 1.0
-    private var isMuted: UInt32 = 0
-    private var currentExpectedGeneration: UInt64 = 1
 
     public init() {
-        stateLock.initialize(to: os_unfair_lock())
+        controlLock.initialize(to: os_unfair_lock())
+
+        expectedGenerationPtr = UnsafeMutablePointer<UInt64>.allocate(capacity: 1)
+        expectedGenerationPtr.initialize(to: 1)
+
+        volumePtr = UnsafeMutablePointer<Float32>.allocate(capacity: 1)
+        volumePtr.initialize(to: 1.0)
+
+        isMutedPtr = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
+        isMutedPtr.initialize(to: 0)
+
+        isRunningPtr = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
+        isRunningPtr.initialize(to: 0)
+
+        bufferFrameSizePtr = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
+        bufferFrameSizePtr.initialize(to: Self.defaultBufferSize)
     }
 
     deinit {
-        stateLock.deallocate()
+        controlLock.deallocate()
+        expectedGenerationPtr.deallocate()
+        volumePtr.deallocate()
+        isMutedPtr.deallocate()
+        isRunningPtr.deallocate()
+        bufferFrameSizePtr.deallocate()
+    }
+
+    // MARK: - Memory Ordering Primitives
+
+    @inline(__always)
+    private func memoryBarrier() {
+        #if canImport(Darwin)
+        OSMemoryBarrier()
+        #endif
     }
 
     // MARK: - Control Plane Operations (Out-of-Callback)
 
     public func setExpectedGeneration(_ gen: UInt64) {
-        os_unfair_lock_lock(stateLock)
-        currentExpectedGeneration = gen
-        os_unfair_lock_unlock(stateLock)
+        memoryBarrier()
+        expectedGenerationPtr.pointee = gen
+        memoryBarrier()
     }
 
+    /// Lock-free expected generation reader safe for realtime audio callback.
+    @inline(__always)
     public func getExpectedGeneration() -> UInt64 {
-        os_unfair_lock_lock(stateLock)
-        defer { os_unfair_lock_unlock(stateLock) }
-        return currentExpectedGeneration
+        memoryBarrier()
+        return expectedGenerationPtr.pointee
+    }
+
+    public func setMuted(_ muted: Bool) {
+        memoryBarrier()
+        isMutedPtr.pointee = muted ? 1 : 0
+        memoryBarrier()
+    }
+
+    public func isMuted() -> Bool {
+        memoryBarrier()
+        return isMutedPtr.pointee != 0
+    }
+
+    public func setVolume(_ vol: Float32) {
+        memoryBarrier()
+        volumePtr.pointee = max(0.0, min(2.0, vol))
+        memoryBarrier()
+    }
+
+    public func getVolume() -> Float32 {
+        memoryBarrier()
+        return volumePtr.pointee
     }
 
     public func startIO() -> OSStatus {
-        os_unfair_lock_lock(stateLock)
-        defer { os_unfair_lock_unlock(stateLock) }
+        os_unfair_lock_lock(controlLock)
+        defer { os_unfair_lock_unlock(controlLock) }
         activeClientCount += 1
-        isRunning = true
+        memoryBarrier()
+        isRunningPtr.pointee = 1
         return noErr
     }
 
     public func stopIO() -> OSStatus {
-        os_unfair_lock_lock(stateLock)
-        defer { os_unfair_lock_unlock(stateLock) }
+        os_unfair_lock_lock(controlLock)
+        defer { os_unfair_lock_unlock(controlLock) }
         activeClientCount = max(0, activeClientCount - 1)
         if activeClientCount == 0 {
-            isRunning = false
+            memoryBarrier()
+            isRunningPtr.pointee = 0
         }
         return noErr
     }
 
-    // MARK: - Realtime Audio Callback (Zero Allocation, Lock-Free)
+    // MARK: - Realtime Audio Callback (Zero Allocation, Lock-Free, RPC-Free)
 
     /// CoreAudio HAL I/O callback for `kAudioServerPlugInIOOperationReadInput`.
     /// Reads exclusively from `RingBuffer`.
     /// Zero heap allocations, zero blocking locks, zero synchronous RPCs.
-    /// In case of underflow or un-warmed generation: outputs digital silence (zeros).
+    /// In case of underflow, absence, or un-warmed generation: outputs digital silence (zeros).
     @inline(__always)
     public func readInput(
         destination: UnsafeMutableRawPointer,
@@ -118,10 +175,11 @@ public final class VisibleInputEndpoint {
         guard frameCount > 0 else { return noErr }
 
         let floatBuffer = destination.bindMemory(to: Float.self, capacity: Int(frameCount))
-        let gen = currentExpectedGeneration
+        let gen = expectedGenerationPtr.pointee
+        memoryBarrier()
 
-        // Check hardware/software mute flag
-        if isMuted != 0 {
+        // Fast lock-free mute check
+        if isMutedPtr.pointee != 0 {
             floatBuffer.initialize(repeating: 0.0, count: Int(frameCount))
             return noErr
         }
@@ -133,12 +191,11 @@ public final class VisibleInputEndpoint {
             expectedGeneration: gen
         )
 
-        // If ring buffer underruns, silence has already been populated
-        if framesRead > 0 && volume != 1.0 {
-            // Apply volume scaling in-place without memory allocation
-            let gain = volume
+        // Apply volume scaling lock-free in-place without dynamic memory allocation
+        let currentVol = volumePtr.pointee
+        if framesRead > 0 && currentVol != 1.0 {
             for i in 0..<framesRead {
-                floatBuffer[i] *= gain
+                floatBuffer[i] *= currentVol
             }
         }
 
@@ -256,7 +313,7 @@ public final class VisibleInputEndpoint {
             outData.assumingMemoryBound(to: UInt32.self).pointee = 1
             outDataSize = UInt32(MemoryLayout<UInt32>.size)
         case kAudioDevicePropertyDeviceIsRunning:
-            outData.assumingMemoryBound(to: UInt32.self).pointee = isRunning ? 1 : 0
+            outData.assumingMemoryBound(to: UInt32.self).pointee = isRunningPtr.pointee
             outDataSize = UInt32(MemoryLayout<UInt32>.size)
         case kAudioDevicePropertyNominalSampleRate:
             outData.assumingMemoryBound(to: Float64.self).pointee = Self.sampleRate
@@ -266,7 +323,7 @@ public final class VisibleInputEndpoint {
             outData.assumingMemoryBound(to: AudioValueRange.self).pointee = range
             outDataSize = UInt32(MemoryLayout<AudioValueRange>.size)
         case kAudioDevicePropertyBufferFrameSize:
-            outData.assumingMemoryBound(to: UInt32.self).pointee = Self.defaultBufferSize
+            outData.assumingMemoryBound(to: UInt32.self).pointee = bufferFrameSizePtr.pointee
             outDataSize = UInt32(MemoryLayout<UInt32>.size)
         case kAudioDevicePropertyBufferFrameSizeRange:
             let range = AudioValueRange(mMinimum: 64, mMaximum: 4096)
@@ -300,6 +357,16 @@ public final class VisibleInputEndpoint {
             guard inDataSize >= MemoryLayout<UInt32>.size else { return kAudioHardwareBadPropertySizeError }
             let newSize = inData.assumingMemoryBound(to: UInt32.self).pointee
             guard newSize >= 64 && newSize <= 4096 else { return kAudioHardwareIllegalOperationError }
+            memoryBarrier()
+            bufferFrameSizePtr.pointee = newSize
+            return noErr
+        case kAudioDevicePropertyNominalSampleRate:
+            guard inDataSize >= MemoryLayout<Float64>.size else { return kAudioHardwareBadPropertySizeError }
+            let requestedRate = inData.assumingMemoryBound(to: Float64.self).pointee
+            // Strictly enforce 48kHz Float32 mono contract: reject unsupported sample rates
+            guard requestedRate == Self.sampleRate else {
+                return kAudioDeviceUnsupportedFormatError
+            }
             return noErr
         default:
             return kAudioHardwareUnknownPropertyError

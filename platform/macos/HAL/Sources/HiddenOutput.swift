@@ -8,7 +8,7 @@
 // - Non-mixable private stream interface.
 // - CoreAudio `kAudioDevicePropertyIsHidden = 1` preventing app accidental selection.
 // - Enforces owner session lock: secondary client access rejected with `UnavailableBusy`.
-// - Zero memory allocation, zero blocking locks, zero synchronous RPCs in callback.
+// - Strictly zero memory allocation, zero blocking locks, zero synchronous RPCs in callback.
 //
 //===----------------------------------------------------------------------===//
 
@@ -56,22 +56,52 @@ public final class HiddenOutputEndpoint {
         mReserved: 0
     )
 
-    // MARK: - State & Owner Session Lock
+    // MARK: - Realtime Atomic State (Pre-allocated, Lock-Free)
 
-    private let stateLock = os_unfair_lock_t.allocate(capacity: 1)
-    private var isRunning: Bool = false
-    private var ownerProcessID: pid_t = 0
-    private var isOwned: Bool = false
-    private var volume: Float32 = 1.0
-    private var isMuted: UInt32 = 0
-    private var sequenceCounter: UInt64 = 0
+    private let ownerProcessIDPtr: UnsafeMutablePointer<pid_t>
+    private let isOwnedPtr: UnsafeMutablePointer<UInt32>
+    private let isRunningPtr: UnsafeMutablePointer<UInt32>
+    private let sequenceCounterPtr: UnsafeMutablePointer<UInt64>
+    private let bufferFrameSizePtr: UnsafeMutablePointer<UInt32>
+
+    // Control-plane lock (used ONLY out-of-callback)
+    private let controlLock = os_unfair_lock_t.allocate(capacity: 1)
 
     public init() {
-        stateLock.initialize(to: os_unfair_lock())
+        controlLock.initialize(to: os_unfair_lock())
+
+        ownerProcessIDPtr = UnsafeMutablePointer<pid_t>.allocate(capacity: 1)
+        ownerProcessIDPtr.initialize(to: 0)
+
+        isOwnedPtr = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
+        isOwnedPtr.initialize(to: 0)
+
+        isRunningPtr = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
+        isRunningPtr.initialize(to: 0)
+
+        sequenceCounterPtr = UnsafeMutablePointer<UInt64>.allocate(capacity: 1)
+        sequenceCounterPtr.initialize(to: 0)
+
+        bufferFrameSizePtr = UnsafeMutablePointer<UInt32>.allocate(capacity: 1)
+        bufferFrameSizePtr.initialize(to: Self.defaultBufferSize)
     }
 
     deinit {
-        stateLock.deallocate()
+        controlLock.deallocate()
+        ownerProcessIDPtr.deallocate()
+        isOwnedPtr.deallocate()
+        isRunningPtr.deallocate()
+        sequenceCounterPtr.deallocate()
+        bufferFrameSizePtr.deallocate()
+    }
+
+    // MARK: - Memory Ordering Primitives
+
+    @inline(__always)
+    private func memoryBarrier() {
+        #if canImport(Darwin)
+        OSMemoryBarrier()
+        #endif
     }
 
     // MARK: - Owner Session Lock Management (Out-of-Callback)
@@ -79,36 +109,39 @@ public final class HiddenOutputEndpoint {
     /// Acquires exclusive ownership for the noise suppression engine writer.
     /// Returns `kAudioHardwareUnavailableBusyError` if another process holds ownership.
     public func acquireOwnerLock(clientPID: pid_t) -> OSStatus {
-        os_unfair_lock_lock(stateLock)
-        defer { os_unfair_lock_unlock(stateLock) }
+        os_unfair_lock_lock(controlLock)
+        defer { os_unfair_lock_unlock(controlLock) }
 
-        if isOwned && ownerProcessID != clientPID {
+        if isOwnedPtr.pointee != 0 && ownerProcessIDPtr.pointee != clientPID {
             // Non-owner session receives UnavailableBusy
             return kAudioHardwareUnavailableBusyError
         }
 
-        isOwned = true
-        ownerProcessID = clientPID
+        memoryBarrier()
+        isOwnedPtr.pointee = 1
+        ownerProcessIDPtr.pointee = clientPID
+        memoryBarrier()
         return noErr
     }
 
     /// Releases exclusive ownership when engine disconnects or terminates.
     public func releaseOwnerLock(clientPID: pid_t) -> OSStatus {
-        os_unfair_lock_lock(stateLock)
-        defer { os_unfair_lock_unlock(stateLock) }
+        os_unfair_lock_lock(controlLock)
+        defer { os_unfair_lock_unlock(controlLock) }
 
-        if isOwned && ownerProcessID == clientPID {
-            isOwned = false
-            ownerProcessID = 0
+        if isOwnedPtr.pointee != 0 && ownerProcessIDPtr.pointee == clientPID {
+            memoryBarrier()
+            isOwnedPtr.pointee = 0
+            ownerProcessIDPtr.pointee = 0
+            memoryBarrier()
         }
         return noErr
     }
 
     /// Verifies whether the specified client PID is the current owner.
     public func isOwner(clientPID: pid_t) -> Bool {
-        os_unfair_lock_lock(stateLock)
-        defer { os_unfair_lock_unlock(stateLock) }
-        return !isOwned || ownerProcessID == clientPID
+        memoryBarrier()
+        return isOwnedPtr.pointee == 0 || ownerProcessIDPtr.pointee == clientPID
     }
 
     // MARK: - Device Lifecycle
@@ -117,22 +150,24 @@ public final class HiddenOutputEndpoint {
         let status = acquireOwnerLock(clientPID: clientPID)
         guard status == noErr else { return status }
 
-        os_unfair_lock_lock(stateLock)
-        isRunning = true
-        os_unfair_lock_unlock(stateLock)
+        os_unfair_lock_lock(controlLock)
+        defer { os_unfair_lock_unlock(controlLock) }
+        memoryBarrier()
+        isRunningPtr.pointee = 1
         return noErr
     }
 
     public func stopIO(clientPID: pid_t) -> OSStatus {
-        os_unfair_lock_lock(stateLock)
-        if ownerProcessID == clientPID {
-            isRunning = false
+        os_unfair_lock_lock(controlLock)
+        if ownerProcessIDPtr.pointee == clientPID {
+            memoryBarrier()
+            isRunningPtr.pointee = 0
         }
-        os_unfair_lock_unlock(stateLock)
+        os_unfair_lock_unlock(controlLock)
         return releaseOwnerLock(clientPID: clientPID)
     }
 
-    // MARK: - Realtime Audio Callback (Zero Allocation, Lock-Free)
+    // MARK: - Realtime Audio Callback (Zero Allocation, Lock-Free, RPC-Free)
 
     /// Called during `kAudioServerPlugInIOOperationWriteMix`.
     /// Zero heap allocations, zero blocking locks, zero synchronous RPCs.
@@ -145,18 +180,19 @@ public final class HiddenOutputEndpoint {
         ringBuffer: RingBuffer
     ) -> OSStatus {
         // Fast lock-free check of owner PID
-        if isOwned && ownerProcessID != clientPID {
+        memoryBarrier()
+        if isOwnedPtr.pointee != 0 && ownerProcessIDPtr.pointee != clientPID {
             return kAudioHardwareUnavailableBusyError
         }
 
         guard frameCount > 0 else { return noErr }
         let floatPtr = buffer.bindMemory(to: Float.self, capacity: Int(frameCount))
 
-        sequenceCounter &+= 1
+        sequenceCounterPtr.pointee &+= 1
         ringBuffer.write(
             samples: floatPtr,
             count: Int(frameCount),
-            sequence: sequenceCounter,
+            sequence: sequenceCounterPtr.pointee,
             generation: generation
         )
 
@@ -274,7 +310,7 @@ public final class HiddenOutputEndpoint {
             outData.assumingMemoryBound(to: UInt32.self).pointee = 1
             outDataSize = UInt32(MemoryLayout<UInt32>.size)
         case kAudioDevicePropertyDeviceIsRunning:
-            outData.assumingMemoryBound(to: UInt32.self).pointee = isRunning ? 1 : 0
+            outData.assumingMemoryBound(to: UInt32.self).pointee = isRunningPtr.pointee
             outDataSize = UInt32(MemoryLayout<UInt32>.size)
         case kAudioDevicePropertyNominalSampleRate:
             outData.assumingMemoryBound(to: Float64.self).pointee = Self.sampleRate
@@ -284,7 +320,7 @@ public final class HiddenOutputEndpoint {
             outData.assumingMemoryBound(to: AudioValueRange.self).pointee = range
             outDataSize = UInt32(MemoryLayout<AudioValueRange>.size)
         case kAudioDevicePropertyBufferFrameSize:
-            outData.assumingMemoryBound(to: UInt32.self).pointee = Self.defaultBufferSize
+            outData.assumingMemoryBound(to: UInt32.self).pointee = bufferFrameSizePtr.pointee
             outDataSize = UInt32(MemoryLayout<UInt32>.size)
         case kAudioDevicePropertyBufferFrameSizeRange:
             let range = AudioValueRange(mMinimum: 64, mMaximum: 4096)
@@ -306,5 +342,30 @@ public final class HiddenOutputEndpoint {
             return kAudioHardwareUnknownPropertyError
         }
         return noErr
+    }
+
+    public func setPropertyData(
+        address: AudioObjectPropertyAddress,
+        inDataSize: UInt32,
+        inData: UnsafeRawPointer
+    ) -> OSStatus {
+        switch address.mSelector {
+        case kAudioDevicePropertyBufferFrameSize:
+            guard inDataSize >= MemoryLayout<UInt32>.size else { return kAudioHardwareBadPropertySizeError }
+            let newSize = inData.assumingMemoryBound(to: UInt32.self).pointee
+            guard newSize >= 64 && newSize <= 4096 else { return kAudioHardwareIllegalOperationError }
+            memoryBarrier()
+            bufferFrameSizePtr.pointee = newSize
+            return noErr
+        case kAudioDevicePropertyNominalSampleRate:
+            guard inDataSize >= MemoryLayout<Float64>.size else { return kAudioHardwareBadPropertySizeError }
+            let requestedRate = inData.assumingMemoryBound(to: Float64.self).pointee
+            guard requestedRate == Self.sampleRate else {
+                return kAudioDeviceUnsupportedFormatError
+            }
+            return noErr
+        default:
+            return kAudioHardwareUnknownPropertyError
+        }
     }
 }

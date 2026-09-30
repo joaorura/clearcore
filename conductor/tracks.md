@@ -16,5 +16,12 @@
   *Link: [./tracks/task9_macos_hal_spike/index.md](./tracks/task9_macos_hal_spike/index.md)*
 - [x] **Track: Task 10 Linux PipeWire Native Helper Spike**
   *Link: [./tracks/task10_linux_pipewire_spike/index.md](./tracks/task10_linux_pipewire_spike/index.md)*
+- [x] **Track: Task 11 Production Windows WASAPI & WaveRT Host Adapter**
+  *Link: [./tracks/task11_windows_production_adapter/index.md](./tracks/task11_windows_production_adapter/index.md)*
+- [x] **Track: Task 12 Production macOS CoreAudio & HAL Host Adapter**
+  *Link: [./tracks/task12_macos_production_adapter/index.md](./tracks/task12_macos_production_adapter/index.md)*
+- [x] **Track: Task 13 Production Linux PipeWire Host Adapter**
+  *Link: [./tracks/task13_linux_production_adapter/index.md](./tracks/task13_linux_production_adapter/index.md)*
+
 
 

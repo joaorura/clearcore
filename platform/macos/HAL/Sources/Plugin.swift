@@ -434,6 +434,12 @@ private func Driver_SetPropertyData(
             inDataSize: inDataSize,
             inData: inData
         )
+    case HiddenOutputEndpoint.deviceObjectID:
+        return RealtimeNoiseDriver.shared.hiddenOutput.setPropertyData(
+            address: addr,
+            inDataSize: inDataSize,
+            inData: inData
+        )
     default:
         return kAudioHardwareUnknownPropertyError
     }

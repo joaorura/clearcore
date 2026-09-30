@@ -899,6 +899,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "realtime-noise-linux-host"
+version = "0.1.0"
+dependencies = [
+ "realtime-noise-contracts",
+ "realtime-noise-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "realtime-noise-model"
 version = "0.1.0"
 dependencies = [
@@ -956,6 +966,16 @@ dependencies = [
  "serde_json",
  "sha2",
  "stats_alloc",
+]
+
+[[package]]
+name = "realtime-noise-windows-host"
+version = "0.1.0"
+dependencies = [
+ "realtime-noise-contracts",
+ "realtime-noise-engine",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

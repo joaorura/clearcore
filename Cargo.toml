@@ -10,6 +10,8 @@ members = [
     "crates/ipc",
     "crates/supervisor",
     "crates/service",
+    "platform/windows/host",
+    "platform/linux/host",
 ]
 resolver = "3"
 

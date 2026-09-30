@@ -185,9 +185,16 @@ public final class RingBuffer {
         memoryBarrier()
         let r = self.readIndex.pointee
 
+        // Fail-closed condition 2: Inverted pointers or concurrently cleared
+        guard w >= r else {
+            destination.initialize(repeating: 0.0, count: count)
+            self.underrunCount.pointee &+= 1
+            return 0
+        }
+
         let available = Int(w - r)
 
-        // Fail-closed condition 2: Buffer underrun (engine lagging or halted)
+        // Fail-closed condition 3: Buffer underrun (engine lagging or halted)
         if available < count {
             destination.initialize(repeating: 0.0, count: count)
             self.underrunCount.pointee &+= 1
@@ -215,21 +222,22 @@ public final class RingBuffer {
     /// Atomically invalidates the buffer, setting a new generation and wiping all sample memory.
     /// Invoked upon engine restart, mode changes (Bypass/Active/Mute), or supervisor recovery.
     public func invalidate(newGeneration: UInt64) {
-        self.generation.pointee = newGeneration
-        memoryBarrier()
-        self.writeIndex.pointee = 0
-        self.readIndex.pointee = 0
-        self.sequence.pointee = 0
-        self.storage.initialize(repeating: 0.0, count: capacity)
-        memoryBarrier()
+        clear(newGeneration: newGeneration)
     }
 
-    /// Clears the ring buffer without altering the current generation.
-    public func clear() {
+    /// Clears the ring buffer, atomically zeroing sample memory and resetting pointers so that
+    /// any concurrent or subsequent read on visible input immediately outputs digital silence (all zeros).
+    ///
+    /// - Parameter newGeneration: Optional new generation counter to assign atomically.
+    public func clear(newGeneration: UInt64? = nil) {
         memoryBarrier()
-        self.writeIndex.pointee = 0
         self.readIndex.pointee = 0
+        self.writeIndex.pointee = 0
         self.sequence.pointee = 0
+        if let newGen = newGeneration {
+            self.generation.pointee = newGen
+        }
+        memoryBarrier()
         self.storage.initialize(repeating: 0.0, count: capacity)
         memoryBarrier()
     }
@@ -251,5 +259,56 @@ public final class RingBuffer {
         let over = self.overflowCount.pointee
         let avail = max(0, Int(w - r))
         return (avail, under, over, gen, seq)
+    }
+
+    // MARK: - Invariant & Verification Tests
+
+    /// Validates that when control generation changes or clear() is called, the ring buffer is wiped
+    /// and any concurrent or subsequent read on visible input immediately outputs digital silence (all zeros).
+    @discardableResult
+    public static func testControlGenerationChangeClearsRingAndVisibleInputOutputsSilence() -> Bool {
+        let ring = RingBuffer(capacity: 1024)
+        let testCount = 480
+        let gen1: UInt64 = 1
+
+        let writeBuffer = UnsafeMutablePointer<Float>.allocate(capacity: testCount)
+        defer { writeBuffer.deallocate() }
+        writeBuffer.initialize(repeating: 0.75, count: testCount)
+
+        ring.write(samples: writeBuffer, count: testCount, sequence: 1, generation: gen1)
+
+        let readBuffer = UnsafeMutablePointer<Float>.allocate(capacity: testCount)
+        defer { readBuffer.deallocate() }
+        readBuffer.initialize(repeating: -1.0, count: testCount)
+
+        let readFrames1 = ring.read(into: readBuffer, count: testCount, expectedGeneration: gen1)
+        guard readFrames1 == testCount && readBuffer.pointee == 0.75 else {
+            return false
+        }
+
+        // Fill with fresh audio
+        ring.write(samples: writeBuffer, count: testCount, sequence: 2, generation: gen1)
+
+        // Invalidate generation / clear ring buffer
+        let gen2: UInt64 = 2
+        ring.clear(newGeneration: gen2)
+
+        // Read with old generation: must output pure digital silence (zeros)
+        readBuffer.initialize(repeating: 99.0, count: testCount)
+        let readFramesOld = ring.read(into: readBuffer, count: testCount, expectedGeneration: gen1)
+        guard readFramesOld == 0 else { return false }
+        for i in 0..<testCount {
+            guard readBuffer[i] == 0.0 else { return false }
+        }
+
+        // Read with new generation before writer writes: must output pure digital silence (zeros)
+        readBuffer.initialize(repeating: 99.0, count: testCount)
+        let readFramesNew = ring.read(into: readBuffer, count: testCount, expectedGeneration: gen2)
+        guard readFramesNew == 0 else { return false }
+        for i in 0..<testCount {
+            guard readBuffer[i] == 0.0 else { return false }
+        }
+
+        return true
     }
 }

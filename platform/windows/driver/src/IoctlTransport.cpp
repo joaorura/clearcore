@@ -232,7 +232,7 @@ NTSTATUS CIoctlTransport::SubmitEnvelope(
             m_Stats.TotalEnvelopesDropped++;
             KeReleaseSpinLock(&m_Lock, oldIrql);
             return STATUS_DATA_LATE_ERROR;
-        } else if (gen > m_ActiveGeneration) {
+        } else if (gen > m_ActiveGeneration || EnvelopeHasFlag(envelope, DISCONTINUITY_FLAG_GENERATION_CHANGE)) {
             // Stream restart or generation bump; flush stale queue and accept new generation
             m_ActiveGeneration = gen;
             m_LastSequence = seq;

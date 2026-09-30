@@ -351,9 +351,16 @@ VOID CMiniportWaveRTStream::ProcessAudioHop()
             SHORT* pcmDest = (SHORT*)destPtr;
             for (UINT32 i = 0; i < WIRE_ENVELOPE_HOP_SAMPLES; ++i) {
                 FLOAT s = tempFloatBuffer[i];
-                if (s > 1.0f) s = 1.0f;
-                else if (s < -1.0f) s = -1.0f;
-                pcmDest[i] = (SHORT)(s * 32767.0f);
+                if (s >= 0.0f) {
+                    if (s > 1.0f) s = 1.0f;
+                    pcmDest[i] = (SHORT)(s * 32767.0f);
+                } else if (s < 0.0f) {
+                    if (s < -1.0f) s = -1.0f;
+                    pcmDest[i] = (SHORT)(s * 32768.0f);
+                } else {
+                    // Non-finite (NaN/Inf) fails closed to pure digital silence
+                    pcmDest[i] = 0;
+                }
             }
         }
     } else {

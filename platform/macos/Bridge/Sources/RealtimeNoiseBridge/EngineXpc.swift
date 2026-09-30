@@ -6,9 +6,10 @@
 // Out-of-callback XPC / IPC client communicating with `realtime-noise-service`.
 // Features:
 // - Strictly executed outside the CoreAudio realtime audio thread.
+// - Handles supervisor states (Running, EngineUnavailable, Restarting, TerminalSafeState).
 // - Enforces owner session lock; conflicting non-owner sessions receive `UnavailableBusy`.
 // - Dispatches mode updates: Active, Bypass, Mute, and TerminalSafeState.
-// - Fail-closed: triggers atomic generation invalidation upon crash or disconnection.
+// - Fail-closed: triggers atomic generation invalidation upon crash, restart, or disconnection.
 // - Adheres to `realtime-noise.v1` wire protocol specification.
 //
 //===----------------------------------------------------------------------===//
@@ -27,10 +28,19 @@ public enum DenoiseMode: String, Codable, Sendable {
     case mute = "Mute"
 }
 
+public enum SupervisorState: Equatable, Sendable {
+    case running
+    case engineUnavailable(reason: String)
+    case restarting(attempt: Int, nextRetryMs: UInt64)
+    case terminalSafeState(reason: String, diagnostic: String?)
+}
+
 public enum BridgeState: Equatable, Sendable {
     case disconnected
     case connecting
     case connected(mode: DenoiseMode, generation: UInt64)
+    case engineUnavailable(reason: String)
+    case restarting(attempt: Int, nextRetryMs: UInt64)
     case terminalSafeState(reason: String)
 }
 
@@ -72,8 +82,13 @@ public struct EngineStatus: Codable, Sendable {
 
 public protocol RealtimeNoiseBridgeDelegate: AnyObject, Sendable {
     func bridge(_ bridge: EngineXpcClient, didChangeState newState: BridgeState)
+    func bridge(_ bridge: EngineXpcClient, didUpdateSupervisorState supervisorState: SupervisorState)
     func bridge(_ bridge: EngineXpcClient, didInvalidateGeneration newGeneration: UInt64)
     func bridge(_ bridge: EngineXpcClient, didEncounterError error: XpcError)
+}
+
+public extension RealtimeNoiseBridgeDelegate {
+    func bridge(_ bridge: EngineXpcClient, didUpdateSupervisorState supervisorState: SupervisorState) {}
 }
 
 // MARK: - Engine XPC Client
@@ -85,11 +100,17 @@ public final class EngineXpcClient: @unchecked Sendable {
 
     private let queue: DispatchQueue
     private var state: BridgeState = .disconnected
+    private var currentSupervisorState: SupervisorState = .engineUnavailable(reason: "Initial disconnected state")
+    private var currentMode: DenoiseMode = .active
     private var currentGeneration: UInt64 = 0
     private var activeOwnerToken: String?
     private var activeOwnerPID: pid_t?
 
     public weak var delegate: RealtimeNoiseBridgeDelegate?
+
+    /// Optional closures for external HAL synchronization
+    public var onHalModeChange: (@Sendable (DenoiseMode) -> Void)?
+    public var onHalOwnerLockChange: (@Sendable (pid_t?, Bool) -> Void)?
 
     public init(
         queue: DispatchQueue = DispatchQueue(label: "com.clearcore.RealtimeNoiseBridge.xpc", qos: .userInitiated)
@@ -103,12 +124,24 @@ public final class EngineXpcClient: @unchecked Sendable {
         queue.sync { state }
     }
 
+    public var supervisorState: SupervisorState {
+        queue.sync { currentSupervisorState }
+    }
+
+    public var mode: DenoiseMode {
+        queue.sync { currentMode }
+    }
+
     public var generation: UInt64 {
         queue.sync { currentGeneration }
     }
 
     public var currentOwnerPID: pid_t? {
         queue.sync { activeOwnerPID }
+    }
+
+    public var isOwnerSessionActive: Bool {
+        queue.sync { activeOwnerToken != nil }
     }
 
     // MARK: - Connection Lifecycle
@@ -120,7 +153,11 @@ public final class EngineXpcClient: @unchecked Sendable {
 
             // Negotiate initial connection outside audio thread
             self.currentGeneration = 1
+            self.currentMode = .active
+            self.currentSupervisorState = .running
             self.state = .connected(mode: .active, generation: self.currentGeneration)
+            self.onHalModeChange?(.active)
+            self.delegate?.bridge(self, didUpdateSupervisorState: .running)
             self.delegate?.bridge(self, didChangeState: self.state)
             self.delegate?.bridge(self, didInvalidateGeneration: self.currentGeneration)
         }
@@ -152,6 +189,7 @@ public final class EngineXpcClient: @unchecked Sendable {
 
             self.activeOwnerToken = sessionToken
             self.activeOwnerPID = pid
+            self.onHalOwnerLockChange?(pid, true)
             completion(.success(()))
         }
     }
@@ -165,9 +203,60 @@ public final class EngineXpcClient: @unchecked Sendable {
             if self.activeOwnerToken == sessionToken {
                 self.activeOwnerToken = nil
                 self.activeOwnerPID = nil
+                self.onHalOwnerLockChange?(nil, false)
                 completion(.success(()))
             } else {
                 completion(.success(()))
+            }
+        }
+    }
+
+    // MARK: - Supervisor State Integration
+
+    /// Synchronizes bridge and HAL state with engine supervisor lifecycle.
+    /// Handles Running, EngineUnavailable, Restarting, and TerminalSafeState.
+    public func handleSupervisorStateUpdate(_ newState: SupervisorState) {
+        queue.async {
+            self.currentSupervisorState = newState
+            self.delegate?.bridge(self, didUpdateSupervisorState: newState)
+
+            switch newState {
+            case .running:
+                // Engine resumed normal execution: restore active mode and notify HAL
+                self.currentMode = .active
+                self.state = .connected(mode: .active, generation: self.currentGeneration)
+                self.onHalModeChange?(.active)
+                self.delegate?.bridge(self, didChangeState: self.state)
+
+            case .engineUnavailable(let reason):
+                // Hardware mic or model unavailable: force digital silence (mute)
+                self.currentMode = .mute
+                self.state = .engineUnavailable(reason: reason)
+                self.currentGeneration &+= 1
+                self.onHalModeChange?(.mute)
+                self.delegate?.bridge(self, didInvalidateGeneration: self.currentGeneration)
+                self.delegate?.bridge(self, didChangeState: self.state)
+
+            case .restarting(let attempt, let nextRetryMs):
+                // Transient engine crash: force digital silence during exponential backoff
+                self.currentMode = .mute
+                self.state = .restarting(attempt: attempt, nextRetryMs: nextRetryMs)
+                self.currentGeneration &+= 1
+                self.onHalModeChange?(.mute)
+                self.delegate?.bridge(self, didInvalidateGeneration: self.currentGeneration)
+                self.delegate?.bridge(self, didChangeState: self.state)
+
+            case .terminalSafeState(let reason, _):
+                // Fatal or repeated crash threshold exceeded: lock into silence and release owner lock
+                self.currentMode = .mute
+                self.state = .terminalSafeState(reason: reason)
+                self.currentGeneration &+= 1
+                self.activeOwnerToken = nil
+                self.activeOwnerPID = nil
+                self.onHalModeChange?(.mute)
+                self.onHalOwnerLockChange?(nil, false)
+                self.delegate?.bridge(self, didInvalidateGeneration: self.currentGeneration)
+                self.delegate?.bridge(self, didChangeState: self.state)
             }
         }
     }
@@ -193,13 +282,18 @@ public final class EngineXpcClient: @unchecked Sendable {
             case .terminalSafeState(let reason):
                 completion(.failure(.failClosed("Cannot set mode in terminal safe state: \(reason)")))
                 return
+            case .engineUnavailable(let reason):
+                completion(.failure(.failClosed("Cannot set mode while engine is unavailable: \(reason)")))
+                return
             default:
                 break
             }
 
             // Invalidate generation atomically on mode change
+            self.currentMode = mode
             self.currentGeneration &+= 1
             self.state = .connected(mode: mode, generation: self.currentGeneration)
+            self.onHalModeChange?(mode)
             self.delegate?.bridge(self, didInvalidateGeneration: self.currentGeneration)
             self.delegate?.bridge(self, didChangeState: self.state)
             completion(.success(mode))
@@ -246,15 +340,8 @@ public final class EngineXpcClient: @unchecked Sendable {
     // MARK: - Fail-Closed Terminal Safe State
 
     /// Enters unrecoverable fail-closed state: shuts down audio flow, invalidates generation,
-    /// and ensures pure digital silence (zero leakage).
+    /// releases owner session lock, and ensures pure digital silence.
     public func enterTerminalSafeState(reason: String) {
-        queue.async {
-            self.state = .terminalSafeState(reason: reason)
-            self.currentGeneration &+= 1
-            self.activeOwnerToken = nil
-            self.activeOwnerPID = nil
-            self.delegate?.bridge(self, didInvalidateGeneration: self.currentGeneration)
-            self.delegate?.bridge(self, didChangeState: self.state)
-        }
+        handleSupervisorStateUpdate(.terminalSafeState(reason: reason, diagnostic: nil))
     }
 }
