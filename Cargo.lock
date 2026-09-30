@@ -883,6 +883,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "realtime-noise-format-adapter"
+version = "0.1.0"
+dependencies = [
+ "realtime-noise-contracts",
+]
+
+[[package]]
 name = "realtime-noise-model"
 version = "0.1.0"
 dependencies = [

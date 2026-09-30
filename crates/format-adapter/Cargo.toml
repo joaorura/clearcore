@@ -1,0 +1,13 @@
+[package]
+name = "realtime-noise-format-adapter"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+realtime-noise-contracts = { path = "../contracts" }
+
+[lints]
+workspace = true
