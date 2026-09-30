@@ -204,7 +204,7 @@ impl CalibrationReport {
 
 /// Priority score for candidate backends in AUTO selection.
 /// Higher score indicates higher selection priority:
-/// - Dedicated GPU (Specific runtime: `TensorRT` score 100; General runtimes: `Vulkan` 90, `DirectML` 85)
+/// - Dedicated GPU (`TensorRT` score 100; `DirectML` on dGPU score 95 - top priority for AMD/Intel dGPUs and Windows; `Vulkan` score 90)
 /// - NPU (Intel NPU via `OpenVINO` score 80; AMD NPU via Ryzen AI / XDNA score 80; Apple Neural Engine via `CoreML` 75)
 /// - Integrated GPU (Intel Arc / iGPU via `OpenVINO` GPU score 70; AMD iGPU via Ryzen AI score 70)
 /// - CPU (Intel CPU prefers `OpenVINO` CPU AMX/VNNI score 60; Tract pure Rust CPU baseline score 50)
@@ -213,20 +213,20 @@ pub fn backend_priority_score(backend_name: &str) -> u32 {
     match backend_name.to_ascii_lowercase().as_str() {
         // Tier 1: Dedicated GPU - Specific runtime (NVIDIA TensorRT)
         "tensorrt" => 100,
+        // Tier 1: Dedicated GPU - DirectML (Top priority for AMD Radeon RX, Intel Arc dGPU, and universal Windows dGPU)
+        "directml" | "directml-dgpu" | "dx12" => 95,
         // Tier 1: Dedicated GPU - Specific runtime (CUDA)
-        "cuda" | "nvidia" => 95,
-        // Tier 1: Dedicated GPU - General runtime (Vulkan)
-        "vulkan" => 90,
-        // Tier 1: Dedicated GPU - General runtime (DirectML / DirectX 12)
-        "directml" | "dx12" => 85,
+        "cuda" | "nvidia" => 92,
+        // Tier 1: Dedicated GPU - General cross-platform runtime (Vulkan on dGPU)
+        "vulkan" | "vulkan-dgpu" => 90,
         // Tier 2: NPU (Intel NPU via OpenVINO, AMD NPU via Ryzen AI / XDNA)
         "openvino-npu" | "intel-npu" | "npu" | "ryzenai-npu" | "ryzen-ai" | "ryzenai"
         | "amd-npu" | "vitisai" | "xdna" => 80,
         // Tier 2: Apple Neural Engine via CoreML
         "coreml" | "ane" => 75,
-        // Tier 3: Integrated GPU (Intel Arc / iGPU via OpenVINO GPU, AMD iGPU via Ryzen AI)
+        // Tier 3: Integrated GPU (Intel Arc / iGPU via OpenVINO GPU, AMD iGPU via Ryzen AI, DirectML iGPU)
         "openvino-gpu" | "intel-gpu" | "arc" | "ryzenai-gpu" | "ryzen-ai-gpu" | "amd-igpu"
-        | "rdna-igpu" => 70,
+        | "rdna-igpu" | "directml-igpu" => 70,
         "openvino" => 65,
         // Tier 4: CPU - Intel CPU prefers OpenVINO (score 60) over ONNX / Tract baseline (score 50)
         "openvino-cpu" | "intel-cpu" => 60,

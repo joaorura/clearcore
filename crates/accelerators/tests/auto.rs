@@ -574,3 +574,77 @@ fn intel_cpu_prefers_openvino_over_onnx_tract() {
     assert_eq!(tract_sel, BackendSelection::TractCpu);
     assert!(tract_sel.is_tract_cpu());
 }
+
+#[test]
+fn directml_on_dedicated_gpu_is_top_priority_on_windows() {
+    let policy = AutoPolicy::new();
+
+    let dml_dgpu = CalibrationReport {
+        backend_name: "directml".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.65,
+        p95_latency_ms: 0.95,
+        p99_latency_ms: 1.25,
+        max_latency_ms: 1.90,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let amd_npu = CalibrationReport {
+        backend_name: "ryzenai-npu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.90,
+        p95_latency_ms: 1.30,
+        p99_latency_ms: 1.60,
+        max_latency_ms: 2.20,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let intel_igpu = CalibrationReport {
+        backend_name: "openvino-gpu".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 1.50,
+        p95_latency_ms: 2.10,
+        p99_latency_ms: 2.80,
+        max_latency_ms: 3.50,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let tract_cpu = CalibrationReport {
+        backend_name: "tract".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 4.80,
+        p95_latency_ms: 5.60,
+        p99_latency_ms: 6.20,
+        max_latency_ms: 6.90,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
+
+    let candidates = [dml_dgpu, amd_npu, intel_igpu, tract_cpu];
+
+    // 1. DirectML on dedicated GPU is Tier 1 (score 95) and takes top priority over NPU, iGPU, and CPU
+    let sel = policy.resolve_candidates(BackendRequest::Auto, &candidates);
+    assert_eq!(sel, BackendSelection::DirectMl);
+    assert_eq!(sel.name(), "directml");
+    assert_eq!(sel.tier(), DeviceTier::DedicatedGpu);
+    assert!(sel.is_dedicated_gpu());
+
+    // 2. User forces Dedicated GPU: selects DirectML
+    let dgpu_sel = policy.resolve_candidates(BackendRequest::DedicatedGpu, &candidates);
+    assert_eq!(dgpu_sel, BackendSelection::DirectMl);
+}
