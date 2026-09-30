@@ -7,6 +7,9 @@ members = [
     "crates/model",
     "crates/engine",
     "crates/format-adapter",
+    "crates/ipc",
+    "crates/supervisor",
+    "crates/service",
 ]
 resolver = "3"
 

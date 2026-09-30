@@ -1,16 +1,16 @@
 # Implementation Plan: Task 7 Local IPC, EngineSupervisor & Service Lifecycle
 
 ## Phase 1: Workspace Registration & Contract Tests (RED)
-- [ ] Task: Create `crates/ipc`, `crates/supervisor`, `crates/service` and register in root `Cargo.toml`
-    - [ ] Create `crates/ipc/Cargo.toml`
-    - [ ] Create `crates/supervisor/Cargo.toml`
-    - [ ] Create `crates/service/Cargo.toml`
-    - [ ] Register all 3 crates in root `Cargo.toml` `members`
-- [ ] Task: Write initial failing contract tests (RED)
-    - [ ] Write `crates/ipc/tests/protocol.rs` with `incompatible_ipc_version_is_rejected_closed`
-    - [ ] Write `crates/supervisor/tests/supervision.rs` with `sixth_crash_in_fifteen_minutes_enters_terminal_safe_state`
-    - [ ] Write `crates/service/tests/service_lifecycle.rs` with `service_survives_control_client_disconnect_and_serves_next_client`
-    - [ ] Verify tests fail cleanly (RED) in Docker
+- [x] Task: Create `crates/ipc`, `crates/supervisor`, `crates/service` and register in root `Cargo.toml`
+    - [x] Create `crates/ipc/Cargo.toml`
+    - [x] Create `crates/supervisor/Cargo.toml`
+    - [x] Create `crates/service/Cargo.toml`
+    - [x] Register all 3 crates in root `Cargo.toml` `members`
+- [x] Task: Write initial failing contract tests (RED)
+    - [x] Write `crates/ipc/tests/protocol.rs` with `incompatible_ipc_version_is_rejected_closed`
+    - [x] Write `crates/supervisor/tests/supervision.rs` with `sixth_crash_in_fifteen_minutes_enters_terminal_safe_state`
+    - [x] Write `crates/service/tests/service_lifecycle.rs` with `service_survives_control_client_disconnect_and_serves_next_client`
+    - [x] Verify tests fail cleanly (RED) in Docker
 - [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
 ## Phase 2: Protocol, Supervisor & Backoff Implementation (GREEN)
