@@ -11,7 +11,7 @@
     - [x] Write `crates/supervisor/tests/supervision.rs` with `sixth_crash_in_fifteen_minutes_enters_terminal_safe_state`
     - [x] Write `crates/service/tests/service_lifecycle.rs` with `service_survives_control_client_disconnect_and_serves_next_client`
     - [x] Verify tests fail cleanly (RED) in Docker
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [checkpoint: caa59dc]
 
 ## Phase 2: Protocol, Supervisor & Backoff Implementation (GREEN)
 - [ ] Task: Implement IPC Protocol and Transport Core
