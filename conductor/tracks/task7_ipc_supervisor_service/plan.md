@@ -24,7 +24,7 @@
     - [x] Re-export in `crates/supervisor/src/lib.rs`
 - [x] Task: Verify Phase 1 IPC and Supervisor tests pass (GREEN)
     - [x] Run `cargo test -p realtime-noise-ipc -p realtime-noise-supervisor --locked --offline` in Docker
-- [ ] Task: Phase Verification & Checkpoint (Refer to workflow.md)
+- [x] Task: Phase Verification & Checkpoint (Refer to workflow.md) [checkpoint: 271ac70]
 
 ## Phase 3: Daemon Binary, Lifecycle Scripts & Integration Tests (GREEN & INTEGRATION)
 - [ ] Task: Implement `realtime-noise-service` daemon
