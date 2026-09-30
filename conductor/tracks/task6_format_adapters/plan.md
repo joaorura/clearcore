@@ -28,10 +28,10 @@
     - [x] Run full format-adapter test suite and clippy in Docker
 - [x] Task: Phase Verification & Checkpoint (Refer to workflow.md)
 
-## Phase 4: Final Verification, Checkpoint & Track Completion
-- [ ] Task: Full offline workspace verification
-    - [ ] Run all workspace tests in Docker: `cargo test --workspace --features tract --locked --offline`
-    - [ ] Ensure formatting `cargo fmt --all -- --check` and strict Clippy across all crates
-- [ ] Task: Update ledger and mark track complete
-    - [ ] Append Task 6 completion event to `.omo/start-work/ledger.jsonl`
-    - [ ] Mark track `[x]` in `conductor/tracks.md` and commit
+## Phase 4: Final Verification, Checkpoint & Track Completion [checkpoint: 434efcb]
+- [x] Task: Full offline workspace verification
+    - [x] Run all workspace tests in Docker: `cargo test --workspace --features tract --locked --offline`
+    - [x] Ensure formatting `cargo fmt --all -- --check` and strict Clippy across all crates
+- [x] Task: Update ledger and mark track complete
+    - [x] Append Task 6 completion event to `.omo/start-work/ledger.jsonl`
+    - [x] Mark track `[x]` in `conductor/tracks.md` and commit
