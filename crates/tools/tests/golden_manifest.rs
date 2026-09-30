@@ -391,3 +391,42 @@ fn validate_corpus_v2_rejects_source_lock_mismatch() {
     );
     let _ = std::fs::remove_dir_all(&temp_root);
 }
+
+#[test]
+fn validate_input_case_v2_accepts_valid_frames() {
+    let mut case = realtime_noise_tools::golden_manifest::CorpusCaseV2 {
+        case_id: "case-v2-001".to_owned(),
+        frames_path: PathBuf::from("frames/case-001.json"),
+        input_sha256: String::new(),
+        source_id: "src-001".to_owned(),
+        transcription_applicability: "none".to_owned(),
+        snr_noise_class: "stationary".to_owned(),
+        sample_rate_hz: 48000,
+        channels: 1,
+        frame_count: 2,
+    };
+    let frames = vec![vec![0.0f32; 480]; case.frame_count];
+    case.input_sha256 = realtime_noise_model::frames_sha256(&frames);
+    assert!(realtime_noise_tools::golden_manifest::validate_input_case_v2(&case, &frames).is_ok());
+}
+
+#[test]
+fn validate_input_case_v2_rejects_mismatched_sha256() {
+    let case = realtime_noise_tools::golden_manifest::CorpusCaseV2 {
+        case_id: "case-v2-001".to_owned(),
+        frames_path: PathBuf::from("frames/case-001.json"),
+        input_sha256: "0".repeat(64),
+        source_id: "src-001".to_owned(),
+        transcription_applicability: "none".to_owned(),
+        snr_noise_class: "stationary".to_owned(),
+        sample_rate_hz: 48000,
+        channels: 1,
+        frame_count: 2,
+    };
+    let frames = vec![vec![0.0f32; 480]; case.frame_count];
+    let err = realtime_noise_tools::golden_manifest::validate_input_case_v2(&case, &frames).unwrap_err();
+    assert_eq!(
+        realtime_noise_tools::golden_manifest::blocked_status(&err),
+        "BLOCKED_PENDING_GOLDEN"
+    );
+}
