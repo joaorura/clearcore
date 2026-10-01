@@ -43,6 +43,8 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordStartTimeRef = useRef<number>(0);
+  const recordedDurationRef = useRef<number>(0);
 
   // Synchronized HTML5 Audio Elements
   const rawAudioElementRef = useRef<HTMLAudioElement | null>(null);
@@ -115,6 +117,10 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
 
       const [rawBuf, filteredBuf] = await Promise.all([rawBufferPromise, filteredBufferPromise]);
 
+      if (rawBuf && Number.isFinite(rawBuf.duration) && rawBuf.duration > 0) {
+        setAbDuration(rawBuf.duration);
+        recordedDurationRef.current = rawBuf.duration;
+      }
       const rawData = rawBuf.getChannelData(0);
       const filteredData = filteredBuf.getChannelData(0);
       const minLength = Math.min(rawData.length, filteredData.length);
@@ -164,6 +170,9 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
     setRecordingSeconds(0);
     setIsAbPlaying(false);
     setAbCurrentTime(0);
+    setAbDuration(0);
+    recordStartTimeRef.current = Date.now();
+    recordedDurationRef.current = 0;
 
     try {
       let devs: MediaDeviceInfo[] = [];
@@ -334,6 +343,12 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
             setNoiseReductionDb(26);
           }
 
+          const elapsed = Math.max(0.1, (Date.now() - recordStartTimeRef.current) / 1000);
+          if (!recordedDurationRef.current) {
+            recordedDurationRef.current = elapsed;
+            setAbDuration(elapsed);
+          }
+
           setIsRecording(false);
           cleanupAudioStreams();
         }
@@ -437,6 +452,11 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
     setAbCurrentTime(newTime);
     if (rawAudioElementRef.current) rawAudioElementRef.current.currentTime = newTime;
     if (filteredAudioElementRef.current) filteredAudioElementRef.current.currentTime = newTime;
+  };
+
+  const formatSeconds = (sec: number) => {
+    if (!Number.isFinite(sec) || isNaN(sec) || sec < 0) return '0.0s';
+    return `${sec.toFixed(1)}s`;
   };
 
   return (
@@ -571,20 +591,19 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
         )}
       </div>
 
-      {/* Comparative View: When Recordings are Ready */}
+      {/* Unified Synchronized A/B Comparison Player */}
       {rawAudioUrl && filteredAudioUrl && !isRecording && (
-        <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Synchronized A/B Comparison Player */}
+        <div style={{ marginTop: 20 }}>
           <div
             style={{
-              padding: '16px 18px',
+              padding: '18px 20px',
               background: '#0f172a',
               borderRadius: 8,
               border: '1px solid #1e3a8a',
               boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2)',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <span style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.95rem' }}>
                   {t('testAudio.abPlayerTitle')}
@@ -612,7 +631,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
               )}
             </div>
 
-            {/* Seamless A/B Switch Buttons */}
+            {/* Seamless A/B Switch Selector */}
             <div style={{ display: 'flex', gap: 10, margin: '14px 0', flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -656,7 +675,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
             </div>
 
             {/* A/B Play/Pause and Timeline Slider */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
               <button
                 type="button"
                 className="action-btn"
@@ -669,7 +688,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
                   padding: '8px 16px',
                   fontSize: '0.85rem',
                   borderRadius: 6,
-                  minWidth: 90,
+                  minWidth: 96,
                 }}
               >
                 {isAbPlaying ? '⏸ Pausar' : '▶ Reproduzir'}
@@ -678,88 +697,76 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
               <input
                 type="range"
                 min={0}
-                max={abDuration || 1}
+                max={abDuration > 0 ? abDuration : 1}
                 step={0.05}
-                value={abCurrentTime}
+                value={Math.min(abCurrentTime, abDuration > 0 ? abDuration : 1)}
                 onChange={handleScrub}
                 style={{ flex: 1, accentColor: activeAbTrack === 'before' ? '#ef4444' : '#10b981', cursor: 'pointer' }}
               />
 
-              <span style={{ fontSize: '0.8rem', color: '#94a3b8', minWidth: 65, textAlign: 'right' }}>
-                {abCurrentTime.toFixed(1)}s / {abDuration ? abDuration.toFixed(1) : '0.0'}s
+              <span style={{ fontSize: '0.8rem', color: '#94a3b8', minWidth: 70, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                {formatSeconds(abCurrentTime)} / {formatSeconds(abDuration)}
               </span>
             </div>
 
-            {/* Hidden Synchronized HTML5 Audio Elements for A/B playback */}
+            {/* Active Track Indicator Status */}
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem' }}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: activeAbTrack === 'before' ? '#ef4444' : '#10b981',
+                }}
+              />
+              <span style={{ color: activeAbTrack === 'before' ? '#fca5a5' : '#6ee7b7', fontWeight: 600 }}>
+                {activeAbTrack === 'before'
+                  ? 'Canal Ativo: Microfone Físico Bruto (Sem tratamento)'
+                  : 'Canal Ativo: Filtrado por IA (DeepFilterNet3 suprimindo ruído)'}
+              </span>
+            </div>
+
+            {/* Synchronized Audio Elements */}
             <audio
               ref={rawAudioElementRef}
               src={rawAudioUrl}
               onTimeUpdate={() => {
                 if (rawAudioElementRef.current) {
                   setAbCurrentTime(rawAudioElementRef.current.currentTime);
+                  const d = rawAudioElementRef.current.duration;
+                  if (Number.isFinite(d) && d > 0) {
+                    setAbDuration(d);
+                  }
                 }
               }}
               onLoadedMetadata={() => {
                 if (rawAudioElementRef.current) {
-                  setAbDuration(rawAudioElementRef.current.duration);
+                  const d = rawAudioElementRef.current.duration;
+                  if (Number.isFinite(d) && d > 0) {
+                    setAbDuration(d);
+                  } else if (recordedDurationRef.current > 0) {
+                    setAbDuration(recordedDurationRef.current);
+                  }
                 }
               }}
-              onEnded={() => setIsAbPlaying(false)}
+              onEnded={() => {
+                setIsAbPlaying(false);
+                setAbCurrentTime(0);
+                if (rawAudioElementRef.current) rawAudioElementRef.current.currentTime = 0;
+                if (filteredAudioElementRef.current) filteredAudioElementRef.current.currentTime = 0;
+              }}
             />
             <audio
               ref={filteredAudioElementRef}
               src={filteredAudioUrl}
-              onEnded={() => setIsAbPlaying(false)}
+              onEnded={() => {
+                setIsAbPlaying(false);
+                setAbCurrentTime(0);
+                if (rawAudioElementRef.current) rawAudioElementRef.current.currentTime = 0;
+                if (filteredAudioElementRef.current) filteredAudioElementRef.current.currentTime = 0;
+              }}
             />
-          </div>
-
-          {/* Side-by-Side Detailed Inspection Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-            {/* Card: Antes da Pipeline */}
-            <div
-              style={{
-                padding: '14px 16px',
-                background: 'var(--bg-secondary)',
-                borderRadius: 8,
-                border: '1px solid #7f1d1d',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontWeight: 600, color: '#fca5a5', fontSize: '0.85rem' }}>
-                  {t('testAudio.beforePipelineTitle')}
-                </span>
-                <span style={{ fontSize: '0.7rem', background: '#451a1a', border: '1px solid #7f1d1d', borderRadius: 4, padding: '2px 6px', color: '#f87171' }}>
-                  Sem Filtro
-                </span>
-              </div>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: 10 }}>
-                {t('testAudio.beforePipelineDesc')}
-              </p>
-              <audio controls src={rawAudioUrl} style={{ width: '100%', outline: 'none', borderRadius: 4 }} />
-            </div>
-
-            {/* Card: Depois da Pipeline */}
-            <div
-              style={{
-                padding: '14px 16px',
-                background: 'var(--bg-secondary)',
-                borderRadius: 8,
-                border: '1px solid #065f46',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontWeight: 600, color: '#6ee7b7', fontSize: '0.85rem' }}>
-                  {t('testAudio.afterPipelineTitle')}
-                </span>
-                <span style={{ fontSize: '0.7rem', background: '#064e3b', border: '1px solid #059669', borderRadius: 4, padding: '2px 6px', color: '#34d399' }}>
-                  DeepFilterNet3 IA
-                </span>
-              </div>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: 10 }}>
-                {t('testAudio.afterPipelineDesc')}
-              </p>
-              <audio controls src={filteredAudioUrl} style={{ width: '100%', outline: 'none', borderRadius: 4 }} />
-            </div>
           </div>
         </div>
       )}
