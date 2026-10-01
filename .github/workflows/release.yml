@@ -89,7 +89,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Clearcore-win32-x64
-          path: release/Clearcore-win32-x64*
+          path: release/Clearcore-win32-*.zip
 
   build-macos:
     name: Build macOS x64/ARM64 Package
@@ -139,7 +139,7 @@ jobs:
       - name: Consolidate Release Assets
         run: |
           mkdir -p release-assets
-          find downloaded-artifacts -type f -exec cp {} release-assets/ \;
+          find downloaded-artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-assets/ \;
           ls -lh release-assets/
 
       - name: Create GitHub Release
