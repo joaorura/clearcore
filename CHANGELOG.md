@@ -28,5 +28,5 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 - Localhost TCP bridge on Windows (`127.0.0.1:49215`) for reliable IPC communication without external dependencies.
 - Exact process matching (`pkill -x`) in uninstaller scripts to avoid subshell interruption.
 
-[Unreleased]: https://github.com/clearcore/clearcore/compare/v0.1.0-beta.1...HEAD
-[0.1.0-beta.1]: https://github.com/clearcore/clearcore/releases/tag/v0.1.0-beta.1
+[Unreleased]: https://github.com/joaorura/clearcore/compare/v0.1.0-beta.1...HEAD
+[0.1.0-beta.1]: https://github.com/joaorura/clearcore/releases/tag/v0.1.0-beta.1

@@ -3,7 +3,7 @@
 > **Target Audience:** AI Coding Assistants, LLMs, and Autonomous Software Agents (Claude, ChatGPT, Gemini, Antigravity, Cursor, Copilot Workspace, Windsurf, Devin, etc.).  
 > **Curl-Friendly Direct URL:**  
 > ```bash
-> curl -sSL https://raw.githubusercontent.com/clearcore/clearcore/main/LLM.md
+> curl -sSL https://raw.githubusercontent.com/joaorura/clearcore/master/LLM.md
 > ```
 
 ---

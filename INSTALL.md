@@ -131,7 +131,7 @@ sudo apt install -y nodejs
 
 #### 3. Clone and Build ClearCore
 ```bash
-git clone https://github.com/clearcore/clearcore.git
+git clone https://github.com/joaorura/clearcore.git
 cd clearcore
 
 # Run offline qualification gate
@@ -191,7 +191,7 @@ cargo run --release -p realtime-noise-service
 
 #### 2. Build & Package
 ```bash
-git clone https://github.com/clearcore/clearcore.git
+git clone https://github.com/joaorura/clearcore.git
 cd clearcore
 
 # Build Rust crates
@@ -208,28 +208,48 @@ The output `Clearcore.app` is placed in `release/Clearcore-darwin-x64/`.
 
 On Windows, ClearCore integrates via a high-performance **WaveRT PortCls virtual audio streaming driver** (`RealtimeNoise.inf`), providing sub-millisecond audio streaming compatible with WASAPI exclusive and shared modes.
 
-### Windows Path A: Turnkey Single-Click Setup
+### Windows Path A: Portable Standalone Execution (Recommended for Beta)
 
-1. Download and run `Clearcore-Setup.exe` (or run Inno Setup / NSIS generated installer).
-2. The setup wizard:
-   - Installs ClearCore into `C:\Program Files\Clearcore\`.
-   - Stages and installs the `RealtimeNoise.inf` WaveRT audio driver using `pnputil.exe /add-driver RealtimeNoise.inf /install`.
-   - Configures the `RealtimeNoiseService` background worker.
-   - Places shortcuts in the Start Menu and Desktop.
-3. Complete the wizard and launch ClearCore. The virtual microphone **Realtime Noise Virtual Microphone** is now available system-wide.
+Download and extract the portable release archive **`Clearcore-win32-x64.zip`**:
+
+1. Extract `Clearcore-win32-x64.zip` to your desired directory (e.g. `C:\Clearcore`).
+2. Run **`Clearcore.exe`**:
+   - The application automatically starts its companion background worker (`realtime-noise-service.exe`) and minimizes to the system tray.
+   - **SmartScreen Prompt**: If Windows displays an "Unknown Publisher / Windows protected your PC" dialog, click **"More info"** and then **"Run anyway"**.
+3. **Autostart with Windows**:
+   To start ClearCore minimized to tray on login:
+   ```powershell
+   powershell .\resources\scripts\setup-autostart.ps1 -Action enable
+   ```
+
+#### Windows Kernel Driver (WaveRT Virtual Microphone) & Test-Signing
+Microsoft Windows enforces strict digital signature requirements for kernel drivers (`.sys`). Official global distribution requires an EV Code Signing Hardware Token and Microsoft WHQL certification.
+
+For testing during the community **Beta** phase:
+1. Open PowerShell or Command Prompt as **Administrator** and enable Test Signing:
+   ```cmd
+   bcdedit /set testsigning on
+   ```
+2. Restart Windows to enter test mode (a small "Test Mode" watermark appears in the bottom right of the desktop).
+3. Sign user-mode and driver binaries with a local test certificate:
+   ```powershell
+   powershell -File .\resources\scripts\sign-windows-binaries.ps1 -InstallToRoot
+   ```
+4. Verify or install the virtual microphone device:
+   ```powershell
+   powershell -File .\resources\scripts\check-virtual-mic-windows.ps1 -Recreate
+   ```
 
 ---
 
-### Windows Path B: Portable Standalone Execution
+### Windows Path B: Turnkey Single-Click Setup (`Clearcore-Setup.exe`)
 
-Extract the portable release zip `Clearcore-win32-x64.zip` and run:
-```powershell
-.\release\Clearcore-win32-x64\Clearcore.exe
-```
-Or start all components via the helper script:
-```powershell
-.\start-all.ps1
-```
+The repository includes NSIS (`Clearcore-Setup.nsi`) and Inno Setup (`Clearcore-Setup.iss`) automation scripts in `platform/windows/installer/`. These scripts assemble:
+- Program Files directory layout (`C:\Program Files\Clearcore\`).
+- WaveRT driver staging and driver registration.
+- Background service registration and desktop shortcuts.
+
+Single-click `.exe` installer builds will be published alongside WHQL-certified drivers in the General Availability (GA) release milestone.
 
 ---
 
@@ -244,7 +264,7 @@ Or start all components via the helper script:
 
 #### 2. Compilation and Packaging
 ```powershell
-git clone https://github.com/clearcore/clearcore.git
+git clone https://github.com/joaorura/clearcore.git
 cd clearcore
 
 # Build all workspace crates

@@ -27,16 +27,38 @@ param(
 $ErrorActionPreference = "SilentlyContinue"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Resolve-Path "$ScriptDir\.."
-$InfPath = "$RepoRoot\platform\windows\driver\RealtimeNoise.inf"
+
+# Resolução de caminhos para o driver INF (empacotado ou código-fonte)
+$CandidateInfs = @(
+    (Join-Path $ScriptDir "..\driver\RealtimeNoise.inf"),
+    (Join-Path $ScriptDir "..\..\resources\driver\RealtimeNoise.inf"),
+    (Join-Path $ScriptDir "..\resources\driver\RealtimeNoise.inf"),
+    (Join-Path $ScriptDir "resources\driver\RealtimeNoise.inf"),
+    (Join-Path $ScriptDir "..\platform\windows\driver\RealtimeNoise.inf"),
+    "$env:ProgramFiles\Clearcore\resources\driver\RealtimeNoise.inf"
+)
+
+$InfPath = $null
+foreach ($cand in $CandidateInfs) {
+    if (Test-Path $cand) {
+        $InfPath = (Resolve-Path $cand).Path
+        break
+    }
+}
+if (-not $InfPath) {
+    $InfPath = Join-Path $ScriptDir "..\platform\windows\driver\RealtimeNoise.inf"
+}
+
 $DeviceHardwareId = "Root\RealtimeNoise"
 $DeviceName = "\\.\RealtimeNoise"
-$DeviceDesc = "Realtime Noise Virtual Audio Capture Device"
+$DeviceDesc = "ClearCore Virtual Audio Capture Device"
 
 function Test-VirtualDevicePresent {
     # 1. Checar via PnP Device
     $pnp = Get-PnpDevice | Where-Object { 
         $_.InstanceId -like "*RealtimeNoise*" -or 
+        $_.FriendlyName -like "*ClearCore*" -or
+        $_.FriendlyName -like "*Clearcore*" -or
         $_.FriendlyName -like "*Realtime Noise*" -or 
         $_.FriendlyName -like "*Hippocamp*" 
     }
@@ -61,6 +83,8 @@ function Test-VirtualDevicePresent {
 function Get-VirtualDeviceStatus {
     $pnp = Get-PnpDevice | Where-Object { 
         $_.InstanceId -like "*RealtimeNoise*" -or 
+        $_.FriendlyName -like "*ClearCore*" -or
+        $_.FriendlyName -like "*Clearcore*" -or
         $_.FriendlyName -like "*Realtime Noise*" -or 
         $_.FriendlyName -like "*Hippocamp*" 
     } | Select-Object -First 1
@@ -72,10 +96,10 @@ function Get-VirtualDeviceStatus {
 }
 
 function Test-IsDefaultMic {
-    # Testa se é o dispositivo de gravação padrão no Windows
+    # Testa se e o dispositivo de gravacao padrao no Windows
     if (Get-Command Get-AudioDevice -ErrorAction SilentlyContinue) {
         $def = Get-AudioDevice -Recording -ErrorAction SilentlyContinue
-        if ($def -and ($def.Name -like "*Realtime Noise*" -or $def.Name -like "*Hippocamp*")) {
+        if ($def -and ($def.Name -like "*ClearCore*" -or $def.Name -like "*Clearcore*" -or $def.Name -like "*Realtime Noise*" -or $def.Name -like "*Hippocamp*")) {
             return $true
         }
     }
@@ -85,7 +109,7 @@ function Test-IsDefaultMic {
 function Set-DefaultMic {
     if (Get-Command Set-AudioDevice -ErrorAction SilentlyContinue) {
         $dev = Get-AudioDevice -List -ErrorAction SilentlyContinue | Where-Object { 
-            $_.Type -eq "Recording" -and ($_.Name -like "*Realtime Noise*" -or $_.Name -like "*Hippocamp*") 
+            $_.Type -eq "Recording" -and ($_.Name -like "*ClearCore*" -or $_.Name -like "*Clearcore*" -or $_.Name -like "*Realtime Noise*" -or $_.Name -like "*Hippocamp*") 
         } | Select-Object -First 1
         if ($dev) {
             Set-AudioDevice -Index $dev.Index | Out-Null
@@ -96,15 +120,26 @@ function Set-DefaultMic {
 }
 
 function Install-VirtualDriver {
-    Write-Host "[Windows] Instalando driver WaveRT do microfone virtual..."
+    Write-Host "[Windows] Verificando driver WaveRT do microfone virtual..."
     if (Test-Path $InfPath) {
+        $driverDir = Split-Path -Parent $InfPath
+        $sysFile = Join-Path $driverDir "RealtimeNoise.sys"
+        if (-not (Test-Path $sysFile)) {
+            Write-Warning "Arquivo de kernel RealtimeNoise.sys nao encontrado em: $driverDir"
+            Write-Host " [INFO] No estagio Beta atual, o driver de kernel RealtimeNoise.sys precisa ser compilado com o WDK."
+            Write-Host "        Para testes com driver autoassinado, execute como Administrador:"
+            Write-Host "        bcdedit /set testsigning on"
+            Write-Host "        E utilize o script .\scripts\sign-windows-binaries.ps1"
+            return $false
+        }
+
         # 1. Tenta instalar diretamente via pnputil
         $pnpOut = & pnputil.exe /add-driver "$InfPath" /install 2>&1
         if (Test-VirtualDevicePresent) {
             return $true
         }
 
-        # 2. Se falhar, solicita elevação UAC para instalar o driver
+        # 2. Se falhar, solicita elevacao UAC para instalar o driver
         Write-Host "[Windows] Solicitando elevacao de Administrador (UAC) para instalar o driver..."
         try {
             $argList = "/c pnputil.exe /add-driver `"$InfPath`" /install"
@@ -113,12 +148,12 @@ function Install-VirtualDriver {
             Write-Warning "Falha na solicitacao de elevacao UAC: $_"
         }
 
-        # 3. Tenta devcon se disponível para instanciar Root\RealtimeNoise
+        # 3. Tenta devcon se disponivel para instanciar Root\RealtimeNoise
         if (Get-Command devcon.exe -ErrorAction SilentlyContinue) {
             devcon.exe install "$InfPath" "$DeviceHardwareId" 2>&1 | Out-Null
         }
 
-        # 4. Iniciar o serviço caso tenha sido registrado
+        # 4. Iniciar o servico caso tenha sido registrado
         Start-Service -Name "RealtimeNoise" -ErrorAction SilentlyContinue
 
         Start-Sleep -Seconds 1

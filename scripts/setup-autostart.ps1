@@ -14,9 +14,44 @@ $RegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $ValueName = "ClearcoreRealtimeNoise"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Resolve-Path "$ScriptDir\.."
-$AppDir = "$RepoRoot\crates\app-tauri"
-$ExecCommand = "npm.cmd start --prefix `"$AppDir`" -- --tray"
+$ExecCommand = $null
+
+# 1. Procurar Clearcore.exe empacotado (relativo ao script)
+$CandidateExes = @(
+    (Join-Path $ScriptDir "..\..\Clearcore.exe"),
+    (Join-Path $ScriptDir "..\Clearcore.exe"),
+    (Join-Path $ScriptDir "Clearcore.exe"),
+    (Join-Path $ScriptDir "..\release\Clearcore-win32-x64\Clearcore.exe")
+)
+
+foreach ($cand in $CandidateExes) {
+    if (Test-Path $cand) {
+        $fullExe = (Resolve-Path $cand).Path
+        $ExecCommand = "`"$fullExe`" --tray"
+        break
+    }
+}
+
+# 2. Se nao encontrou o binario empacotado, checar se esta rodando do repositorio fonte
+if (-not $ExecCommand) {
+    $RepoRoot = Resolve-Path "$ScriptDir\.." -ErrorAction SilentlyContinue
+    if ($RepoRoot) {
+        $AppDir = "$RepoRoot\crates\app-tauri"
+        if (Test-Path "$AppDir\package.json") {
+            $ExecCommand = "npm.cmd start --prefix `"$AppDir`" -- --tray"
+        }
+    }
+}
+
+# 3. Fallback para caminho padrao de instalacao ou PATH
+if (-not $ExecCommand) {
+    $DefaultInstall = "$env:ProgramFiles\Clearcore\Clearcore.exe"
+    if (Test-Path $DefaultInstall) {
+        $ExecCommand = "`"$DefaultInstall`" --tray"
+    } else {
+        $ExecCommand = "Clearcore.exe --tray"
+    }
+}
 
 switch ($Action) {
     "enable" {

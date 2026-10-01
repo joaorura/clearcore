@@ -69,8 +69,8 @@ Download the release packages directly from the release assets:
 | Artifact | Platform | Package Type | Contents & Installation |
 |---|---|---|---|
 | **`Clearcore-linux-x64.tar.gz`** | Linux (x86_64) | Standalone Archive | Portable binary + `./install.sh` for system desktop integration |
-| **`Clearcore-Setup.exe`** | Windows (x64) | Single-Click Installer | Inno Setup / NSIS package with automated WaveRT driver registration |
-| **`Clearcore-darwin-x64.tar.gz`** | macOS (x64/ARM64) | Application Bundle | `Clearcore.app` bundled with CoreAudio HAL driver and installer |
+| **`Clearcore-win32-x64.zip`** | Windows (x64) | Portable Application | Self-contained app with embedded daemon, autostart, and WaveRT driver specs |
+| **`Clearcore-darwin-arm64.tar.gz`** | macOS (Apple Silicon) | Application Bundle | `Clearcore.app` bundled with CoreAudio HAL driver and installer |
 
 ---
 
@@ -78,28 +78,21 @@ Download the release packages directly from the release assets:
 
 To ensure your downloaded binaries have not been corrupted or tampered with, verify the SHA-256 checksums before installation.
 
-### Official Checksums
-```text
-7cb41a99081a41ef1a3f98bcab15e920bc86fd0fffcacdbe6060557b9a3cf000  Clearcore-linux-x64.tar.gz
-```
-
 ### Verification Commands
 
 - **Linux**:
   ```bash
-  sha256sum -c <<EOF
-  7cb41a99081a41ef1a3f98bcab15e920bc86fd0fffcacdbe6060557b9a3cf000  Clearcore-linux-x64.tar.gz
-  EOF
+  sha256sum Clearcore-linux-x64.tar.gz
   ```
 
 - **macOS**:
   ```bash
-  shasum -a 256 Clearcore-darwin-x64.tar.gz
+  shasum -a 256 Clearcore-darwin-arm64.tar.gz
   ```
 
 - **Windows (PowerShell)**:
   ```powershell
-  Get-FileHash -Algorithm SHA256 .\Clearcore-Setup.exe
+  Get-FileHash -Algorithm SHA256 .\Clearcore-win32-x64.zip
   ```
 
 ---
@@ -123,12 +116,30 @@ To ensure your downloaded binaries have not been corrupted or tampered with, ver
 3. Open your voice application (Discord, Zoom, OBS Studio) and select **"Realtime Noise Virtual Microphone"** (`realtime-noise-source`) as your input device.
 
 ### Windows
-1. Download and execute **`Clearcore-Setup.exe`** as Administrator.
-2. The installer will automatically register the WaveRT virtual microphone driver (`pnputil /add-driver RealtimeNoise.inf`) and start ClearCore in the system tray.
-3. Select **"Realtime Noise Virtual Microphone"** in Windows Sound Settings or your communication client.
+1. Download and extract **`Clearcore-win32-x64.zip`**.
+2. Run **`Clearcore.exe`**:
+   - The application automatically launches the companion background daemon (`realtime-noise-service.exe`) and minimizes to the system tray.
+   - *SmartScreen*: In this open-source beta, Windows SmartScreen may show an "Unknown Publisher" prompt. Click **"More info"** -> **"Run anyway"**.
+3. **Autostart on Boot**:
+   ```powershell
+   powershell .\resources\scripts\setup-autostart.ps1 -Action enable
+   ```
+4. **Virtual Microphone Driver (Kernel WaveRT)**:
+   - Kernel drivers (`.sys`) in Windows require strict signing. For community beta testing:
+     1. Open PowerShell or Command Prompt as **Administrator** and enable test signing:
+        ```cmd
+        bcdedit /set testsigning on
+        ```
+     2. Restart your computer.
+     3. You can sign or check the driver with the bundled tools:
+        ```powershell
+        powershell .\resources\scripts\sign-windows-binaries.ps1
+        powershell .\resources\scripts\check-virtual-mic-windows.ps1 -Recreate
+        ```
+   *(Note: The all-in-one `Clearcore-Setup.exe` with EV/WHQL signed driver pipeline is scheduled for General Availability).*
 
 ### macOS
-1. Download and extract **`Clearcore-darwin-x64.tar.gz`**.
+1. Download and extract **`Clearcore-darwin-arm64.tar.gz`**.
 2. Run the included `install.sh` with administrative privileges to place the CoreAudio HAL driver in `/Library/Audio/Plug-Ins/HAL/`:
    ```bash
    sudo ./install.sh
@@ -176,6 +187,6 @@ To ensure your downloaded binaries have not been corrupted or tampered with, ver
 ## 💬 Feedback & Bug Reports
 
 As this is a Beta release, your feedback is crucial in helping us reach General Availability (GA):
-- **Issue Tracker**: File bug reports and performance feedback on [GitHub Issues](https://github.com/clearcore/clearcore/issues).
+- **Issue Tracker**: File bug reports and performance feedback on [GitHub Issues](https://github.com/joaorura/clearcore/issues).
 - **Audio Diagnostics**: You can export diagnostic logs directly from the desktop application tray menu -> **Diagnostics**.
 - **Security Vulnerabilities**: Please review [`SECURITY.md`](../SECURITY.md) for private reporting procedures.

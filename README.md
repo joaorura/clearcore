@@ -25,7 +25,7 @@ If you are using an AI Coding Assistant or Agent (Claude Desktop, Cursor, ChatGP
 > **Copy-Paste AI Prompt:**
 > ```text
 > Install and verify ClearCore Realtime Noise Suppression on my computer.
-> Please inspect the repository instructions in LLM.md (or https://raw.githubusercontent.com/clearcore/clearcore/main/LLM.md) and INSTALL.md.
+> Please inspect the repository instructions in LLM.md (or https://raw.githubusercontent.com/joaorura/clearcore/master/LLM.md) and INSTALL.md.
 > Detect my operating system, check for CPU AVX2 support, execute the appropriate turnkey installer or build steps, verify that the virtual microphone is healthy and recognized by the system audio subsystem, and confirm that the noise suppression daemon is running in Active mode.
 > ```
 

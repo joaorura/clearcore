@@ -1,9 +1,9 @@
 ;; RealtimeNoise.inf
 ;;
-;; Installation file for Project Hippocamp Realtime Noise Suppression
+;; Installation file for ClearCore Realtime Noise Suppression
 ;; Virtual PortCls/WaveRT Audio Capture Adapter.
 ;;
-;; Copyright (c) Project Hippocamp. All rights reserved.
+;; Copyright (c) ClearCore Project. All rights reserved.
 
 [Version]
 Signature="$Windows NT$"
@@ -25,9 +25,9 @@ RealtimeNoise.CopyFiles = 13
 RealtimeNoise.sys = 1
 
 [Manufacturer]
-%ProviderName% = ProjectHippocamp, NTamd64.10.0...14393
+%ProviderName% = ClearCore, NTamd64.10.0...14393
 
-[ProjectHippocamp.NTamd64.10.0...14393]
+[ClearCore.NTamd64.10.0...14393]
 %RealtimeNoise.DeviceDesc% = RealtimeNoise_Device, Root\RealtimeNoise
 
 ;;======================================================
@@ -124,16 +124,16 @@ HKR,Parameters,ZeroLeakageEnforced,0x00010001,1
 ;;======================================================
 
 [Strings]
-ProviderName                = "Project Hippocamp"
-DiskDescription             = "Hippocamp Realtime Noise Suppression Driver Installation Disk"
-RealtimeNoise.DeviceDesc    = "Hippocamp Virtual Audio Capture Adapter"
-RealtimeNoise.SvcDesc       = "Hippocamp Virtual Audio WaveRT Driver Service"
-CapturePinName              = "Denoised Capture"
+ProviderName                = "ClearCore Open Source Project"
+DiskDescription             = "ClearCore Realtime Noise Suppression Driver Installation Disk"
+RealtimeNoise.DeviceDesc    = "ClearCore Virtual Audio Capture Adapter"
+RealtimeNoise.SvcDesc       = "ClearCore Virtual Audio WaveRT Driver Service"
+CapturePinName              = "ClearCore Denoised Capture"
 
-RealtimeNoise.Wave.szPname     = "Hippocamp WaveRT Audio Subdevice"
-RealtimeNoise.Capture.szPname  = "Hippocamp Denoised Virtual Microphone"
-RealtimeNoise.RealTime.szPname = "Hippocamp WaveRT Realtime Stream Subdevice"
-RealtimeNoise.Topology.szPname = "Hippocamp Audio Topology Subdevice"
+RealtimeNoise.Wave.szPname     = "ClearCore WaveRT Audio Subdevice"
+RealtimeNoise.Capture.szPname  = "ClearCore Denoised Virtual Microphone"
+RealtimeNoise.RealTime.szPname = "ClearCore WaveRT Realtime Stream Subdevice"
+RealtimeNoise.Topology.szPname = "ClearCore Audio Topology Subdevice"
 
 ;; Standard KS Category GUIDs
 KSCATEGORY_AUDIO            = "{6994AD04-93EF-11D0-A3CC-00A0C9223196}"

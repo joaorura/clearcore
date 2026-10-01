@@ -203,6 +203,7 @@ const scriptFiles = [
   'uninstall-macos.sh',
   'uninstall-windows.bat',
   'uninstall-windows.ps1',
+  'sign-windows-binaries.ps1',
 ];
 
 for (const sf of scriptFiles) {
@@ -221,11 +222,56 @@ const driverTargetDir = path.join(resourcesDir, 'driver');
 fs.mkdirSync(driverTargetDir, { recursive: true });
 
 if (isWin) {
-  const infSrc = path.join(repoRoot, 'platform', 'windows', 'driver', 'RealtimeNoise.inf');
+  const driverDir = path.join(repoRoot, 'platform', 'windows', 'driver');
+  const infSrc = path.join(driverDir, 'RealtimeNoise.inf');
   if (fs.existsSync(infSrc)) {
     fs.copyFileSync(infSrc, path.join(driverTargetDir, 'RealtimeNoise.inf'));
     console.log('✓ Bundled RealtimeNoise.inf driver specification');
   }
+
+  // Bundle compiled kernel driver binaries if present
+  const sysCandidates = [
+    path.join(driverDir, 'RealtimeNoise.sys'),
+    path.join(driverDir, 'x64', 'Release', 'RealtimeNoise.sys'),
+    path.join(driverDir, 'x64', 'Debug', 'RealtimeNoise.sys'),
+  ];
+  for (const s of sysCandidates) {
+    if (fs.existsSync(s)) {
+      fs.copyFileSync(s, path.join(driverTargetDir, 'RealtimeNoise.sys'));
+      console.log('✓ Bundled RealtimeNoise.sys kernel driver');
+      break;
+    }
+  }
+
+  const catCandidates = [
+    path.join(driverDir, 'RealtimeNoise.cat'),
+    path.join(driverDir, 'x64', 'Release', 'RealtimeNoise.cat'),
+    path.join(driverDir, 'x64', 'Debug', 'RealtimeNoise.cat'),
+  ];
+  for (const c of catCandidates) {
+    if (fs.existsSync(c)) {
+      fs.copyFileSync(c, path.join(driverTargetDir, 'RealtimeNoise.cat'));
+      console.log('✓ Bundled RealtimeNoise.cat catalog file');
+      break;
+    }
+  }
+
+  const readmeContent = `ClearCore Windows WaveRT Virtual Microphone Driver
+===================================================
+Status: Beta Driver Specification
+
+To install and use this virtual microphone driver on Windows:
+1. The driver RealtimeNoise.sys is built using Visual Studio and the Windows Driver Kit (WDK 10.0).
+2. During the Beta testing phase, kernel drivers signed with a local/test certificate require
+   Windows Test-Signing mode enabled:
+     bcdedit /set testsigning on
+   (run Command Prompt / PowerShell as Administrator, then reboot if prompted).
+3. To sign the driver and user-mode binaries with a test certificate, use:
+     powershell -File resources/scripts/sign-windows-binaries.ps1
+4. To register/install the driver:
+     pnputil /add-driver RealtimeNoise.inf /install
+`;
+  fs.writeFileSync(path.join(driverTargetDir, 'README-DRIVER.txt'), readmeContent, 'utf8');
 } else if (isMac) {
   const halDriver = path.join(repoRoot, 'platform', 'macos', 'HAL', 'RealtimeNoiseHAL.driver');
   if (fs.existsSync(halDriver)) {
@@ -499,6 +545,19 @@ if (Test-Path $PsScript) {
 }
 `;
   fs.writeFileSync(path.join(bundleDir, 'uninstall.ps1'), uninstallPs1, 'utf8');
+
+  // Test code signing for Windows binaries prior to zip compression
+  if (isWin) {
+    const signScript = path.join(repoRoot, 'scripts', 'sign-windows-binaries.ps1');
+    if (fs.existsSync(signScript)) {
+      console.log('🔏 Applying test code signing to Windows executables...');
+      try {
+        execSync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${signScript}"`, { stdio: 'inherit' });
+      } catch (signErr) {
+        console.warn('Test signing skipped or failed:', signErr.message);
+      }
+    }
+  }
 
   const zipName = `${bundleName}.zip`;
   const zipPath = path.join(releaseDir, zipName);
