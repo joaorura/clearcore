@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Clearcore / Hippocamp - Verificador e Recuperador de Microfone Virtual PipeWire
+# Clearcore / Hippocamp - Verificador e Recuperador de Microfone Virtual
+# (Multi-Plataforma: Linux PipeWire, macOS CoreAudio HAL, Windows WaveRT)
 # ==============================================================================
 # Este script:
-# 1. Checa se o microfone virtual "realtime-noise-source" existe no PipeWire.
-# 2. Se NÃO foi criado, inicia o processo de recuperação e criação automática.
-# 3. Garante que o microfone esteja visível para Teams, Discord, Zoom, OBS, etc.
+# 1. Detecta o sistema operacional do host.
+# 2. No Linux: gerencia o nó PipeWire "realtime-noise-source" (via helper C / loopback).
+# 3. No macOS: delega para check-virtual-mic-macos.sh (CoreAudio HAL Plug-in).
+# 4. No Windows: delega para check-virtual-mic-windows.ps1 (Driver WaveRT / PortCls).
 #
 # Uso:
 #   ./scripts/check-virtual-mic.sh              # Verifica e cria se não existir
@@ -18,6 +20,24 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Despacho Multi-Plataforma
+CURRENT_OS="$(uname -s 2>/dev/null || echo "Unknown")"
+if [[ "${CURRENT_OS}" == "Darwin" ]]; then
+    MACOS_SCRIPT="${SCRIPT_DIR}/scripts/check-virtual-mic-macos.sh"
+    if [[ -x "${MACOS_SCRIPT}" ]]; then
+        exec "${MACOS_SCRIPT}" "$@"
+    else
+        exec bash "${MACOS_SCRIPT}" "$@"
+    fi
+elif [[ "${CURRENT_OS}" == *"MINGW"* || "${CURRENT_OS}" == *"MSYS"* || "${CURRENT_OS}" == *"CYGWIN"* || "${OS:-}" == "Windows_NT" ]]; then
+    WIN_SCRIPT="${SCRIPT_DIR}/scripts/check-virtual-mic-windows.ps1"
+    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${WIN_SCRIPT}" "$@"
+fi
+
+# ==============================================================================
+# Implementação Nativa Linux (PipeWire / WirePlumber)
+# ==============================================================================
 HELPER_BIN="${SCRIPT_DIR}/platform/linux/helper/build/pipewire_helper"
 NODE_NAME="realtime-noise-source"
 NODE_DESC="Realtime Noise Virtual Microphone"
@@ -88,10 +108,13 @@ print_json_status() {
 
     cat <<EOF
 {
+  "platform": "linux",
+  "platform_label": "Linux (PipeWire / WirePlumber)",
   "present": ${present},
   "node_id": ${node_id},
   "node_name": "${NODE_NAME}",
   "node_description": "${NODE_DESC}",
+  "driver_status": "OK",
   "is_default": ${is_def},
   "format": "F32LE",
   "rate": 48000,
@@ -252,7 +275,7 @@ if [[ "${ACTION}" == "status" ]]; then
             IS_DEF="Sim (Padrao do Sistema)"
         fi
         echo "=========================================================="
-        echo " Microfone Virtual Clearcore (PipeWire)"
+        echo " Microfone Virtual Clearcore (Linux PipeWire)"
         echo "=========================================================="
         echo " - Estado:       🟢 Ativo"
         echo " - Node ID:      ${NODE_ID:-desconhecido}"
@@ -264,7 +287,7 @@ if [[ "${ACTION}" == "status" ]]; then
         exit 0
     else
         echo "=========================================================="
-        echo " Microfone Virtual Clearcore (PipeWire)"
+        echo " Microfone Virtual Clearcore (Linux PipeWire)"
         echo "=========================================================="
         echo " - Estado:       🔴 Nao Detectado no Grafo do PipeWire"
         echo " - Sugestao:     Execute ./scripts/check-virtual-mic.sh --recreate"

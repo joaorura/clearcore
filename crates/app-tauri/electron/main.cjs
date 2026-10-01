@@ -26,15 +26,26 @@ let currentStatus = {
 };
 
 let currentVirtualMicStatus = {
+  platform: process.platform,
+  platform_label:
+    process.platform === 'win32'
+      ? 'Windows (WaveRT Driver)'
+      : process.platform === 'darwin'
+      ? 'macOS (CoreAudio HAL)'
+      : 'Linux (PipeWire)',
   present: false,
   node_id: null,
   node_name: 'realtime-noise-source',
   node_description: 'Realtime Noise Virtual Microphone',
+  driver_status: 'Unknown',
   is_default: false,
 };
 
 // Check if launched with --tray or --hidden or from autostart
-const startInTray = process.argv.includes('--tray') || process.argv.includes('--hidden') || process.argv.includes('--minimized');
+const startInTray =
+  process.argv.includes('--tray') ||
+  process.argv.includes('--hidden') ||
+  process.argv.includes('--minimized');
 
 // Path to socket
 function getSocketPath() {
@@ -49,12 +60,13 @@ function getSocketPath() {
 function sendIpcRequest(command, payload = {}) {
   return new Promise((resolve, reject) => {
     const socketPath = getSocketPath();
-    const req = JSON.stringify({
-      version: 'realtime-noise.v1',
-      request_id: `req-${Date.now()}`,
-      command,
-      payload,
-    }) + '\n';
+    const req =
+      JSON.stringify({
+        version: 'realtime-noise.v1',
+        request_id: `req-${Date.now()}`,
+        command,
+        payload,
+      }) + '\n';
 
     const client = net.createConnection(socketPath, () => {
       client.write(req);
@@ -93,25 +105,61 @@ function sendIpcRequest(command, payload = {}) {
   });
 }
 
-// Virtual Microphone Helper & Check Script path
-function getVirtualMicScriptPath() {
-  const candidate1 = path.resolve(__dirname, '..', '..', '..', 'scripts', 'check-virtual-mic.sh');
-  const candidate2 = path.resolve(process.cwd(), 'scripts', 'check-virtual-mic.sh');
-  if (fs.existsSync(candidate1)) return candidate1;
-  if (fs.existsSync(candidate2)) return candidate2;
-  return 'scripts/check-virtual-mic.sh';
-}
-
-function queryVirtualMicStatus() {
+// Cross-Platform Virtual Microphone Script Execution
+function executeVirtualMicScript(action) {
   return new Promise((resolve) => {
-    const script = getVirtualMicScriptPath();
-    execFile(script, ['--json', '--status'], (error, stdout) => {
+    let scriptPath = '';
+    let command = '';
+    let args = [];
+
+    const isWin = process.platform === 'win32';
+    const isMac = process.platform === 'darwin';
+
+    if (isWin) {
+      command = 'powershell.exe';
+      const c1 = path.resolve(__dirname, '..', '..', '..', 'scripts', 'check-virtual-mic-windows.ps1');
+      const c2 = path.resolve(process.cwd(), 'scripts', 'check-virtual-mic-windows.ps1');
+      scriptPath = fs.existsSync(c1) ? c1 : c2;
+      args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Json'];
+      if (action === 'recreate') args.push('-Recreate');
+      else if (action === 'set_default') args.push('-SetDefault');
+      else if (action === 'status') args.push('-Status');
+    } else if (isMac) {
+      command = '/bin/bash';
+      const c1 = path.resolve(__dirname, '..', '..', '..', 'scripts', 'check-virtual-mic-macos.sh');
+      const c2 = path.resolve(process.cwd(), 'scripts', 'check-virtual-mic-macos.sh');
+      scriptPath = fs.existsSync(c1) ? c1 : c2;
+      args = [scriptPath, '--json'];
+      if (action === 'recreate') args.push('--recreate');
+      else if (action === 'set_default') args.push('--set-default');
+      else if (action === 'status') args.push('--status');
+    } else {
+      command = '/bin/bash';
+      const c1 = path.resolve(__dirname, '..', '..', '..', 'scripts', 'check-virtual-mic.sh');
+      const c2 = path.resolve(process.cwd(), 'scripts', 'check-virtual-mic.sh');
+      scriptPath = fs.existsSync(c1) ? c1 : c2;
+      args = [scriptPath, '--json'];
+      if (action === 'recreate') args.push('--recreate');
+      else if (action === 'set_default') args.push('--set-default');
+      else if (action === 'status') args.push('--status');
+    }
+
+    execFile(command, args, (error, stdout) => {
+      const defaultPlatformLabel = isWin
+        ? 'Windows (WaveRT Driver)'
+        : isMac
+        ? 'macOS (CoreAudio HAL)'
+        : 'Linux (PipeWire / WirePlumber)';
+
       if (error && !stdout) {
         resolve({
+          platform: process.platform,
+          platform_label: defaultPlatformLabel,
           present: false,
           node_id: null,
           node_name: 'realtime-noise-source',
           node_description: 'Realtime Noise Virtual Microphone',
+          driver_status: 'Error',
           is_default: false,
           error: error.message,
         });
@@ -122,10 +170,13 @@ function queryVirtualMicStatus() {
         resolve(parsed);
       } catch (err) {
         resolve({
+          platform: process.platform,
+          platform_label: defaultPlatformLabel,
           present: false,
           node_id: null,
           node_name: 'realtime-noise-source',
           node_description: 'Realtime Noise Virtual Microphone',
+          driver_status: 'ParseError',
           is_default: false,
           error: `Parse error: ${err.message}`,
         });
@@ -134,63 +185,42 @@ function queryVirtualMicStatus() {
   });
 }
 
+function queryVirtualMicStatus() {
+  return executeVirtualMicScript('status');
+}
+
 function runRecreateVirtualMic() {
-  return new Promise((resolve) => {
-    const script = getVirtualMicScriptPath();
-    execFile(script, ['--recreate', '--json'], (error, stdout) => {
-      try {
-        const parsed = JSON.parse(stdout.trim());
-        resolve(parsed);
-      } catch (err) {
-        resolve({
-          present: false,
-          node_id: null,
-          node_name: 'realtime-noise-source',
-          node_description: 'Realtime Noise Virtual Microphone',
-          is_default: false,
-          error: error ? error.message : `Recreate parse error: ${err.message}`,
-        });
-      }
-    });
-  });
+  return executeVirtualMicScript('recreate');
 }
 
 function runSetDefaultVirtualMic() {
-  return new Promise((resolve) => {
-    const script = getVirtualMicScriptPath();
-    execFile(script, ['--set-default', '--json'], (error, stdout) => {
-      try {
-        const parsed = JSON.parse(stdout.trim());
-        resolve(parsed);
-      } catch (err) {
-        resolve({
-          present: false,
-          node_id: null,
-          node_name: 'realtime-noise-source',
-          node_description: 'Realtime Noise Virtual Microphone',
-          is_default: false,
-          error: error ? error.message : `Set default error: ${err.message}`,
-        });
-      }
-    });
-  });
+  return executeVirtualMicScript('set_default');
 }
 
 // Active startup verification: check if created; if not created, auto-create!
 async function verifyAndAutoCreateVirtualMicOnStartup() {
-  console.log('[Startup] Verificando criacao do microfone virtual no PipeWire...');
+  const plat =
+    process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux';
+  console.log(`[Startup] Verificando criacao do microfone virtual em ${plat}...`);
   const initial = await queryVirtualMicStatus();
   if (initial && initial.present) {
-    console.log(`[Startup] Microfone virtual verificado no PipeWire (Node ID: ${initial.node_id})`);
+    console.log(`[Startup] Microfone virtual verificado em ${plat} (ID: ${initial.node_id})`);
     currentVirtualMicStatus = initial;
   } else {
-    console.warn('[Startup] Microfone virtual NAO detectado! Executando recuperacao e criacao automatica...');
+    console.warn(
+      `[Startup] Microfone virtual NAO detectado em ${plat}! Executando recuperacao e criacao automatica...`
+    );
     const recreated = await runRecreateVirtualMic();
     currentVirtualMicStatus = recreated;
     if (recreated.present) {
-      console.log(`[Startup] Microfone virtual criado e registrado no PipeWire com sucesso! (Node ID: ${recreated.node_id})`);
+      console.log(
+        `[Startup] Microfone virtual criado e registrado em ${plat} com sucesso! (ID: ${recreated.node_id})`
+      );
     } else {
-      console.error('[Startup] Falha na criacao automatica do microfone virtual:', recreated.error);
+      console.error(
+        `[Startup] Falha na criacao automatica do microfone virtual em ${plat}:`,
+        recreated.error
+      );
     }
   }
   updateTrayMenu();
@@ -276,6 +306,7 @@ function updateTrayMenu() {
   }
 
   const autostart = isAutostartEnabled();
+  const platformLabel = currentVirtualMicStatus.platform_label || 'Virtual';
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -285,8 +316,8 @@ function updateTrayMenu() {
     { type: 'separator' },
     {
       label: currentVirtualMicStatus.present
-        ? `Microfone: 🟢 Ativo (ID: ${currentVirtualMicStatus.node_id || 'OK'})`
-        : `Microfone: 🔴 Não Criado (Clique para Criar)`,
+        ? `Microfone (${platformLabel}): 🟢 Ativo (ID: ${currentVirtualMicStatus.node_id || 'OK'})`
+        : `Microfone (${platformLabel}): 🔴 Não Criado (Clique para Criar / Instalar)`,
       click: async () => {
         if (!currentVirtualMicStatus.present) {
           const res = await runRecreateVirtualMic();
@@ -317,7 +348,7 @@ function updateTrayMenu() {
         ]
       : [
           {
-            label: 'Criar / Recuperar Microfone Virtual',
+            label: 'Criar / Instalar Microfone Virtual',
             click: async () => {
               const res = await runRecreateVirtualMic();
               currentVirtualMicStatus = res;
@@ -459,10 +490,10 @@ function createWindow() {
   const iconPath = path.join(assetsDir, 'icon.png');
 
   mainWindow = new BrowserWindow({
-    width: 840,
-    height: 740,
-    minWidth: 680,
-    minHeight: 560,
+    width: 860,
+    height: 760,
+    minWidth: 700,
+    minHeight: 580,
     show: false, // Start hidden to obey "inicie na bandeja"
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
@@ -527,7 +558,8 @@ async function pollDaemonStatus() {
     if (
       micRes.present !== currentVirtualMicStatus.present ||
       micRes.node_id !== currentVirtualMicStatus.node_id ||
-      micRes.is_default !== currentVirtualMicStatus.is_default
+      micRes.is_default !== currentVirtualMicStatus.is_default ||
+      micRes.platform_label !== currentVirtualMicStatus.platform_label
     ) {
       currentVirtualMicStatus = micRes;
       updateTrayMenu();

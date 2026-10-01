@@ -13,10 +13,16 @@ interface EngineStatus {
 }
 
 export interface VirtualMicStatus {
+  platform?: 'linux' | 'windows' | 'macos' | string;
+  platform_label?: string;
   present: boolean;
   node_id: number | string | null;
   node_name: string;
   node_description: string;
+  driver_status?: string;
+  driver_bundle?: string;
+  driver_installed?: boolean;
+  install_inf?: string;
   is_default: boolean;
   format?: string;
   rate?: number;
@@ -193,17 +199,18 @@ export const App: React.FC = () => {
 
   const handleRecreateVirtualMic = async () => {
     setIsCheckingMic(true);
-    setMicActionMessage('Verificando / Recriando microfone virtual no PipeWire...');
+    const platLabel = virtualMic?.platform_label || 'Sistema';
+    setMicActionMessage(`Verificando / Criando microfone virtual (${platLabel})...`);
     try {
       const res = await invokeBridge<VirtualMicStatus>('recreate_virtual_mic');
       setVirtualMic(res);
       if (res.present) {
-        setMicActionMessage(`Microfone virtual criado e verificado com sucesso! (Node ID: ${res.node_id ?? 'Ativo'})`);
+        setMicActionMessage(`Microfone virtual criado e verificado com sucesso! (ID: ${res.node_id ?? 'Ativo'})`);
       } else {
-        setMicActionMessage(`Não foi possível registrar o microfone virtual: ${res.error ?? 'Erro desconhecido'}`);
+        setMicActionMessage(`Não foi possível registrar o microfone virtual: ${res.error ?? 'Verifique permissões de Administrador/Root'}`);
       }
     } catch (err) {
-      setMicActionMessage(`Erro ao recriar microfone: ${String(err)}`);
+      setMicActionMessage(`Erro ao criar microfone: ${String(err)}`);
     } finally {
       setIsCheckingMic(false);
       setTimeout(() => setMicActionMessage(null), 5000);
@@ -247,13 +254,17 @@ export const App: React.FC = () => {
     }
   };
 
+  const platformTitle = virtualMic?.platform_label || 'Multi-Plataforma';
+  const isWindows = virtualMic?.platform === 'windows';
+  const isMac = virtualMic?.platform === 'macos';
+
   return (
     <div className="container">
       <header className="header">
         <div className="title-area">
           <h1>Clearcore / Orca Noise Suppression</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>
-            Companion Desktop com Bandeja do Sistema e Início Automático
+            Companion Desktop Multi-Plataforma (Linux, Windows, macOS) com Bandeja e Início Automático
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -308,13 +319,18 @@ export const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Microfone Virtual PipeWire */}
+      {/* Microfone Virtual Multi-Plataforma */}
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
           <div>
-            <h2 className="card-title" style={{ margin: 0 }}>Microfone Virtual do Sistema (PipeWire)</h2>
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
-              Ponto de captura exposto para Discord, Teams, Zoom, OBS e navegadores.
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 className="card-title" style={{ margin: 0 }}>Microfone Virtual do Sistema</h2>
+              <span style={{ fontSize: '0.75rem', background: '#1e293b', border: '1px solid #334155', borderRadius: 4, padding: '2px 8px', color: '#93c5fd' }}>
+                {platformTitle}
+              </span>
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>
+              Dispositivo virtual de captura exposto para Discord, Teams, Zoom, OBS e navegadores.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -322,9 +338,9 @@ export const App: React.FC = () => {
               className="action-btn"
               disabled={isCheckingMic}
               onClick={handleRecreateVirtualMic}
-              title="Verifica o grafo do PipeWire e recria o nó caso não tenha sido criado"
+              title="Verifica o subsistema de áudio e recria/instala o microfone virtual caso não tenha sido criado"
             >
-              {isCheckingMic ? '⏳ Verificando...' : '🔄 Verificar / Recriar'}
+              {isCheckingMic ? '⏳ Verificando...' : '🔄 Verificar / Criar'}
             </button>
             {virtualMic?.present && (
               <button
@@ -344,9 +360,11 @@ export const App: React.FC = () => {
 
         <div className="grid-cols-2">
           <div className="metric-box">
-            <div className="metric-label">Estado do Nó PipeWire</div>
+            <div className="metric-label">
+              {isWindows ? 'Status do Driver WaveRT / PnP' : isMac ? 'Status do Plug-In CoreAudio HAL' : 'Estado do Nó PipeWire'}
+            </div>
             <div className="metric-value status-badge" style={{ color: virtualMic?.present ? '#4ade80' : '#f87171' }}>
-              {virtualMic?.present ? `🟢 Ativo (Node ID: ${virtualMic.node_id ?? 'OK'})` : '🔴 Não Criado no PipeWire'}
+              {virtualMic?.present ? `🟢 Ativo (ID: ${virtualMic.node_id ?? 'OK'})` : '🔴 Não Detectado no Sistema'}
             </div>
           </div>
           <div className="metric-box">
@@ -359,14 +377,33 @@ export const App: React.FC = () => {
 
         {virtualMic?.present ? (
           <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-            <span><strong>Nome:</strong> {virtualMic.node_name}</span>
+            <span><strong>Dispositivo:</strong> {virtualMic.node_name}</span>
             <span><strong>Formato:</strong> {virtualMic.format || 'F32LE'} @ {virtualMic.rate || 48000}Hz</span>
             <span><strong>Canais:</strong> {virtualMic.channels || 1} (Mono)</span>
-            <span><strong>Latência do Quantum:</strong> {virtualMic.quantum || 480} amostras (10ms)</span>
+            <span><strong>Latência:</strong> {virtualMic.quantum || 480} amostras (10ms)</span>
           </div>
         ) : (
-          <div style={{ marginTop: 12, padding: '10px 14px', background: '#451a1a', border: '1px solid #7f1d1d', borderRadius: 6, color: '#fca5a5', fontSize: '0.85rem' }}>
-            ⚠️ O microfone virtual não foi detectado no PipeWire. Clique em <strong>"Verificar / Recriar"</strong> acima para criar e registrar o nó automaticamente.
+          <div style={{ marginTop: 12, padding: '12px 14px', background: '#451a1a', border: '1px solid #7f1d1d', borderRadius: 6, color: '#fca5a5', fontSize: '0.85rem', lineHeight: 1.5 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              ⚠️ O microfone virtual não foi detectado no subsistema de áudio ({platformTitle}).
+            </div>
+            <div>
+              {isWindows && (
+                <span>
+                  O driver WaveRT <code>Root\RealtimeNoise</code> não está ativo. Clique em <strong>"Verificar / Criar"</strong> ou execute como Administrador: <code>pnputil /add-driver platform\windows\driver\RealtimeNoise.inf /install</code>.
+                </span>
+              )}
+              {isMac && (
+                <span>
+                  O bundle <code>RealtimeNoiseHAL.driver</code> não está em <code>/Library/Audio/Plug-Ins/HAL/</code>. Clique em <strong>"Verificar / Criar"</strong> para instalar e reiniciar o <code>coreaudiod</code>.
+                </span>
+              )}
+              {!isWindows && !isMac && (
+                <span>
+                  O nó <code>realtime-noise-source</code> não foi criado no PipeWire. Clique em <strong>"Verificar / Criar"</strong> para registrar o nó e carregar o helper C nativo.
+                </span>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -409,7 +446,7 @@ export const App: React.FC = () => {
               Iniciar com o Sistema (Minimizado na Bandeja)
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
-              Inicia o Clearcore silenciosamente na barra de tarefas ao ligar o computador.
+              Inicia o Clearcore silenciosamente na barra de tarefas ao ligar o computador ({platformTitle}).
             </div>
           </div>
           <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
@@ -425,7 +462,7 @@ export const App: React.FC = () => {
           </label>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 10 }}>
-          💡 Dica: Ao fechar ou minimizar esta janela, o Clearcore continuará ativo na bandeja do sistema. Clique com o botão direito no ícone da bandeja para trocar de modo instantaneamente, verificar o microfone ou sair.
+          💡 Dica: Ao fechar ou minimizar esta janela, o Clearcore continuará ativo na bandeja do sistema. Clique com o botão direito no ícone da bandeja para trocar de modo instantaneamente, verificar o microfone virtual ou sair.
         </p>
       </div>
 

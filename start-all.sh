@@ -44,6 +44,7 @@ fi
 if pgrep -f "electron.*main.cjs" >/dev/null 2>&1; then
     echo "Desktop Companion Electron ja esta em execucao na bandeja."
 elif command -v systemd-run >/dev/null 2>&1; then
+    systemctl --user reset-failed realtime-noise-electron 2>/dev/null || true
     systemd-run --user --unit=realtime-noise-electron \
         --working-directory="${SCRIPT_DIR}/crates/app-tauri" \
         /usr/bin/npm start >/dev/null 2>&1 || true
