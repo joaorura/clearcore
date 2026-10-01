@@ -57,9 +57,25 @@ if echo "${PCI_INFO}" | grep -i "8086:" | grep -qiE 'vga|display|graphics|\[030'
     HAS_INTEL_GPU=true
 fi
 
-# 4. Intel CPU
-if grep -qi "intel" /proc/cpuinfo 2>/dev/null; then
+# 4. CPU Detection (Dynamic Model Name and Vendor)
+CPU_MODEL=""
+if [[ -f /proc/cpuinfo ]]; then
+    CPU_MODEL="$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed 's/^[ \t]*//' || true)"
+fi
+if [[ -z "${CPU_MODEL}" ]] && command -v lscpu >/dev/null 2>&1; then
+    CPU_MODEL="$(lscpu | grep -i "Model name:" | cut -d: -f2 | sed 's/^[ \t]*//' || true)"
+fi
+if [[ -z "${CPU_MODEL}" ]]; then
+    CPU_MODEL="Processador Host x86_64"
+fi
+
+HAS_AMD_CPU=false
+if echo "${CPU_MODEL}" | grep -qiE "amd|ryzen"; then
+    HAS_AMD_CPU=true
+    HAS_INTEL_CPU=false
+elif echo "${CPU_MODEL}" | grep -qi "intel"; then
     HAS_INTEL_CPU=true
+    HAS_AMD_CPU=false
 fi
 
 # 5. AMD Ryzen AI NPU (XDNA / XDNA 2)
@@ -69,6 +85,9 @@ fi
 
 # 6. AMD Radeon iGPU / dGPU (RDNA Graphics)
 if echo "${PCI_INFO}" | grep -i "1002:" | grep -qiE 'vga|display|graphics|\[030'; then
+    HAS_AMD_GPU=true
+elif [[ "${HAS_AMD_CPU}" == "true" ]]; then
+    # Most modern AMD APUs include Radeon integrated graphics
     HAS_AMD_GPU=true
 fi
 
@@ -127,44 +146,61 @@ if ldconfig -p 2>/dev/null | grep -q "libopenvino\.so" || [[ -e /lib64/libopenvi
     HAS_OPENVINO_BASE=true
 fi
 
-# Plugin NPU
-for p in /usr/lib64/openvino*/libopenvino_intel_npu_plugin.so /lib64/openvino*/libopenvino_intel_npu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_npu_plugin.so; do
-    if [[ -e "${p}" ]]; then
-        HAS_OPENVINO_NPU=true
-        break
-    fi
-done
+# Plugin NPU (Only if Intel NPU hardware is present)
+if [[ "${HAS_INTEL_NPU}" == "true" ]]; then
+    for p in /usr/lib64/openvino*/libopenvino_intel_npu_plugin.so /lib64/openvino*/libopenvino_intel_npu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_npu_plugin.so; do
+        if [[ -e "${p}" ]]; then
+            HAS_OPENVINO_NPU=true
+            break
+        fi
+    done
+fi
 
-# Plugin GPU (iGPU/dGPU)
-for p in /usr/lib64/openvino*/libopenvino_intel_gpu_plugin.so /lib64/openvino*/libopenvino_intel_gpu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_gpu_plugin.so; do
-    if [[ -e "${p}" ]]; then
-        HAS_OPENVINO_GPU=true
-        break
-    fi
-done
+# Plugin GPU (Only if Intel iGPU/dGPU is present)
+if [[ "${HAS_INTEL_GPU}" == "true" ]]; then
+    for p in /usr/lib64/openvino*/libopenvino_intel_gpu_plugin.so /lib64/openvino*/libopenvino_intel_gpu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_gpu_plugin.so; do
+        if [[ -e "${p}" ]]; then
+            HAS_OPENVINO_GPU=true
+            break
+        fi
+    done
+fi
 
-# Plugin CPU
-for p in /usr/lib64/openvino*/libopenvino_intel_cpu_plugin.so /lib64/openvino*/libopenvino_intel_cpu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_cpu_plugin.so; do
-    if [[ -e "${p}" ]]; then
-        HAS_OPENVINO_CPU=true
-        break
-    fi
-done
+# Plugin CPU (Only if Intel CPU is present - never on AMD)
+if [[ "${HAS_INTEL_CPU}" == "true" ]]; then
+    for p in /usr/lib64/openvino*/libopenvino_intel_cpu_plugin.so /lib64/openvino*/libopenvino_intel_cpu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_cpu_plugin.so; do
+        if [[ -e "${p}" ]]; then
+            HAS_OPENVINO_CPU=true
+            break
+        fi
+    done
+fi
 
-# Inspecao de dispositivos via OpenVINO Core
+# Inspecao de dispositivos via OpenVINO Core (apenas para hardware Intel relevante)
 if [[ "${HAS_OPENVINO_BASE}" == "true" ]]; then
     OV_DEVICES=$(python3 -c "import openvino as ov; print(','.join(ov.Core().available_devices))" 2>/dev/null || \
                  /home/joaorura/miniconda3/bin/python3 -c "import openvino as ov; print(','.join(ov.Core().available_devices))" 2>/dev/null || \
                  /home/joaorura/.local/share/whisper-ov/.venv/bin/python3 -c "import openvino as ov; print(','.join(ov.Core().available_devices))" 2>/dev/null || true)
-    if [[ "${OV_DEVICES}" == *"NPU"* ]]; then
+    if [[ "${OV_DEVICES}" == *"NPU"* && "${HAS_INTEL_NPU}" == "true" ]]; then
         HAS_OPENVINO_NPU=true
     fi
-    if [[ "${OV_DEVICES}" == *"GPU"* ]]; then
+    if [[ "${OV_DEVICES}" == *"GPU"* && "${HAS_INTEL_GPU}" == "true" ]]; then
         HAS_OPENVINO_GPU=true
     fi
-    if [[ "${OV_DEVICES}" == *"CPU"* ]]; then
+    if [[ "${OV_DEVICES}" == *"CPU"* && "${HAS_INTEL_CPU}" == "true" ]]; then
         HAS_OPENVINO_CPU=true
     fi
+fi
+
+# Garantia de isolamento estrito contra AMD: OpenVINO nunca e associado a hardware AMD
+if [[ "${HAS_AMD_CPU}" == "true" || "${HAS_INTEL_CPU}" == "false" ]]; then
+    HAS_OPENVINO_CPU=false
+fi
+if [[ "${HAS_INTEL_GPU}" == "false" ]]; then
+    HAS_OPENVINO_GPU=false
+fi
+if [[ "${HAS_INTEL_NPU}" == "false" ]]; then
+    HAS_OPENVINO_NPU=false
 fi
 
 # ------------------------------------------------------------------------------
@@ -252,7 +288,7 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "tier": "Npu",
       "hardware_detected": ${HAS_INTEL_NPU},
       "runtime_installed": ${HAS_OPENVINO_NPU},
-      "device_info": "Intel(R) AI Boost (NPU Neural dedicada no SoC - ultrabaixo consumo)",
+      "device_info": $(if [[ "${HAS_INTEL_NPU}" == "true" ]]; then echo "\"Intel(R) AI Boost (NPU Neural dedicada no SoC - ultrabaixo consumo)\""; else echo "\"NPU Intel AI Boost não encontrada neste sistema.\""; fi),
       "runtime_name": "OpenVINO NPU Plugin (libopenvino_intel_npu_plugin.so)",
       "install_script": "./scripts/install-openvino.sh",
       "install_command": "./scripts/install-openvino.sh",
@@ -264,7 +300,7 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "tier": "IntegratedGpu",
       "hardware_detected": ${HAS_INTEL_GPU},
       "runtime_installed": ${HAS_OPENVINO_GPU},
-      "device_info": "Intel Arrow Lake-P Graphics (GPU integrada de alta largura de banda)",
+      "device_info": $(if [[ "${HAS_INTEL_GPU}" == "true" ]]; then echo "\"GPU Integrada Intel Arc / Graphics\""; else echo "\"GPU Integrada Intel não encontrada neste sistema.\""; fi),
       "runtime_name": "OpenVINO GPU Plugin (libopenvino_intel_gpu_plugin.so)",
       "install_script": "./scripts/install-openvino.sh",
       "install_command": "./scripts/install-openvino.sh",
@@ -275,12 +311,12 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "name": "Intel OpenVINO (CPU - Otimizado)",
       "tier": "Cpu",
       "hardware_detected": ${HAS_INTEL_CPU},
-      "runtime_installed": ${HAS_OPENVINO_CPU},
-      "device_info": "Intel Core Ultra 7 265H (Aceleração vetorial AVX2 / AMX / VNNI)",
+      "runtime_installed": $(if [[ "${HAS_INTEL_CPU}" == "true" ]]; then echo "${HAS_OPENVINO_CPU}"; else echo "false"; fi),
+      "device_info": $(if [[ "${HAS_INTEL_CPU}" == "true" ]]; then echo "\"${CPU_MODEL} (Aceleração vetorial AVX2 / AMX / VNNI)\""; else echo "\"Incompatível: Processador AMD detectado (${CPU_MODEL}). OpenVINO é exclusivo para hardware Intel.\""; fi),
       "runtime_name": "OpenVINO CPU Plugin (libopenvino_intel_cpu_plugin.so)",
       "install_script": "./scripts/install-openvino.sh",
       "install_command": "./scripts/install-openvino.sh",
-      "install_instruction": "Otimizações vetoriais avançadas da Intel para CPU com o compilador OpenVINO."
+      "install_instruction": "Otimizações vetoriais avançadas da Intel para CPU com o compilador OpenVINO (exclusivo para processadores Intel)."
     },
     {
       "id": "amd_ryzenai_npu",
@@ -300,7 +336,7 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "tier": "IntegratedGpu",
       "hardware_detected": ${HAS_AMD_GPU},
       "runtime_installed": ${HAS_AMD_GPU_RUNTIME},
-      "device_info": "AMD Radeon 780M / 880M / 890M Graphics (iGPU integrada)",
+      "device_info": $(if [[ "${HAS_AMD_GPU}" == "true" || "${HAS_AMD_CPU}" == "true" ]]; then echo "\"${CPU_MODEL} (Gráficos AMD Radeon)\""; else echo "\"GPU AMD Radeon não detectada.\""; fi),
       "runtime_name": "AMD ROCm / Vulkan / DirectML",
       "install_script": "./scripts/install-ryzenai.sh",
       "install_command": "./scripts/install-ryzenai.sh",
@@ -324,7 +360,7 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "tier": "Cpu",
       "hardware_detected": true,
       "runtime_installed": true,
-      "device_info": "Processador Host x86_64 / ARM (Execução Baseline Fail-Safe em Rust puro)",
+      "device_info": "${CPU_MODEL} (Execução Baseline Fail-Safe em Rust puro)",
       "runtime_name": "Tract (Embarcado, Zero Dependências)",
       "install_script": "",
       "install_command": "",

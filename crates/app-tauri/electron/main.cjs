@@ -1114,10 +1114,31 @@ function queryHardwareBackends() {
     }
   }
 
-  // Cross-platform fallback definition
-  const fallbackAutoResolved = isMac && process.arch === 'arm64'
-    ? { id: 'apple_coreml', name: 'Apple Silicon (CoreML)' }
-    : { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
+  // Cross-platform intelligent hardware detection (dynamically inspects CPU and GPU)
+  const cpus = os.cpus();
+  const cpuModel = (cpus && cpus[0] && cpus[0].model) ? cpus[0].model.trim() : 'Processador Host CPU';
+  const isIntel = /intel/i.test(cpuModel);
+  const isAmd = /amd|ryzen/i.test(cpuModel);
+
+  // Probe for discrete NVIDIA GPU without hanging
+  let hasNvidiaGpu = false;
+  try {
+    if (isLinux && fs.existsSync('/dev/nvidia0')) hasNvidiaGpu = true;
+    if (isWin && fs.existsSync('C:\\Windows\\System32\\nvapi64.dll')) hasNvidiaGpu = true;
+  } catch {}
+
+  // Resolve Auto backend
+  let fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
+  if (isMac && process.arch === 'arm64') {
+    fallbackAutoResolved = { id: 'apple_coreml', name: 'Apple Silicon (CoreML)' };
+  } else if (hasNvidiaGpu) {
+    fallbackAutoResolved = { id: 'nvidia_tensorrt', name: 'NVIDIA GPU (TensorRT / CUDA)' };
+  } else if (isAmd) {
+    // On AMD: never select OpenVINO! Prefer Pure-Rust CPU Tract (or Ryzen AI if configured)
+    fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
+  } else if (isIntel) {
+    fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
+  }
 
   return {
     auto_resolved_backend: fallbackAutoResolved,
@@ -1128,7 +1149,9 @@ function queryHardwareBackends() {
         tier: 'Auto',
         hardware_detected: true,
         runtime_installed: true,
-        device_info: 'Seleção dinâmica por prioridade de hardware e disponibilidade',
+        device_info: isAmd
+          ? `Processador AMD detectado (${cpuModel}). Seleção automática segura via Tract Pure-Rust.`
+          : 'Seleção dinâmica por prioridade de hardware e disponibilidade.',
         runtime_name: 'Agendador Automático ClearCore',
         auto_resolved_id: fallbackAutoResolved.id,
         auto_resolved_name: fallbackAutoResolved.name,
@@ -1140,9 +1163,9 @@ function queryHardwareBackends() {
         id: 'nvidia_tensorrt',
         name: 'NVIDIA GPU (TensorRT / CUDA)',
         tier: 'DedicatedGpu',
-        hardware_detected: false,
+        hardware_detected: hasNvidiaGpu,
         runtime_installed: false,
-        device_info: 'GPU Dedicada NVIDIA',
+        device_info: hasNvidiaGpu ? 'GPU Dedicada NVIDIA Detectada' : 'Nenhuma GPU dedicada NVIDIA detectada neste sistema.',
         runtime_name: isWin ? 'TensorRT (nvinfer.dll)' : 'TensorRT (libnvinfer.so)',
         install_script: isWin ? '.\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
         install_command: isWin ? 'powershell .\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
@@ -1152,45 +1175,59 @@ function queryHardwareBackends() {
         id: 'openvino_npu',
         name: 'Intel OpenVINO (NPU - AI Boost)',
         tier: 'Npu',
-        hardware_detected: false,
+        hardware_detected: isIntel && /ultra/i.test(cpuModel),
         runtime_installed: false,
-        device_info: 'Intel(R) AI Boost (NPU Neural dedicada no SoC)',
+        device_info: isIntel
+          ? 'Intel(R) AI Boost (NPU Neural dedicada no SoC Core Ultra)'
+          : `Incompatível: Processador AMD detectado (${cpuModel}). A NPU Intel AI Boost requer processador Intel Core Ultra.`,
         runtime_name: isWin ? 'OpenVINO NPU (openvino_intel_npu_plugin.dll)' : 'OpenVINO NPU (libopenvino_intel_npu_plugin.so)',
         install_script: isWin ? '.\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
         install_command: isWin ? 'powershell .\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
-        install_instruction: 'Instale o Intel OpenVINO runtime e o driver Intel NPU para habilitar o processamento de baixíssimo consumo na NPU.',
+        install_instruction: isIntel
+          ? 'Instale o Intel OpenVINO runtime e o driver Intel NPU para habilitar o processamento na NPU.'
+          : 'O OpenVINO não funciona em processadores AMD.',
       },
       {
         id: 'openvino_gpu',
         name: 'Intel OpenVINO (iGPU - Intel Graphics)',
         tier: 'IntegratedGpu',
-        hardware_detected: false,
+        hardware_detected: isIntel,
         runtime_installed: false,
-        device_info: 'Intel Arc Graphics / Arrow Lake iGPU',
+        device_info: isIntel
+          ? 'GPU Integrada Intel Arc / Graphics'
+          : `Incompatível: Processador AMD detectado (${cpuModel}). Requer GPU integrada Intel.`,
         runtime_name: isWin ? 'OpenVINO GPU (openvino_intel_gpu_plugin.dll)' : 'OpenVINO GPU (libopenvino_intel_gpu_plugin.so)',
         install_script: isWin ? '.\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
         install_command: isWin ? 'powershell .\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
-        install_instruction: 'Instale o Intel OpenVINO runtime e o driver compute-runtime para acelerar na GPU integrada.',
+        install_instruction: isIntel
+          ? 'Instale o Intel OpenVINO runtime e o driver compute-runtime para acelerar na GPU integrada.'
+          : 'O OpenVINO não funciona em processadores AMD.',
       },
       {
         id: 'openvino_cpu',
         name: 'Intel OpenVINO (CPU - Otimizado)',
         tier: 'Cpu',
-        hardware_detected: true,
+        hardware_detected: isIntel,
         runtime_installed: false,
-        device_info: 'Processador Intel Core Ultra (AVX2 / AMX / VNNI)',
+        device_info: isIntel
+          ? `${cpuModel} (Aceleração vetorial Intel AVX2 / AMX / VNNI)`
+          : `Incompatível: Processador AMD detectado (${cpuModel}). OpenVINO é exclusivo para Intel.`,
         runtime_name: isWin ? 'OpenVINO CPU (openvino_intel_cpu_plugin.dll)' : 'OpenVINO CPU (libopenvino_intel_cpu_plugin.so)',
         install_script: isWin ? '.\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
         install_command: isWin ? 'powershell .\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
-        install_instruction: 'Instale o Intel OpenVINO runtime para habilitar aceleração vetorial Intel na CPU.',
+        install_instruction: isIntel
+          ? 'Instale o Intel OpenVINO runtime para habilitar aceleração vetorial Intel na CPU.'
+          : 'OpenVINO não é compatível com processadores AMD. Utilize o CPU Nativo (Tract Pure-Rust).',
       },
       {
         id: 'amd_ryzenai_npu',
         name: 'AMD Ryzen AI (NPU - XDNA)',
         tier: 'Npu',
-        hardware_detected: false,
+        hardware_detected: isAmd && (/ai\s*\d|7\d{3}|8\d{3}|xdna/i.test(cpuModel) || fs.existsSync('/dev/amdxdna')),
         runtime_installed: false,
-        device_info: 'AMD Ryzen AI NPU (XDNA / XDNA 2)',
+        device_info: isAmd
+          ? `${cpuModel} (NPU AMD Ryzen AI XDNA)`
+          : 'Requer processador AMD Ryzen AI com NPU XDNA integrada.',
         runtime_name: isWin ? 'Ryzen AI Software (xrt_core.dll)' : 'Ryzen AI Software (libxrt_core.so)',
         install_script: isWin ? '.\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
         install_command: isWin ? 'powershell .\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
@@ -1200,9 +1237,11 @@ function queryHardwareBackends() {
         id: 'amd_ryzenai_gpu',
         name: 'AMD Radeon (iGPU - RDNA Graphics)',
         tier: 'IntegratedGpu',
-        hardware_detected: false,
+        hardware_detected: isAmd,
         runtime_installed: false,
-        device_info: 'AMD Radeon Graphics (iGPU integrada)',
+        device_info: isAmd
+          ? `${cpuModel} (Gráficos Integrados AMD Radeon)`
+          : 'Requer processador AMD Ryzen com GPU integrada Radeon.',
         runtime_name: isWin ? 'DirectML / Vulkan (DirectML.dll)' : 'AMD ROCm / Vulkan',
         install_script: isWin ? '.\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
         install_command: isWin ? 'powershell .\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
@@ -1226,11 +1265,11 @@ function queryHardwareBackends() {
         tier: 'Cpu',
         hardware_detected: true,
         runtime_installed: true,
-        device_info: 'Processador Host CPU (Execução Nativa Segura)',
+        device_info: `${cpuModel} (Execução Nativa Segura em Rust puro - AVX2)`,
         runtime_name: 'Tract (Embarcado, Zero Dependências)',
         install_script: '',
         install_command: '',
-        install_instruction: 'Mecanismo padrão 100% seguro em Rust, sempre disponível sem necessidade de drivers.',
+        install_instruction: 'Mecanismo padrão 100% seguro em Rust (#![forbid(unsafe_code)]), compatível com AMD e Intel.',
       },
     ],
     active_backend: currentSelectedBackend,

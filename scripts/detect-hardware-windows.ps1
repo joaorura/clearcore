@@ -52,9 +52,18 @@ foreach ($vc in $videoControllers) {
     }
 }
 
+$hasAmdCpu = $false
 $proc = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($proc -and $proc.Name -match "Intel") {
-    $hasIntelCpu = $true
+if ($proc) {
+    if ($proc.Name -match "Intel") {
+        $hasIntelCpu = $true
+        $hasAmdCpu = $false
+    } elseif ($proc.Name -match "AMD|Ryzen") {
+        $hasAmdCpu = $true
+        $hasIntelCpu = $false
+        # AMD APUs typically include Radeon integrated graphics
+        $hasAmdGpu = $true
+    }
 }
 
 $pnpDevices = Get-PnpDevice -ErrorAction SilentlyContinue
@@ -95,26 +104,28 @@ if (-not $hasTrtRuntime) {
     }
 }
 
-# OpenVINO Runtimes
+# OpenVINO Runtimes (Only checked if Intel hardware is present; never on AMD)
 $hasOpenVinoNpu = $false
 $hasOpenVinoGpu = $false
 $hasOpenVinoCpu = $false
 
-$ovPaths = @(
-    "C:\Program Files (x86)\Intel\openvino*\runtime\bin\intel64\openvino.dll",
-    "C:\openvino\runtime\bin\intel64\openvino.dll"
-)
-foreach ($op in $ovPaths) {
-    if (Test-Path $op) {
-        $hasOpenVinoCpu = $true
-        $hasOpenVinoGpu = $true
-        break
+if ($hasIntelCpu -or $hasIntelGpu -or $hasIntelNpu) {
+    $ovPaths = @(
+        "C:\Program Files (x86)\Intel\openvino*\runtime\bin\intel64\openvino.dll",
+        "C:\openvino\runtime\bin\intel64\openvino.dll"
+    )
+    foreach ($op in $ovPaths) {
+        if (Test-Path $op) {
+            if ($hasIntelCpu) { $hasOpenVinoCpu = $true }
+            if ($hasIntelGpu) { $hasOpenVinoGpu = $true }
+            break
+        }
     }
-}
 
-$npuDrv = Get-Service "intel-npu-driver" -ErrorAction SilentlyContinue
-if ($hasIntelNpu -and ($npuDrv -or $hasOpenVinoCpu)) {
-    $hasOpenVinoNpu = $true
+    $npuDrv = Get-Service "intel-npu-driver" -ErrorAction SilentlyContinue
+    if ($hasIntelNpu -and ($npuDrv -or $hasOpenVinoCpu)) {
+        $hasOpenVinoNpu = $true
+    }
 }
 
 # AMD Runtimes
@@ -222,12 +233,12 @@ if ($Json -or (-not $Status)) {
                 name = "Intel OpenVINO (CPU - Otimizado)"
                 tier = "Cpu"
                 hardware_detected = [bool]$hasIntelCpu
-                runtime_installed = [bool]$hasOpenVinoCpu
-                device_info = if ($proc) { $proc.Name } else { "Processador Intel Host" }
+                runtime_installed = [bool]($hasIntelCpu -and $hasOpenVinoCpu)
+                device_info = if ($hasIntelCpu) { if ($proc) { $proc.Name } else { "Processador Intel Host" } } else { "Incompatível: Processador AMD detectado ($($proc.Name)). OpenVINO requer processador Intel." }
                 runtime_name = "OpenVINO CPU Plugin (openvino_intel_cpu_plugin.dll)"
                 install_script = ".\scripts\install-openvino.ps1"
                 install_command = "powershell .\scripts\install-openvino.ps1"
-                install_instruction = "Instale o runtime OpenVINO para habilitar aceleração vetorial Intel AVX2/AMX na CPU."
+                install_instruction = "Instale o runtime OpenVINO para habilitar aceleração vetorial Intel AVX2/AMX na CPU (exclusivo para Intel)."
             },
             @{
                 id = "amd_ryzenai_npu"
