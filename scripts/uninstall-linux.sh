@@ -19,10 +19,10 @@ echo "=========================================================="
 
 # 1. Encerrar todos os processos do Clearcore
 echo "🛑 Encerrando processos ativos do Clearcore..."
-pkill -f "clearcore" >/dev/null 2>&1 || true
-pkill -f "pipewire_helper" >/dev/null 2>&1 || true
-pkill -f "realtime-noise-service" >/dev/null 2>&1 || true
-pkill -f "pw-loopback.*realtime-noise" >/dev/null 2>&1 || true
+pkill -x "clearcore" >/dev/null 2>&1 || true
+pkill -x "pipewire_helper" >/dev/null 2>&1 || true
+pkill -x "realtime-noise-service" >/dev/null 2>&1 || true
+pkill -f "^pw-loopback.*realtime-noise" >/dev/null 2>&1 || true
 
 # 2. Desativar e remover serviços systemd de usuário
 echo "⚙️ Desativando serviços systemd de usuário..."

@@ -305,10 +305,10 @@ echo "=== Clearcore Uninstaller ==="
 
 # 1. Stop all running processes
 echo "Stopping Clearcore processes..."
-pkill -f "clearcore" >/dev/null 2>&1 || true
-pkill -f "pipewire_helper" >/dev/null 2>&1 || true
-pkill -f "realtime-noise-service" >/dev/null 2>&1 || true
-pkill -f "pw-loopback.*realtime-noise" >/dev/null 2>&1 || true
+pkill -x "clearcore" >/dev/null 2>&1 || true
+pkill -x "pipewire_helper" >/dev/null 2>&1 || true
+pkill -x "realtime-noise-service" >/dev/null 2>&1 || true
+pkill -f "^pw-loopback.*realtime-noise" >/dev/null 2>&1 || true
 
 # 2. Disable and remove user systemd units
 if command -v systemctl >/dev/null 2>&1; then
