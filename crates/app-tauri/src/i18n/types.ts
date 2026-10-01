@@ -127,6 +127,23 @@ export interface Translations {
     sourceUsedRaw: string;
     errorMicAccess: string;
     maxLimitReached: string;
+    dualModeTitle: string;
+    dualModeBadge: string;
+    dualDescription: string;
+    startDualRecording: string;
+    recordingStatusDual: string;
+    beforePipelineTitle: string;
+    beforePipelineDesc: string;
+    afterPipelineTitle: string;
+    afterPipelineDesc: string;
+    abPlayerTitle: string;
+    abPlayerDesc: string;
+    abSwitchBefore: string;
+    abSwitchAfter: string;
+    noiseReductionBadge: string;
+    singleStreamFallback: string;
+    levelBefore: string;
+    levelAfter: string;
   };
   hardwareBackend: {
     title: string;
