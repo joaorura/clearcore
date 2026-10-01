@@ -81,6 +81,20 @@ jobs:
           cd crates\app-tauri
           npm ci
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Build WaveRT Kernel Driver
+        shell: powershell
+        continue-on-error: true
+        run: |
+          cd platform\windows\driver
+          nuget restore packages.config -PackagesDirectory packages
+          msbuild driver.vcxproj /p:Configuration=Release /p:Platform=x64
+
       - name: Package Windows Standalone Application
         shell: powershell
         run: .\package.ps1

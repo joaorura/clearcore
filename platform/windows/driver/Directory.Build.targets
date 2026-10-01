@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <WdkVersion Condition="'$(WdkVersion)' == ''">10.0.26100.2454</WdkVersion>
+    <WdkPackageDir Condition="'$(WdkPackageDir)' == ''">$(MSBuildThisFileDirectory)packages\Microsoft.Windows.WDK.x64.$(WdkVersion)\</WdkPackageDir>
+  </PropertyGroup>
+
+  <!-- Import WDK targets for x64 when restored via NuGet in CI/CD -->
+  <Import Project="$(WdkPackageDir)build\native\Microsoft.Windows.WDK.x64.targets" 
+          Condition="Exists('$(WdkPackageDir)build\native\Microsoft.Windows.WDK.x64.targets') and '$(Platform)' == 'x64'" />
+</Project>

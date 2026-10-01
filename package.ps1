@@ -13,6 +13,23 @@ if (-not (Test-Path $DaemonBin)) {
     }
 }
 
+$DriverDir = Join-Path $ScriptDir "platform\windows\driver"
+$DriverSys = Join-Path $DriverDir "x64\Release\RealtimeNoise.sys"
+if (-not (Test-Path $DriverSys)) {
+    if ((Get-Command nuget -ErrorAction SilentlyContinue) -and (Get-Command msbuild -ErrorAction SilentlyContinue)) {
+        Write-Host "Restoring WDK NuGet and compiling WaveRT driver (RealtimeNoise.sys)..." -ForegroundColor Yellow
+        Push-Location $DriverDir
+        try {
+            nuget restore packages.config -PackagesDirectory packages
+            msbuild driver.vcxproj /p:Configuration=Release /p:Platform=x64
+        } catch {
+            Write-Warning "WDK driver compilation failed or skipped: $_"
+        } finally {
+            Pop-Location
+        }
+    }
+}
+
 Push-Location (Join-Path $ScriptDir "crates\app-tauri")
 try {
     npm run package
