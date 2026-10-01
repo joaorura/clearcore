@@ -9,6 +9,7 @@
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <errno.h>
+#include <dlfcn.h>
 
 static pipewire_helper_context_t *g_ctx = NULL;
 static int g_lock_fd = -1;
@@ -186,8 +187,16 @@ void on_capture_process(void *userdata) {
             } else if (mode == CLEARCORE_MODE_BYPASS) {
                 format_converter_f32_sanitize(raw_frame, processed_frame, HOP_SAMPLES);
             } else {
-                /* Active: Real-time noise suppression & voice enhancement */
-                noise_suppressor_process(&ctx->suppressor, raw_frame, processed_frame, HOP_SAMPLES);
+                /* Active: Real-time neural noise suppression (DeepFilterNet3) */
+                if (ctx->neural_filter && ctx->neural_process_fn) {
+                    int rc = ctx->neural_process_fn(ctx->neural_filter, raw_frame, processed_frame);
+                    if (rc != 0) {
+                        /* Fallback to DSP suppressor if neural inference reports an issue */
+                        noise_suppressor_process(&ctx->suppressor, raw_frame, processed_frame, HOP_SAMPLES);
+                    }
+                } else {
+                    noise_suppressor_process(&ctx->suppressor, raw_frame, processed_frame, HOP_SAMPLES);
+                }
             }
 
             wire_frame_envelope_v1_t env;
@@ -381,6 +390,100 @@ static void release_instance_lock(void) {
     }
 }
 
+static void neural_filter_init(pipewire_helper_context_t *ctx) {
+    if (!ctx) return;
+    ctx->neural_lib_handle = NULL;
+    ctx->neural_filter = NULL;
+    ctx->neural_process_fn = NULL;
+    ctx->neural_free_fn = NULL;
+
+    const char *lib_candidates[] = {
+        "platform/linux/helper/lib/libclearcore_filter.so",
+        "./libclearcore_filter.so",
+        "/home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/lib/libclearcore_filter.so",
+        "/home/joaorura/orca/workspaces/clearcore/hippocamp/target/release/libclearcore_filter.so",
+        "libclearcore_filter.so",
+        NULL
+    };
+
+    void *lib = NULL;
+    for (int i = 0; lib_candidates[i] != NULL; i++) {
+        lib = dlopen(lib_candidates[i], RTLD_NOW | RTLD_GLOBAL);
+        if (lib) {
+            fprintf(stderr, "[pipewire_helper] Loaded neural filter library: %s\n", lib_candidates[i]);
+            break;
+        }
+    }
+
+    if (!lib) {
+        fprintf(stderr, "[pipewire_helper] Neural filter library not loaded: %s. Using DSP suppressor.\n", dlerror());
+        return;
+    }
+
+    typedef void* (*create_fn_t)(const char*);
+    typedef int (*process_fn_t)(void*, const float*, float*);
+    typedef void (*free_fn_t)(void*);
+
+    create_fn_t create_fn = (create_fn_t)dlsym(lib, "clearcore_filter_create");
+    process_fn_t process_fn = (process_fn_t)dlsym(lib, "clearcore_filter_process");
+    free_fn_t free_fn = (free_fn_t)dlsym(lib, "clearcore_filter_free");
+
+    if (!create_fn || !process_fn || !free_fn) {
+        fprintf(stderr, "[pipewire_helper] Failed to resolve clearcore_filter symbols: %s\n", dlerror());
+        dlclose(lib);
+        return;
+    }
+
+    const char *repo_candidates[] = {
+        ".",
+        "/home/joaorura/orca/workspaces/clearcore/hippocamp",
+        "..",
+        NULL
+    };
+
+    void *filter = NULL;
+    for (int i = 0; repo_candidates[i] != NULL; i++) {
+        filter = create_fn(repo_candidates[i]);
+        if (filter) {
+            fprintf(stderr, "[pipewire_helper] Initialized DeepFilterNet3 neural model from: %s\n", repo_candidates[i]);
+            break;
+        }
+    }
+
+    if (!filter) {
+        fprintf(stderr, "[pipewire_helper] Failed to instantiate DeepFilterNet3 neural model; fallback to DSP.\n");
+        dlclose(lib);
+        return;
+    }
+
+    /* Pre-heat neural inference kernels with 5 frames */
+    float warmup_in[HOP_SAMPLES] = {0};
+    float warmup_out[HOP_SAMPLES] = {0};
+    for (int i = 0; i < 5; i++) {
+        process_fn(filter, warmup_in, warmup_out);
+    }
+
+    ctx->neural_lib_handle = lib;
+    ctx->neural_filter = filter;
+    ctx->neural_process_fn = process_fn;
+    ctx->neural_free_fn = free_fn;
+    fprintf(stderr, "[pipewire_helper] ClearCore DeepFilterNet3 neural suppressor ACTIVE!\n");
+}
+
+static void neural_filter_free(pipewire_helper_context_t *ctx) {
+    if (!ctx) return;
+    if (ctx->neural_filter && ctx->neural_free_fn) {
+        ctx->neural_free_fn(ctx->neural_filter);
+        ctx->neural_filter = NULL;
+    }
+    if (ctx->neural_lib_handle) {
+        dlclose(ctx->neural_lib_handle);
+        ctx->neural_lib_handle = NULL;
+    }
+    ctx->neural_process_fn = NULL;
+    ctx->neural_free_fn = NULL;
+}
+
 int pipewire_helper_init(pipewire_helper_context_t *ctx) {
     if (!ctx) return -1;
     memset(ctx, 0, sizeof(*ctx));
@@ -396,6 +499,7 @@ int pipewire_helper_init(pipewire_helper_context_t *ctx) {
     accumulator_init(&ctx->accumulator);
     noise_suppressor_init(&ctx->suppressor);
     init_shared_state(ctx);
+    neural_filter_init(ctx);
 
     if (transport_bridge_init(&ctx->transport, DEFAULT_CAPACITY_HOPS) != 0) {
         return -1;
@@ -592,6 +696,7 @@ void pipewire_helper_destroy(pipewire_helper_context_t *ctx) {
         ctx->loop = NULL;
     }
     transport_bridge_free(&ctx->transport);
+    neural_filter_free(ctx);
     if (ctx->shared_state) {
         munmap(ctx->shared_state, sizeof(clearcore_shared_state_t));
         ctx->shared_state = NULL;

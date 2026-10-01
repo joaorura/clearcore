@@ -1,0 +1,16 @@
+[package]
+name = "realtime-noise-filter-capi"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "clearcore_filter"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+realtime-noise-contracts = { path = "../contracts" }
+realtime-noise-model = { path = "../model", features = ["tract"] }
+
+[lints.rust]
+unsafe_code = "allow"

@@ -13,6 +13,7 @@ members = [
     "crates/diagnostics",
     "crates/accelerators",
     "crates/app-tauri/src-tauri",
+    "crates/filter-capi",
     "platform/windows/host",
     "platform/linux/host",
 ]

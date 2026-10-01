@@ -13,6 +13,7 @@ cc = meson.get_compiler('c')
 pipewire_dep = dependency('libpipewire-0.3', required: true)
 threads_dep = dependency('threads')
 m_dep = cc.find_library('m', required: false)
+dl_dep = cc.find_library('dl', required: false)
 
 inc_dir = include_directories('src')
 
@@ -27,7 +28,7 @@ executable(
     'pipewire_helper',
     helper_sources,
     include_directories: inc_dir,
-    dependencies: [pipewire_dep, threads_dep, m_dep],
+    dependencies: [pipewire_dep, threads_dep, m_dep, dl_dep],
     install: true
 )
 

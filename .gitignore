@@ -11,6 +11,8 @@ crates/app-tauri/src-tauri/binaries/
 .serena/
 .omo/
 **/__pycache__/
-*.py[cod]
-.pytest_cache/
+*.pytest_cache/
 .serena/
+*.so
+*.a
+platform/linux/helper/lib/

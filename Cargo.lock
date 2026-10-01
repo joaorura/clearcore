@@ -912,6 +912,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "realtime-noise-filter-capi"
+version = "0.1.0"
+dependencies = [
+ "realtime-noise-contracts",
+ "realtime-noise-model",
+]
+
+[[package]]
 name = "realtime-noise-format-adapter"
 version = "0.1.0"
 dependencies = [

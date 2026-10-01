@@ -131,12 +131,46 @@ if (fs.existsSync(serviceBin)) {
 }
 
 if (platform === 'linux') {
-  const helperBin = path.join(targetRelease, 'pipewire_helper');
-  if (fs.existsSync(helperBin)) {
-    const destHelper = path.join(binTargetDir, 'pipewire_helper');
-    fs.copyFileSync(helperBin, destHelper);
-    fs.chmodSync(destHelper, 0o755);
-    console.log('✓ Bundled pipewire_helper');
+  const helperCandidates = [
+    path.join(repoRoot, 'platform', 'linux', 'helper', 'build', 'pipewire_helper'),
+    path.join(targetRelease, 'pipewire_helper'),
+  ];
+  for (const h of helperCandidates) {
+    if (fs.existsSync(h)) {
+      const destHelper = path.join(binTargetDir, 'pipewire_helper');
+      fs.copyFileSync(h, destHelper);
+      fs.chmodSync(destHelper, 0o755);
+      console.log('✓ Bundled pipewire_helper');
+      break;
+    }
+  }
+
+  const libCandidates = [
+    path.join(repoRoot, 'platform', 'linux', 'helper', 'lib', 'libclearcore_filter.so'),
+    path.join(targetRelease, 'libclearcore_filter.so'),
+  ];
+  for (const l of libCandidates) {
+    if (fs.existsSync(l)) {
+      const destLib = path.join(binTargetDir, 'libclearcore_filter.so');
+      fs.copyFileSync(l, destLib);
+      fs.chmodSync(destLib, 0o755);
+      // Also copy next to root executable for automatic ld loading
+      fs.copyFileSync(l, path.join(bundleDir, 'libclearcore_filter.so'));
+      console.log('✓ Bundled libclearcore_filter.so neural library');
+      break;
+    }
+  }
+
+  // Bundle approved model assets and governance metadata
+  const vendorApproved = path.join(repoRoot, 'vendor', 'approved');
+  if (fs.existsSync(vendorApproved)) {
+    fs.cpSync(vendorApproved, path.join(bundleDir, 'vendor', 'approved'), { recursive: true });
+    console.log('✓ Bundled vendor/approved DeepFilterNet3 neural model');
+  }
+  const governanceDir = path.join(repoRoot, 'governance', 'model-assets');
+  if (fs.existsSync(governanceDir)) {
+    fs.cpSync(governanceDir, path.join(bundleDir, 'governance', 'model-assets'), { recursive: true });
+    console.log('✓ Bundled governance model trust policy and manifests');
   }
 }
 

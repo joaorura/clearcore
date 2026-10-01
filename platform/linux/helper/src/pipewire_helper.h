@@ -119,6 +119,10 @@ typedef struct pipewire_helper_context {
     bounded_transport_t transport;
     sample_accumulator_t accumulator;
     noise_suppressor_t suppressor;
+    void *neural_lib_handle;
+    void *neural_filter;
+    int (*neural_process_fn)(void *filter, const float *in_samples, float *out_samples);
+    void (*neural_free_fn)(void *filter);
     clearcore_shared_state_t *shared_state;
     int shared_state_fd;
     uint32_t target_device_id;
