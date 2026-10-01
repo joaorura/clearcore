@@ -151,6 +151,8 @@ export const enUS: Translations = {
     switchSuccess: 'Acceleration backend changed to: {name}',
     cannotSelectMissing: 'Cannot activate this accelerator because the required runtime is not installed.',
     autoRecommend: 'Recommended: ClearCore automatically selects the fastest accelerator with an installed runtime.',
+    autoResolvedCurrent: '⚡ Automatically selected: {name}',
+    autoResolvedActive: 'Automatic ➔ {name}',
     refreshBtn: '🔄 Scan Hardware',
     refreshingBtn: '⏳ Scanning...',
   },

@@ -1002,9 +1002,9 @@ function queryHardwareBackends() {
 
   if (isLinux) {
     try {
-      const scriptPath = path.resolve(repoRoot, 'scripts', 'detect-hardware.sh');
+      const scriptPath = findScriptPath('detect-hardware.sh');
       if (fs.existsSync(scriptPath)) {
-        const out = require('child_process').execSync(`"${scriptPath}" --json`, { encoding: 'utf8', timeout: 4000 });
+        const out = require('child_process').execSync(`"${scriptPath}" --json`, { encoding: 'utf8', timeout: 5000 });
         const parsed = JSON.parse(out);
         return {
           ...parsed,
@@ -1016,8 +1016,32 @@ function queryHardwareBackends() {
     }
   }
 
+  if (isWin) {
+    try {
+      const scriptPath = findScriptPath('detect-hardware-windows.ps1');
+      if (fs.existsSync(scriptPath)) {
+        const out = require('child_process').execSync(
+          `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -Json`,
+          { encoding: 'utf8', timeout: 6000 }
+        );
+        const parsed = JSON.parse(out);
+        return {
+          ...parsed,
+          active_backend: currentSelectedBackend,
+        };
+      }
+    } catch (err) {
+      console.warn('Failed to detect Windows hardware via powershell:', err.message);
+    }
+  }
+
   // Cross-platform fallback definition
+  const fallbackAutoResolved = isMac && process.arch === 'arm64'
+    ? { id: 'apple_coreml', name: 'Apple Silicon (CoreML)' }
+    : { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
+
   return {
+    auto_resolved_backend: fallbackAutoResolved,
     backends: [
       {
         id: 'auto',
@@ -1026,7 +1050,9 @@ function queryHardwareBackends() {
         hardware_detected: true,
         runtime_installed: true,
         device_info: 'Seleção dinâmica por prioridade de hardware e disponibilidade',
-        runtime_name: 'Agendador Automático',
+        runtime_name: 'Agendador Automático ClearCore',
+        auto_resolved_id: fallbackAutoResolved.id,
+        auto_resolved_name: fallbackAutoResolved.name,
         install_script: '',
         install_command: '',
         install_instruction: '',
@@ -1080,16 +1106,28 @@ function queryHardwareBackends() {
         install_instruction: 'Instale o Intel OpenVINO runtime para habilitar aceleração vetorial Intel na CPU.',
       },
       {
-        id: 'amd_ryzenai',
-        name: 'AMD Ryzen AI NPU (XDNA)',
+        id: 'amd_ryzenai_npu',
+        name: 'AMD Ryzen AI (NPU - XDNA)',
         tier: 'Npu',
         hardware_detected: false,
         runtime_installed: false,
-        device_info: 'AMD Ryzen AI NPU',
-        runtime_name: 'Ryzen AI Software (XRT / Vitis-AI)',
-        install_script: './scripts/install-ryzenai.sh',
-        install_command: './scripts/install-ryzenai.sh',
+        device_info: 'AMD Ryzen AI NPU (XDNA / XDNA 2)',
+        runtime_name: isWin ? 'Ryzen AI Software (xrt_core.dll)' : 'Ryzen AI Software (libxrt_core.so)',
+        install_script: isWin ? '.\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
+        install_command: isWin ? 'powershell .\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
         install_instruction: 'Instale o driver AMD NPU e o Ryzen AI Software para acelerar no processador neural AMD.',
+      },
+      {
+        id: 'amd_ryzenai_gpu',
+        name: 'AMD Radeon (iGPU - RDNA Graphics)',
+        tier: 'IntegratedGpu',
+        hardware_detected: false,
+        runtime_installed: false,
+        device_info: 'AMD Radeon Graphics (iGPU integrada)',
+        runtime_name: isWin ? 'DirectML / Vulkan (DirectML.dll)' : 'AMD ROCm / Vulkan',
+        install_script: isWin ? '.\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
+        install_command: isWin ? 'powershell .\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
+        install_instruction: 'Instale os drivers gráficos AMD mais recentes para aceleração gráfica integrada.',
       },
       {
         id: 'apple_coreml',

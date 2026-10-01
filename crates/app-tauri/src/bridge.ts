@@ -12,11 +12,17 @@ export interface HardwareBackendItem {
   install_script: string;
   install_command: string;
   install_instruction: string;
+  auto_resolved_id?: string;
+  auto_resolved_name?: string;
 }
 
 export interface HardwareBackendsResponse {
   backends: HardwareBackendItem[];
   active_backend: string;
+  auto_resolved_backend?: {
+    id: string;
+    name: string;
+  };
 }
 
 export interface ClearcoreApi {

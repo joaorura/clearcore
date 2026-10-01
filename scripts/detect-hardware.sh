@@ -8,7 +8,8 @@
 #   - Intel OpenVINO iGPU (Intel Arc / Arrow Lake Graphics)
 #   - Intel OpenVINO CPU (Intel Core Ultra AVX2 / AMX / VNNI Otimizado)
 #   - AMD Ryzen AI NPU (XDNA / XDNA 2)
-#   - Apple Silicon (CoreML)
+#   - AMD Radeon iGPU (RDNA / ROCm / Vulkan)
+#   - Apple Silicon (CoreML - Neural Engine / Metal)
 #   - CPU Nativo Baseline (Tract Pure-Rust Fail-Safe)
 # ==============================================================================
 
@@ -61,10 +62,12 @@ if grep -qi "intel" /proc/cpuinfo 2>/dev/null; then
     HAS_INTEL_CPU=true
 fi
 
-# 5. AMD NPU & GPU
-if echo "${PCI_INFO}" | grep -qi "1022:1502" || [[ -e /dev/amdxdna ]]; then
+# 5. AMD Ryzen AI NPU (XDNA / XDNA 2)
+if echo "${PCI_INFO}" | grep -qi "1022:1502\|1022:17f0" || [[ -e /dev/amdxdna || -d /sys/class/accel/amdxdna0 ]]; then
     HAS_AMD_NPU=true
 fi
+
+# 6. AMD Radeon iGPU / dGPU (RDNA Graphics)
 if echo "${PCI_INFO}" | grep -i "1002:" | grep -qiE 'vga|display|graphics|\[030'; then
     HAS_AMD_GPU=true
 fi
@@ -148,8 +151,7 @@ for p in /usr/lib64/openvino*/libopenvino_intel_cpu_plugin.so /lib64/openvino*/l
     fi
 done
 
-# Inspecao rapida de dispositivos disponiveis via OpenVINO se biblioteca ativa
-OV_DEVICES=""
+# Inspecao de dispositivos via OpenVINO Core
 if [[ "${HAS_OPENVINO_BASE}" == "true" ]]; then
     OV_DEVICES=$(python3 -c "import openvino as ov; print(','.join(ov.Core().available_devices))" 2>/dev/null || \
                  /home/joaorura/miniconda3/bin/python3 -c "import openvino as ov; print(','.join(ov.Core().available_devices))" 2>/dev/null || \
@@ -166,11 +168,45 @@ if [[ "${HAS_OPENVINO_BASE}" == "true" ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# Inspecao de Runtimes: AMD Ryzen AI (XDNA)
+# Inspecao de Runtimes: AMD Ryzen AI NPU (XDNA) & AMD Radeon iGPU
 # ------------------------------------------------------------------------------
-HAS_RYZENAI_RUNTIME=false
-if ldconfig -p 2>/dev/null | grep -q "libxrt_core\.so" || [[ -d /opt/xilinx/xrt ]]; then
-    HAS_RYZENAI_RUNTIME=true
+HAS_AMD_NPU_RUNTIME=false
+if ldconfig -p 2>/dev/null | grep -qi "libxrt_core\.so" || [[ -d /opt/xilinx/xrt || -e /usr/lib64/libxrt_core.so ]]; then
+    HAS_AMD_NPU_RUNTIME=true
+fi
+
+HAS_AMD_GPU_RUNTIME=false
+if ldconfig -p 2>/dev/null | grep -qiE "libvulkan_radeon\.so|amdvlk|libMesaOpenCL\.so" || [[ -d /opt/rocm || -e /usr/lib64/libvulkan_radeon.so ]]; then
+    HAS_AMD_GPU_RUNTIME=true
+fi
+
+# ------------------------------------------------------------------------------
+# Resolucao Dinamica do Backend Escolhido pelo AUTO
+# ------------------------------------------------------------------------------
+AUTO_ID="cpu_tract"
+AUTO_NAME="CPU Nativo (Tract Pure-Rust)"
+
+if [[ "${HAS_NVIDIA}" == "true" && "${HAS_TRT_RUNTIME}" == "true" ]]; then
+    AUTO_ID="nvidia_tensorrt"
+    AUTO_NAME="NVIDIA GPU (TensorRT / CUDA)"
+elif [[ "${HAS_INTEL_NPU}" == "true" && "${HAS_OPENVINO_NPU}" == "true" ]]; then
+    AUTO_ID="openvino_npu"
+    AUTO_NAME="Intel OpenVINO (NPU - AI Boost)"
+elif [[ "${HAS_AMD_NPU}" == "true" && "${HAS_AMD_NPU_RUNTIME}" == "true" ]]; then
+    AUTO_ID="amd_ryzenai_npu"
+    AUTO_NAME="AMD Ryzen AI (NPU - XDNA)"
+elif [[ "${HAS_INTEL_GPU}" == "true" && "${HAS_OPENVINO_GPU}" == "true" ]]; then
+    AUTO_ID="openvino_gpu"
+    AUTO_NAME="Intel OpenVINO (iGPU - Intel Graphics)"
+elif [[ "${HAS_AMD_GPU}" == "true" && "${HAS_AMD_GPU_RUNTIME}" == "true" ]]; then
+    AUTO_ID="amd_ryzenai_gpu"
+    AUTO_NAME="AMD Radeon (iGPU - RDNA Graphics)"
+elif [[ "${HAS_INTEL_CPU}" == "true" && "${HAS_OPENVINO_CPU}" == "true" ]]; then
+    AUTO_ID="openvino_cpu"
+    AUTO_NAME="Intel OpenVINO (CPU - Otimizado)"
+else
+    AUTO_ID="cpu_tract"
+    AUTO_NAME="CPU Nativo (Tract Pure-Rust)"
 fi
 
 # ------------------------------------------------------------------------------
@@ -179,6 +215,10 @@ fi
 if [[ "${OUTPUT_JSON}" == "true" ]]; then
     cat <<EOF
 {
+  "auto_resolved_backend": {
+    "id": "${AUTO_ID}",
+    "name": "${AUTO_NAME}"
+  },
   "backends": [
     {
       "id": "auto",
@@ -188,6 +228,8 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "runtime_installed": true,
       "device_info": "Seleção dinâmica inteligente do acelerador de menor latência",
       "runtime_name": "Agendador Automático ClearCore",
+      "auto_resolved_id": "${AUTO_ID}",
+      "auto_resolved_name": "${AUTO_NAME}",
       "install_script": "",
       "install_command": "",
       "install_instruction": ""
@@ -241,16 +283,28 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "install_instruction": "Otimizações vetoriais avançadas da Intel para CPU com o compilador OpenVINO."
     },
     {
-      "id": "amd_ryzenai",
-      "name": "AMD Ryzen AI NPU (XDNA)",
+      "id": "amd_ryzenai_npu",
+      "name": "AMD Ryzen AI (NPU - XDNA)",
       "tier": "Npu",
       "hardware_detected": ${HAS_AMD_NPU},
-      "runtime_installed": ${HAS_RYZENAI_RUNTIME},
-      "device_info": "AMD Ryzen AI NPU (XDNA / XDNA 2)",
+      "runtime_installed": ${HAS_AMD_NPU_RUNTIME},
+      "device_info": "AMD Ryzen AI NPU (XDNA / XDNA 2 dedicada no processador)",
       "runtime_name": "Ryzen AI Software (libxrt_core.so)",
       "install_script": "./scripts/install-ryzenai.sh",
       "install_command": "./scripts/install-ryzenai.sh",
-      "install_instruction": "Hardware AMD Ryzen AI NPU não encontrado ou driver XRT ausente."
+      "install_instruction": "A NPU AMD Ryzen AI requer o driver amdxdna e o pacote Ryzen AI Software / XRT para processamento neural."
+    },
+    {
+      "id": "amd_ryzenai_gpu",
+      "name": "AMD Radeon (iGPU - RDNA Graphics)",
+      "tier": "IntegratedGpu",
+      "hardware_detected": ${HAS_AMD_GPU},
+      "runtime_installed": ${HAS_AMD_GPU_RUNTIME},
+      "device_info": "AMD Radeon 780M / 880M / 890M Graphics (iGPU integrada)",
+      "runtime_name": "AMD ROCm / Vulkan / DirectML",
+      "install_script": "./scripts/install-ryzenai.sh",
+      "install_command": "./scripts/install-ryzenai.sh",
+      "install_instruction": "Instale os drivers gráficos AMD e a runtime Vulkan/ROCm para acelerar na GPU integrada Radeon."
     },
     {
       "id": "apple_coreml",
@@ -283,6 +337,8 @@ EOF
 fi
 
 echo "[3/3] Relatorio de Auditoria de Hardware & Runtimes:"
+echo "----------------------------------------------------------"
+echo "  [SELECAO AUTO ATUAL] ${AUTO_NAME} (${AUTO_ID})"
 echo "----------------------------------------------------------"
 
 # NVIDIA
@@ -325,14 +381,22 @@ if [[ "${HAS_INTEL_CPU}" == "true" ]]; then
     fi
 fi
 
-# AMD NPU
+# AMD Ryzen AI NPU
 if [[ "${HAS_AMD_NPU}" == "true" ]]; then
     echo "  [DETECTADO] AMD Ryzen AI NPU (XDNA / XDNA 2)"
-    if [[ "${HAS_RYZENAI_RUNTIME}" == "true" ]]; then
+    if [[ "${HAS_AMD_NPU_RUNTIME}" == "true" ]]; then
         echo "              Status Runtime: Instalada (Ryzen AI Software ativo)"
     else
         echo "              Status Runtime: AUSENTE (XRT / Vitis-AI nao encontrado)"
         echo "              -> ACAO: Execute './scripts/install-ryzenai.sh' para ativar Ryzen AI!"
+    fi
+fi
+
+# AMD Radeon iGPU
+if [[ "${HAS_AMD_GPU}" == "true" ]]; then
+    echo "  [DETECTADO] AMD Radeon iGPU (RDNA Graphics)"
+    if [[ "${HAS_AMD_GPU_RUNTIME}" == "true" ]]; then
+        echo "              Status Runtime: Instalada (Vulkan / ROCm ativo)"
     fi
 fi
 
@@ -341,6 +405,6 @@ echo "----------------------------------------------------------"
 echo "Hierarquia de Selecao:"
 echo "1. GPU Dedicada (TensorRT 100)"
 echo "2. NPU (Intel OpenVINO NPU / AMD Ryzen AI NPU 80)"
-echo "3. GPU Integrada (Intel OpenVINO iGPU 70)"
+echo "3. GPU Integrada (Intel OpenVINO iGPU / AMD Radeon iGPU 70)"
 echo "4. CPU (Intel OpenVINO CPU 60 -> Tract Rust Baseline 50)"
 echo "=========================================================="

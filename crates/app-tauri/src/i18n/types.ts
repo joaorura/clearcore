@@ -149,6 +149,8 @@ export interface Translations {
     switchSuccess: string;
     cannotSelectMissing: string;
     autoRecommend: string;
+    autoResolvedCurrent: string;
+    autoResolvedActive: string;
     refreshBtn: string;
     refreshingBtn: string;
   };

@@ -7,6 +7,7 @@ export const HardwareAcceleratorCard: React.FC = () => {
 
   const [backends, setBackends] = useState<HardwareBackendItem[]>([]);
   const [activeBackendId, setActiveBackendId] = useState<string>('auto');
+  const [autoResolvedBackend, setAutoResolvedBackend] = useState<{ id: string; name: string } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedHelpBackend, setSelectedHelpBackend] = useState<HardwareBackendItem | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -21,6 +22,9 @@ export const HardwareAcceleratorCard: React.FC = () => {
         setBackends(res.backends);
         if (res.active_backend) {
           setActiveBackendId(res.active_backend);
+        }
+        if (res.auto_resolved_backend) {
+          setAutoResolvedBackend(res.auto_resolved_backend);
         }
       }
     } catch (err) {
@@ -117,6 +121,10 @@ export const HardwareAcceleratorCard: React.FC = () => {
         return '⚙️';
       case 'intel_openvino':
         return '🔷';
+      case 'amd_ryzenai_npu':
+        return '🧠';
+      case 'amd_ryzenai_gpu':
+        return '🎮';
       case 'amd_ryzenai':
         return '🔶';
       case 'apple_coreml':
@@ -230,7 +238,15 @@ export const HardwareAcceleratorCard: React.FC = () => {
           <span style={{ color: 'var(--text-muted)', marginRight: 6 }}>
             {t('hardwareBackend.activeLabel')}
           </span>
-          <strong style={{ color: '#4ade80' }}>{activeBackend.name}</strong>
+          {activeBackendId === 'auto' ? (
+            <strong style={{ color: '#4ade80' }}>
+              {t('hardwareBackend.autoResolvedActive', {
+                name: autoResolvedBackend?.name || (backends.find(b => b.id === 'auto')?.auto_resolved_name) || activeBackend.name,
+              })}
+            </strong>
+          ) : (
+            <strong style={{ color: '#4ade80' }}>{activeBackend.name}</strong>
+          )}
         </div>
         {activeBackendId === 'auto' && (
           <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
@@ -329,12 +345,42 @@ export const HardwareAcceleratorCard: React.FC = () => {
                   style={{
                     fontSize: '0.8rem',
                     color: 'var(--text-muted)',
-                    marginBottom: 12,
+                    marginBottom: 10,
                     lineHeight: 1.4,
                   }}
                 >
                   {backend.device_info}
                 </div>
+
+                {/* Se for opcao AUTO, mostrar explicitamente qual mecanismo foi selecionado */}
+                {backend.id === 'auto' && (
+                  <div
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.12)',
+                      border: '1px solid rgba(56, 189, 248, 0.35)',
+                      borderRadius: 6,
+                      padding: '8px 10px',
+                      marginBottom: 12,
+                      fontSize: '0.82rem',
+                      color: '#7dd3fc',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>⚡</span>
+                    <span>
+                      {t('hardwareBackend.autoResolvedCurrent', {
+                        name:
+                          backend.auto_resolved_name ||
+                          autoResolvedBackend?.name ||
+                          (backends.find((b) => b.id !== 'auto' && b.hardware_detected && b.runtime_installed)?.name) ||
+                          'Detectando...',
+                      })}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Status and Action Badge */}

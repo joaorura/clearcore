@@ -151,6 +151,8 @@ export const ptBR: Translations = {
     switchSuccess: 'Mecanismo de aceleração alterado para: {name}',
     cannotSelectMissing: 'Não é possível ativar este acelerador porque a runtime necessária não está instalada.',
     autoRecommend: 'Recomendado: o ClearCore seleciona automaticamente o acelerador mais rápido com runtime instalada.',
+    autoResolvedCurrent: '⚡ Selecionado automaticamente: {name}',
+    autoResolvedActive: 'Automático ➔ {name}',
     refreshBtn: '🔄 Verificar Hardware',
     refreshingBtn: '⏳ Verificando...',
   },
