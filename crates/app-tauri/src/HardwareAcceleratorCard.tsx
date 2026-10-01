@@ -92,10 +92,12 @@ export const HardwareAcceleratorCard: React.FC = () => {
         return { label: 'Auto', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)' };
       case 'DedicatedGpu':
         return { label: 'GPU Dedicada', color: '#4ade80', bg: 'rgba(74, 222, 128, 0.15)' };
+      case 'IntegratedGpu':
+        return { label: 'iGPU Integrada', color: '#2dd4bf', bg: 'rgba(45, 212, 191, 0.15)' };
       case 'Npu':
         return { label: 'NPU Neural', color: '#c084fc', bg: 'rgba(192, 132, 252, 0.15)' };
       case 'Cpu':
-        return { label: 'CPU Pure-Rust', color: '#fb923c', bg: 'rgba(251, 146, 60, 0.15)' };
+        return { label: 'CPU Host', color: '#fb923c', bg: 'rgba(251, 146, 60, 0.15)' };
       default:
         return { label: tier, color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.15)' };
     }
@@ -107,6 +109,12 @@ export const HardwareAcceleratorCard: React.FC = () => {
         return '⚡';
       case 'nvidia_tensorrt':
         return '🟢';
+      case 'openvino_npu':
+        return '🧠';
+      case 'openvino_gpu':
+        return '🎮';
+      case 'openvino_cpu':
+        return '⚙️';
       case 'intel_openvino':
         return '🔷';
       case 'amd_ryzenai':
