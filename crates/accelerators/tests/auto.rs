@@ -576,8 +576,22 @@ fn intel_cpu_prefers_openvino_over_onnx_tract() {
 }
 
 #[test]
-fn directml_on_dedicated_gpu_is_top_priority_on_windows() {
+fn directml_is_below_proprietary_gpu_runtimes_but_above_npu() {
     let policy = AutoPolicy::new();
+
+    let cuda_report = CalibrationReport {
+        backend_name: "cuda".to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.50,
+        p95_latency_ms: 0.85,
+        p99_latency_ms: 1.10,
+        max_latency_ms: 1.70,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    };
 
     let dml_dgpu = CalibrationReport {
         backend_name: "directml".to_owned(),
@@ -635,16 +649,21 @@ fn directml_on_dedicated_gpu_is_top_priority_on_windows() {
         reason: None,
     };
 
-    let candidates = [dml_dgpu, amd_npu, intel_igpu, tract_cpu];
+    // 1. Proprietary GPU runtime (CUDA score 95) is preferred over DirectML (score 90)
+    let candidates_with_cuda = [cuda_report, dml_dgpu.clone(), amd_npu.clone()];
+    let sel_cuda = policy.resolve_candidates(BackendRequest::Auto, &candidates_with_cuda);
+    assert_eq!(sel_cuda, BackendSelection::Cuda);
 
-    // 1. DirectML on dedicated GPU is Tier 1 (score 95) and takes top priority over NPU, iGPU, and CPU
-    let sel = policy.resolve_candidates(BackendRequest::Auto, &candidates);
-    assert_eq!(sel, BackendSelection::DirectMl);
-    assert_eq!(sel.name(), "directml");
-    assert_eq!(sel.tier(), DeviceTier::DedicatedGpu);
-    assert!(sel.is_dedicated_gpu());
+    // 2. When proprietary GPU runtimes are absent, DirectML (score 90) takes top priority over NPU (score 80), iGPU (score 70), and CPU (score 50)
+    let candidates_without_cuda = [dml_dgpu, amd_npu, intel_igpu, tract_cpu];
+    let sel_dml = policy.resolve_candidates(BackendRequest::Auto, &candidates_without_cuda);
+    assert_eq!(sel_dml, BackendSelection::DirectMl);
+    assert_eq!(sel_dml.name(), "directml");
+    assert_eq!(sel_dml.tier(), DeviceTier::DedicatedGpu);
+    assert!(sel_dml.is_dedicated_gpu());
 
-    // 2. User forces Dedicated GPU: selects DirectML
-    let dgpu_sel = policy.resolve_candidates(BackendRequest::DedicatedGpu, &candidates);
+    // 3. User forces Dedicated GPU: selects DirectML when it's the available dGPU
+    let dgpu_sel =
+        policy.resolve_candidates(BackendRequest::DedicatedGpu, &candidates_without_cuda);
     assert_eq!(dgpu_sel, BackendSelection::DirectMl);
 }

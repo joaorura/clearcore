@@ -204,21 +204,21 @@ impl CalibrationReport {
 
 /// Priority score for candidate backends in AUTO selection.
 /// Higher score indicates higher selection priority:
-/// - Dedicated GPU (`TensorRT` score 100; `DirectML` on dGPU score 95 - top priority for AMD/Intel dGPUs and Windows; `Vulkan` score 90)
-/// - NPU (Intel NPU via `OpenVINO` score 80; AMD NPU via Ryzen AI / XDNA score 80; Apple Neural Engine via `CoreML` 75)
-/// - Integrated GPU (Intel Arc / iGPU via `OpenVINO` GPU score 70; AMD iGPU via Ryzen AI score 70)
-/// - CPU (Intel CPU prefers `OpenVINO` CPU AMX/VNNI score 60; Tract pure Rust CPU baseline score 50)
+/// - Dedicated GPU:
+///   * Proprietary / Vendor-Specific GPU runtimes: `TensorRT` score 100, `CUDA` score 95
+///   * General / Universal GPU runtimes: `DirectML` on dGPU score 90, `Vulkan` score 85
+/// - NPU: Intel NPU via `OpenVINO` score 80; AMD NPU via Ryzen AI / XDNA score 80; Apple Neural Engine via `CoreML` 75
+/// - Integrated GPU: Intel Arc / iGPU via `OpenVINO` GPU score 70; AMD iGPU via Ryzen AI score 70; DirectML on iGPU score 70
+/// - CPU: Intel CPU prefers `OpenVINO` CPU AMX/VNNI score 60; Tract pure Rust CPU baseline score 50
 #[must_use]
 pub fn backend_priority_score(backend_name: &str) -> u32 {
     match backend_name.to_ascii_lowercase().as_str() {
-        // Tier 1: Dedicated GPU - Specific runtime (NVIDIA TensorRT)
+        // Tier 1: Dedicated GPU - Proprietary / Vendor-Specific runtimes (NVIDIA TensorRT, CUDA)
         "tensorrt" => 100,
-        // Tier 1: Dedicated GPU - DirectML (Top priority for AMD Radeon RX, Intel Arc dGPU, and universal Windows dGPU)
-        "directml" | "directml-dgpu" | "dx12" => 95,
-        // Tier 1: Dedicated GPU - Specific runtime (CUDA)
-        "cuda" | "nvidia" => 92,
-        // Tier 1: Dedicated GPU - General cross-platform runtime (Vulkan on dGPU)
-        "vulkan" | "vulkan-dgpu" => 90,
+        "cuda" | "nvidia" => 95,
+        // Tier 1: Dedicated GPU - General / Universal runtimes (DirectML below proprietary runtimes, Vulkan)
+        "directml" | "directml-dgpu" | "dx12" => 90,
+        "vulkan" | "vulkan-dgpu" => 85,
         // Tier 2: NPU (Intel NPU via OpenVINO, AMD NPU via Ryzen AI / XDNA)
         "openvino-npu" | "intel-npu" | "npu" | "ryzenai-npu" | "ryzen-ai" | "ryzenai"
         | "amd-npu" | "vitisai" | "xdna" => 80,
