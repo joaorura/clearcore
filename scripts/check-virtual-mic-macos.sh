@@ -20,15 +20,17 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SYSTEM_HAL_DIR="/Library/Audio/Plug-Ins/HAL"
+USER_HAL_DIR="${HOME}/Library/Audio/Plug-Ins/HAL"
 DRIVER_NAME="RealtimeNoiseHAL.driver"
 INSTALLED_DRIVER="${SYSTEM_HAL_DIR}/${DRIVER_NAME}"
 BUILT_DRIVER="${SCRIPT_DIR}/platform/macos/HAL/build/Release/${DRIVER_NAME}"
 STAGING_DRIVER="${SCRIPT_DIR}/platform/macos/HAL/${DRIVER_NAME}"
+PACKAGED_DRIVER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../driver" 2>/dev/null && pwd)/${DRIVER_NAME}"
 MIC_NAME="Clearcore Realtime Noise Suppression Microphone"
 MANUFACTURER="CLRC"
 
 is_driver_installed() {
-    if [[ -d "${INSTALLED_DRIVER}" ]]; then
+    if [[ -d "${INSTALLED_DRIVER}" ]] || [[ -d "${USER_HAL_DIR}/${DRIVER_NAME}" ]]; then
         return 0
     fi
     return 1
@@ -70,7 +72,9 @@ set_default_mic() {
 install_hal_driver() {
     echo "[macOS] Instalando CoreAudio AudioServerPlugIn (${DRIVER_NAME})..."
     local source_bundle=""
-    if [[ -d "${BUILT_DRIVER}" ]]; then
+    if [[ -d "${PACKAGED_DRIVER}" ]]; then
+        source_bundle="${PACKAGED_DRIVER}"
+    elif [[ -d "${BUILT_DRIVER}" ]]; then
         source_bundle="${BUILT_DRIVER}"
     elif [[ -d "${STAGING_DRIVER}" ]]; then
         source_bundle="${STAGING_DRIVER}"
@@ -92,21 +96,28 @@ install_hal_driver() {
     fi
 
     if [[ -n "${source_bundle}" && -d "${source_bundle}" ]]; then
-        echo "[macOS] Copiando ${source_bundle} para ${SYSTEM_HAL_DIR}..."
+        local target_dir="${SYSTEM_HAL_DIR}"
         if [[ -w "${SYSTEM_HAL_DIR}" ]]; then
+            echo "[macOS] Copiando ${source_bundle} para ${SYSTEM_HAL_DIR}..."
             rm -rf "${INSTALLED_DRIVER}"
             cp -R "${source_bundle}" "${INSTALLED_DRIVER}"
+        elif sudo -n true 2>/dev/null; then
+            echo "[macOS] Copiando via sudo para ${SYSTEM_HAL_DIR}..."
+            sudo rm -rf "${INSTALLED_DRIVER}"
+            sudo cp -R "${source_bundle}" "${INSTALLED_DRIVER}"
         else
-            echo "[macOS] Requer permissao de Administrador (sudo) para instalar em /Library/Audio/Plug-Ins/HAL:"
-            sudo cp -R "${source_bundle}" "${INSTALLED_DRIVER}" 2>/dev/null || return 1
+            echo "[macOS] Instalando em diretório de usuário ${USER_HAL_DIR} (sem necessidade de root)..."
+            mkdir -p "${USER_HAL_DIR}"
+            rm -rf "${USER_HAL_DIR}/${DRIVER_NAME}"
+            cp -R "${source_bundle}" "${USER_HAL_DIR}/${DRIVER_NAME}"
         fi
 
         # Reiniciar o daemon coreaudiod para carregar o novo plug-in
         echo "[macOS] Reiniciando coreaudiod para ativar o microfone virtual..."
         if command -v launchctl >/dev/null 2>&1; then
-            sudo launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || sudo killall -9 coreaudiod 2>/dev/null || true
+            sudo launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || killall coreaudiod 2>/dev/null || true
         else
-            sudo killall -9 coreaudiod 2>/dev/null || true
+            killall coreaudiod 2>/dev/null || true
         fi
         sleep 1
         return 0

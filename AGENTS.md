@@ -13,12 +13,20 @@ The desktop application is completely self-contained. When launched, the applica
 - **Output:**
   - Linux: `release/Clearcore-linux-x64/` (run `./clearcore` directly or `./install.sh` for system menu integration) + `Clearcore-linux-x64.tar.gz`
   - Windows: `release/Clearcore-win32-x64/` (portable `Clearcore.exe`) + NSIS (`Clearcore-Setup.nsi`) and Inno Setup (`Clearcore-Setup.iss`) to produce single-click `Clearcore-Setup.exe` that installs the app and WaveRT audio driver automatically.
+  - macOS: `release/Clearcore-darwin-x64/` (`Clearcore.app` with embedded CoreAudio HAL driver bundle) + `install.sh` + `.tar.gz`
 
 ## Quick Commands
 
-### Standalone Desktop App Execution
+### Development Mode (Vite HMR + Electron + Sidecar Daemon)
+To run the full development environment with live React hot reloading and automatic backend daemon:
+- **Linux & macOS:** `./dev.sh` (or `cd crates/app-tauri && npm run dev`)
+- **Windows:** `.\dev.bat` ou `.\dev.ps1` (or `cd crates/app-tauri && npm run dev`)
+- **React Frontend Only (Browser):** `cd crates/app-tauri && npm run dev:ui`
+
+### Standalone Desktop App Execution (Production Package)
 - **Run Standalone App (Linux):** `./release/Clearcore-linux-x64/clearcore`
 - **Run Standalone App (Windows):** `.\release\Clearcore-win32-x64\Clearcore.exe`
+- **Run Standalone App (macOS):** `open ./release/Clearcore-darwin-x64/Clearcore.app`
 
 ### Developer Convenience & Lifecycle
 

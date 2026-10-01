@@ -7,6 +7,12 @@ See [`AGENTS.md`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/AGEN
 - **Package Everything (Windows):** `.\package.bat` ou `.\package.ps1`
 - **Run Packaged App (Linux):** `./release/Clearcore-linux-x64/clearcore`
 - **Run Packaged App (Windows):** `.\release\Clearcore-win32-x64\Clearcore.exe`
+- **Run Packaged App (macOS):** `open ./release/Clearcore-darwin-x64/Clearcore.app`
+
+## Development Mode (HMR + Electron + Sidecar Daemon)
+- **Linux & macOS:** `./dev.sh` (or `cd crates/app-tauri && npm run dev`)
+- **Windows:** `.\dev.bat` ou `.\dev.ps1` (or `cd crates/app-tauri && npm run dev`)
+- **UI Only (Browser):** `cd crates/app-tauri && npm run dev:ui`
 
 ## Core Commands
 

@@ -49,23 +49,44 @@ if (!fs.existsSync(electronDist)) {
 console.log(`📋 Copying Electron runtime binaries into ${bundleName}...`);
 fs.cpSync(electronDist, bundleDir, { recursive: true });
 
-// 5. Rename main executable
+// 5. Rename main executable & handle macOS .app structure
 const isWin = platform === 'win32';
-const oldExe = path.join(bundleDir, isWin ? 'electron.exe' : 'electron');
-const newExe = path.join(bundleDir, isWin ? 'Clearcore.exe' : 'clearcore');
+const isMac = platform === 'darwin';
 
-if (fs.existsSync(oldExe)) {
-  fs.renameSync(oldExe, newExe);
-  if (!isWin) {
-    fs.chmodSync(newExe, 0o755);
+let resourcesDir = path.join(bundleDir, 'resources');
+
+if (isMac) {
+  // macOS Electron distribution contains Electron.app
+  const oldApp = path.join(bundleDir, 'Electron.app');
+  const newApp = path.join(bundleDir, 'Clearcore.app');
+  if (fs.existsSync(oldApp)) {
+    fs.renameSync(oldApp, newApp);
   }
-  console.log(`✓ Renamed application binary to ${path.basename(newExe)}`);
+  const appTarget = fs.existsSync(newApp) ? newApp : bundleDir;
+  const oldExe = path.join(appTarget, 'Contents', 'MacOS', 'Electron');
+  const newExe = path.join(appTarget, 'Contents', 'MacOS', 'Clearcore');
+  if (fs.existsSync(oldExe)) {
+    fs.renameSync(oldExe, newExe);
+    fs.chmodSync(newExe, 0o755);
+    console.log(`✓ Renamed application binary to Clearcore in Clearcore.app`);
+  }
+  resourcesDir = path.join(appTarget, 'Contents', 'Resources');
 } else {
-  console.warn(`⚠️ Executable ${oldExe} not found to rename.`);
+  const oldExe = path.join(bundleDir, isWin ? 'electron.exe' : 'electron');
+  const newExe = path.join(bundleDir, isWin ? 'Clearcore.exe' : 'clearcore');
+
+  if (fs.existsSync(oldExe)) {
+    fs.renameSync(oldExe, newExe);
+    if (!isWin) {
+      fs.chmodSync(newExe, 0o755);
+    }
+    console.log(`✓ Renamed application binary to ${path.basename(newExe)}`);
+  } else {
+    console.warn(`⚠️ Executable ${oldExe} not found to rename.`);
+  }
 }
 
 // 6. Assemble resources/app
-const resourcesDir = path.join(bundleDir, 'resources');
 const defaultAsar = path.join(resourcesDir, 'default_app.asar');
 if (fs.existsSync(defaultAsar)) {
   fs.rmSync(defaultAsar, { force: true });
@@ -143,7 +164,25 @@ for (const sf of scriptFiles) {
   }
 }
 
-// 9. Platform-specific standalone integration files
+// 9. Bundle Platform Driver Assets
+const driverTargetDir = path.join(resourcesDir, 'driver');
+fs.mkdirSync(driverTargetDir, { recursive: true });
+
+if (isWin) {
+  const infSrc = path.join(repoRoot, 'platform', 'windows', 'driver', 'RealtimeNoise.inf');
+  if (fs.existsSync(infSrc)) {
+    fs.copyFileSync(infSrc, path.join(driverTargetDir, 'RealtimeNoise.inf'));
+    console.log('✓ Bundled RealtimeNoise.inf driver specification');
+  }
+} else if (isMac) {
+  const halDriver = path.join(repoRoot, 'platform', 'macos', 'HAL', 'RealtimeNoiseHAL.driver');
+  if (fs.existsSync(halDriver)) {
+    fs.cpSync(halDriver, path.join(driverTargetDir, 'RealtimeNoiseHAL.driver'), { recursive: true });
+    console.log('✓ Bundled RealtimeNoiseHAL.driver');
+  }
+}
+
+// 10. Platform-specific standalone integration files
 if (platform === 'linux') {
   console.log('🐧 Creating Linux desktop integration and one-click installer...');
   
@@ -252,6 +291,53 @@ echo "✅ Clearcore uninstalled successfully."
   } catch (err) {
     console.warn('Could not create tar.gz archive:', err.message);
   }
+} else if (platform === 'darwin') {
+  console.log('🍎 Creating macOS application bundle integration and installer...');
+
+  const installSh = `#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="\${SCRIPT_DIR}/Clearcore.app"
+DEST_APP="/Applications/Clearcore.app"
+USER_APP="\${HOME}/Applications/Clearcore.app"
+
+echo "=== Clearcore macOS Application Installer ==="
+
+if [[ -d "\${APP_DIR}" ]]; then
+    if [[ -w "/Applications" ]]; then
+        echo "Installing Clearcore.app to /Applications..."
+        rm -rf "\${DEST_APP}"
+        cp -R "\${APP_DIR}" "\${DEST_APP}"
+    else
+        echo "Installing Clearcore.app to \${USER_APP}..."
+        mkdir -p "\${HOME}/Applications"
+        rm -rf "\${USER_APP}"
+        cp -R "\${APP_DIR}" "\${USER_APP}"
+    fi
+fi
+
+# Run virtual microphone check and HAL installation
+echo "Configuring CoreAudio HAL virtual microphone..."
+"\${SCRIPT_DIR}/Clearcore.app/Contents/Resources/scripts/check-virtual-mic-macos.sh" --recreate || true
+
+echo ""
+echo "✅ Clearcore installed successfully!"
+echo "You can launch Clearcore from Launchpad or Applications."
+`;
+  const installPath = path.join(bundleDir, 'install.sh');
+  fs.writeFileSync(installPath, installSh, 'utf8');
+  fs.chmodSync(installPath, 0o755);
+
+  const tarName = `${bundleName}.tar.gz`;
+  const tarPath = path.join(releaseDir, tarName);
+  console.log(`📦 Creating distribution archive: ${tarName}...`);
+  try {
+    execSync(`tar -czf "${tarPath}" -C "${releaseDir}" "${bundleName}"`, { stdio: 'inherit' });
+    console.log(`✓ Distribution archive created at release/${tarName}`);
+  } catch (err) {
+    console.warn('Could not create tar.gz archive:', err.message);
+  }
 }
 
 console.log('=====================================================');
@@ -262,5 +348,8 @@ if (platform === 'linux') {
   console.log(`💾 To install on system/user: cd ${bundleDir} && ./install.sh`);
 } else if (platform === 'win32') {
   console.log(`🚀 To run directly: ${path.join(bundleDir, 'Clearcore.exe')}`);
+} else if (platform === 'darwin') {
+  console.log(`🚀 To run directly: open ${path.join(bundleDir, 'Clearcore.app')}`);
+  console.log(`💾 To install on system/user: cd ${bundleDir} && ./install.sh`);
 }
 console.log('=====================================================');
