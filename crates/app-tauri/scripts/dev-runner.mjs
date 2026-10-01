@@ -97,12 +97,15 @@ async function startElectron() {
   }
 }
 
-process.on('SIGINT', () => {
+const cleanup = () => {
   console.log('\n[Dev] Stopping dev environment...');
   try {
     viteProc.kill('SIGTERM');
   } catch {}
   process.exit(0);
-});
+};
+
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
 
 startElectron();

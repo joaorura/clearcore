@@ -5,11 +5,15 @@ const net = require('net');
 const os = require('os');
 const { execFile, spawn } = require('child_process');
 
-// Enforce single instance lock
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.quit();
-  process.exit(0);
+// Enforce single instance lock (in production)
+const isDevMode = process.argv.includes('--dev');
+if (!isDevMode) {
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    console.log('[Clearcore] Another instance is already running. Focusing existing instance and exiting.');
+    app.quit();
+    process.exit(0);
+  }
 }
 
 let mainWindow = null;
@@ -645,21 +649,49 @@ function createWindow() {
 
   // Load React app
   const distHtml = path.join(__dirname, '..', 'dist', 'index.html');
-  if (process.argv.includes('--dev')) {
-    mainWindow.loadURL('http://127.0.0.1:5173').catch(() => {
-      mainWindow.loadFile(distHtml);
-    });
+  const isDev = process.argv.includes('--dev');
+
+  if (isDev) {
+    const devUrl = 'http://127.0.0.1:5173';
+    const tryLoadDevUrl = async () => {
+      try {
+        await mainWindow.loadURL(devUrl);
+      } catch (err) {
+        console.warn(`[Dev] Could not connect to Vite at ${devUrl} (${err.message}), retrying in 500ms...`);
+        setTimeout(async () => {
+          try {
+            await mainWindow.loadURL(devUrl);
+          } catch {
+            console.warn('[Dev] Falling back to built dist/index.html');
+            if (fs.existsSync(distHtml)) {
+              mainWindow.loadFile(distHtml);
+            }
+          }
+        }, 500);
+      }
+    };
+    tryLoadDevUrl();
   } else if (fs.existsSync(distHtml)) {
     mainWindow.loadFile(distHtml);
   } else {
     mainWindow.loadURL('http://127.0.0.1:5173');
   }
 
-  // Only show the window if NOT asked to start in tray
+  // Show window if not explicitly asked to start minimized in tray
   if (!startInTray) {
     mainWindow.once('ready-to-show', () => {
       mainWindow.show();
+      mainWindow.focus();
     });
+    // Fallback: force show after 1s in dev mode if ready-to-show hasn't fired yet
+    if (isDev) {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }, 1000);
+    }
   }
 }
 
