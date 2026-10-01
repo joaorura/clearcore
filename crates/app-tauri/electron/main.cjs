@@ -5,6 +5,10 @@ const net = require('net');
 const os = require('os');
 const { execFile, spawn } = require('child_process');
 
+// ClearCore Runtime Application Version
+const APP_VERSION = '0.1.0-beta.1';
+app.setVersion(APP_VERSION);
+
 // Enforce single instance lock (in production)
 const isDevMode = process.argv.includes('--dev');
 if (!isDevMode) {
@@ -977,6 +981,10 @@ app.on('before-quit', () => {
 });
 
 // IPC handlers for frontend
+ipcMain.handle('get_app_version', () => {
+  return APP_VERSION;
+});
+
 ipcMain.handle('get_status', async () => {
   return await sendIpcRequest('GetStatus');
 });

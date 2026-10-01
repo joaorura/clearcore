@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('clearcoreApi', {
+  getVersion: () => ipcRenderer.invoke('get_app_version'),
   getStatus: () => ipcRenderer.invoke('get_status'),
   setMode: (mode) => ipcRenderer.invoke('set_mode', { mode }),
   restartGeneration: () => ipcRenderer.invoke('restart_generation'),

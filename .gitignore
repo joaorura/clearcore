@@ -4,8 +4,9 @@ node_modules/
 **/node_modules/
 dist/
 **/dist/
-release/
-**/release/
+release/*
+!release/*.md
+!**/release/*.md
 platform/linux/helper/build/
 crates/app-tauri/src-tauri/binaries/
 .serena/

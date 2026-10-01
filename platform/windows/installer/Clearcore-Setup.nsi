@@ -11,6 +11,8 @@ InstallDir "$LOCALAPPDATA\Programs\Clearcore"
 InstallDirRegKey HKCU "Software\Clearcore" "Install_Dir"
 RequestExecutionLevel admin
 
+!define PRODUCT_VERSION "0.1.0-beta.1"
+
 ; ------------------------------------------------------------------------------
 ; Interface Configuration
 ; ------------------------------------------------------------------------------
@@ -54,7 +56,7 @@ Section "Clearcore Core Application" SecCore
   ; Add/Remove Programs integration
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore" "DisplayName" "Clearcore Realtime Noise Suppression"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore" "DisplayIcon" "$INSTDIR\Clearcore.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore" "DisplayVersion" "0.1.0"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore" "DisplayVersion" "${PRODUCT_VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore" "Publisher" "Clearcore Team"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore" "NoModify" 1
