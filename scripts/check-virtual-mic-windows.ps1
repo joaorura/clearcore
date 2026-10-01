@@ -98,15 +98,27 @@ function Set-DefaultMic {
 function Install-VirtualDriver {
     Write-Host "[Windows] Instalando driver WaveRT do microfone virtual..."
     if (Test-Path $InfPath) {
-        # Tenta usar pnputil para registrar e instalar o driver
-        $pnpOut = pnputil.exe /add-driver "$InfPath" /install 2>&1
-        
-        # Tenta devcon se disponível para criar o nó Root
+        # 1. Tenta instalar diretamente via pnputil
+        $pnpOut = & pnputil.exe /add-driver "$InfPath" /install 2>&1
+        if (Test-VirtualDevicePresent) {
+            return $true
+        }
+
+        # 2. Se falhar, solicita elevação UAC para instalar o driver
+        Write-Host "[Windows] Solicitando elevacao de Administrador (UAC) para instalar o driver..."
+        try {
+            $argList = "/c pnputil.exe /add-driver `"$InfPath`" /install"
+            $proc = Start-Process -FilePath "cmd.exe" -ArgumentList $argList -Verb RunAs -Wait -PassThru -WindowStyle Hidden
+        } catch {
+            Write-Warning "Falha na solicitacao de elevacao UAC: $_"
+        }
+
+        # 3. Tenta devcon se disponível para instanciar Root\RealtimeNoise
         if (Get-Command devcon.exe -ErrorAction SilentlyContinue) {
             devcon.exe install "$InfPath" "$DeviceHardwareId" 2>&1 | Out-Null
         }
 
-        # Iniciar o serviço caso tenha sido registrado
+        # 4. Iniciar o serviço caso tenha sido registrado
         Start-Service -Name "RealtimeNoise" -ErrorAction SilentlyContinue
 
         Start-Sleep -Seconds 1

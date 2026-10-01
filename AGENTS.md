@@ -1,27 +1,38 @@
 # Orca / Clearcore - Realtime Noise Suppression
 
 ## Overview
-First-party realtime noise-suppression virtual microphone powered by DeepFilterNet3 ONNX, PipeWire C bridge, and Rust supervisor daemon.
+First-party realtime noise-suppression virtual microphone powered by DeepFilterNet3 ONNX, PipeWire C bridge (Linux), WaveRT PortCls driver (Windows), CoreAudio HAL (macOS), and Rust supervisor daemon.
 
 ## Quick Commands
 
 ### Startup & Lifecycle
+
+#### Linux & macOS
 - **Start Everything (Daemon + Electron Tray):** `./start-all.sh`
 - **Stop Everything:** `./stop-all.sh`
 - **Start Daemon Only:** `./start-realtime-noise.sh`
 - **Stop Daemon Only:** `./stop-realtime-noise.sh`
+- **Check Virtual Mic:** `./scripts/check-virtual-mic.sh [--status|--json|--recreate|--set-default]`
 - **Configure Autostart on Boot (Tray):** `./scripts/setup-autostart.sh [enable|disable|status]`
-- **Check Status (IPC):** `cargo run --release -p realtime-noise-app-tauri -- --status`
 
-### Audio Denoise Modes
+#### Windows (CMD & PowerShell)
+- **Start Everything (Daemon + Electron Tray):** `start-all.bat` ou `.\start-all.ps1`
+- **Stop Everything:** `stop-all.bat` ou `.\stop-all.ps1`
+- **Start Daemon Only:** `start-realtime-noise.bat` ou `.\start-realtime-noise.ps1`
+- **Stop Daemon Only:** `stop-realtime-noise.bat` ou `.\stop-realtime-noise.ps1`
+- **Check Virtual Mic:** `powershell .\scripts\check-virtual-mic-windows.ps1 [-Status|-Json|-Recreate|-SetDefault]`
+- **Configure Autostart on Boot (Tray):** `.\scripts\setup-autostart.bat [enable|disable|status]` ou `powershell .\scripts\setup-autostart.ps1 -Action [enable|disable|status]`
+
+#### IPC Status & Modes (Cross-Platform)
+- **Check Status (IPC):** `cargo run --release -p realtime-noise-app-tauri -- --status`
 - **Active Mode (DeepFilterNet):** `cargo run --release -p realtime-noise-app-tauri -- --mode active`
 - **Bypass Mode:** `cargo run --release -p realtime-noise-app-tauri -- --mode bypass`
 - **Mute Mode:** `cargo run --release -p realtime-noise-app-tauri -- --mode mute`
 
 ### Build & Test
-- **Build PipeWire Helper:** `ninja -C platform/linux/helper/build`
+- **Build PipeWire Helper (Linux):** `ninja -C platform/linux/helper/build`
 - **Build Rust Service:** `cargo build --release -p realtime-noise-service`
-- **Build All:** `ninja -C platform/linux/helper/build && cargo build --release`
+- **Build All:** `cargo build --release`
 - **Run Offline Gate:** `./scripts/check-offline.sh`
 
 ## Orca IDE Integration
