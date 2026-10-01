@@ -189,23 +189,30 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
 
       const audioInputs = devs.filter((d) => d.kind === 'audioinput');
 
-      // 1. Identify Virtual Microphone (ClearCore Output / Depois)
+      // 1. Identify Virtual Microphone (ClearCore Output / Depois da Pipeline)
       const virtualDev = audioInputs.find(
         (d) =>
-          d.label.toLowerCase().includes('realtime') ||
-          d.label.toLowerCase().includes('clearcore') ||
-          d.label.toLowerCase().includes('virtual')
+          d.deviceId !== 'default' &&
+          d.deviceId !== 'communications' &&
+          (d.label.toLowerCase().includes('realtime') ||
+            d.label.toLowerCase().includes('clearcore') ||
+            d.label.toLowerCase().includes('virtual'))
       );
 
-      // 2. Identify Physical Microphone (Hardware Mic / Antes)
+      // 2. Identify Physical Microphone (Hardware Mic / Antes - 100% puro do hardware, sem filtro)
       const knownPhysical = inputDevices.find((d) => d.id === selectedInputId);
       const physicalDev = audioInputs.find(
         (d) =>
-          (selectedInputId && d.deviceId === selectedInputId) ||
-          (knownPhysical && d.label.includes(knownPhysical.name)) ||
-          (!d.label.toLowerCase().includes('realtime') &&
-            !d.label.toLowerCase().includes('clearcore') &&
-            !d.label.toLowerCase().includes('virtual'))
+          d.deviceId !== 'default' &&
+          d.deviceId !== 'communications' &&
+          !d.label.toLowerCase().includes('realtime') &&
+          !d.label.toLowerCase().includes('clearcore') &&
+          !d.label.toLowerCase().includes('virtual') &&
+          ((selectedInputId && d.deviceId === selectedInputId) ||
+            (knownPhysical &&
+              (d.label.toLowerCase().includes(knownPhysical.name.toLowerCase()) ||
+                knownPhysical.name.toLowerCase().includes(d.label.toLowerCase()))) ||
+            d.label.length > 0)
       );
 
       const baseConstraints: MediaTrackConstraints = {
@@ -214,15 +221,37 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
         autoGainControl: false,
       };
 
-      // Acquire Raw Physical Mic Stream (Antes da Pipeline)
+      // Acquire Raw Physical Mic Stream (Antes da Pipeline - sem nenhum filtro ou cancelamento)
       let streamRaw: MediaStream | null = null;
-      try {
-        const rawConstraints: MediaTrackConstraints = physicalDev?.deviceId
-          ? { deviceId: { exact: physicalDev.deviceId }, ...baseConstraints }
-          : baseConstraints;
-        streamRaw = await navigator.mediaDevices.getUserMedia({ audio: rawConstraints, video: false });
-      } catch (err) {
-        console.warn('Fallback to standard getUserMedia for raw stream:', err);
+      if (physicalDev?.deviceId) {
+        try {
+          streamRaw = await navigator.mediaDevices.getUserMedia({
+            audio: { deviceId: { exact: physicalDev.deviceId }, ...baseConstraints },
+            video: false,
+          });
+        } catch (err) {
+          console.warn('Fallback to standard getUserMedia for raw stream:', err);
+        }
+      }
+      if (!streamRaw) {
+        const anyPhysical = audioInputs.find(
+          (d) =>
+            d.deviceId !== 'default' &&
+            d.deviceId !== 'communications' &&
+            !d.label.toLowerCase().includes('realtime') &&
+            !d.label.toLowerCase().includes('clearcore') &&
+            !d.label.toLowerCase().includes('virtual')
+        );
+        if (anyPhysical?.deviceId) {
+          try {
+            streamRaw = await navigator.mediaDevices.getUserMedia({
+              audio: { deviceId: { exact: anyPhysical.deviceId }, ...baseConstraints },
+              video: false,
+            });
+          } catch {}
+        }
+      }
+      if (!streamRaw) {
         streamRaw = await navigator.mediaDevices.getUserMedia({ audio: baseConstraints, video: false });
       }
       rawStreamRef.current = streamRaw;
