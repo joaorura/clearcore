@@ -709,14 +709,40 @@ function enumerateSystemInputDevices() {
 
 function setSystemInputDevice(deviceId) {
   selectedInputDeviceId = deviceId;
-  if (process.platform === 'linux') {
-    // If numeric ID, set via wpctl
-    if (/^\d+$/.test(deviceId)) {
+  if (process.platform === 'linux' && /^\d+$/.test(deviceId)) {
+    try {
+      let targetId = deviceId;
       try {
-        require('child_process').execSync(`wpctl set-default ${deviceId}`, { timeout: 3000 });
-      } catch (err) {
-        console.warn(`Failed to set-default input device ${deviceId} via wpctl:`, err.message);
+        const inspectOut = require('child_process').execSync(`wpctl inspect ${deviceId}`, { encoding: 'utf8', timeout: 2000 });
+        if (inspectOut.includes('Audio/Source/Internal')) {
+          // Internal BlueZ/DSP stream node; find associated public Audio/Source node
+          const devMatch = inspectOut.match(/device\.id = "(\d+)"/);
+          if (devMatch) {
+            const statusOut = require('child_process').execSync('wpctl status', { encoding: 'utf8', timeout: 2000 });
+            const filterMatches = [...statusOut.matchAll(/(?:\*|\s)\s*(\d+)\.\s+([^\n]+)\[Audio\/Source\]/g)];
+            for (const fm of filterMatches) {
+              const candidateId = fm[1];
+              try {
+                const cInspect = require('child_process').execSync(`wpctl inspect ${candidateId}`, { encoding: 'utf8', timeout: 1000 });
+                if (cInspect.includes(`device.id = "${devMatch[1]}"`)) {
+                  targetId = candidateId;
+                  break;
+                }
+              } catch {
+                // Ignore inspection timeout
+              }
+            }
+          }
+        }
+      } catch {
+        // Fallback to direct deviceId
       }
+
+      if (targetId) {
+        require('child_process').execSync(`wpctl set-default ${targetId}`, { timeout: 3000 });
+      }
+    } catch {
+      // Silently ignore if device cannot be set as OS default
     }
   }
   updateTrayMenu();

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DiagnosticsPanel, DiagnosticsData } from './diagnostics';
+import { AudioTestCard } from './AudioTestCard';
 import { useI18n } from './i18n';
 
 export type DenoiseMode = 'Active' | 'Bypass' | 'Mute';
@@ -577,6 +578,13 @@ export const App: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Teste de Gravação e Reprodução de Áudio Filtrado */}
+      <AudioTestCard
+        virtualMicPresent={Boolean(virtualMic?.present)}
+        selectedInputId={selectedDeviceId}
+        inputDevices={inputDevices}
+      />
 
       {/* Supervisor Status */}
       <div className="card">

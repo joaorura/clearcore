@@ -108,6 +108,26 @@ export interface Translations {
     normalState: string;
     privacyNotice: string;
   };
+  testAudio: {
+    title: string;
+    badge: string;
+    description: string;
+    sourceLabel: string;
+    sourceFiltered: string;
+    sourceRaw: string;
+    hint: string;
+    startRecording: string;
+    stopRecording: string;
+    recordingStatus: string;
+    levelLabel: string;
+    playbackTitle: string;
+    listenPrompt: string;
+    reRecordBtn: string;
+    sourceUsedFiltered: string;
+    sourceUsedRaw: string;
+    errorMicAccess: string;
+    maxLimitReached: string;
+  };
 }
 
 export type LocaleCode = string;
