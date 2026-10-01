@@ -5,6 +5,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js || true",
     "dev": "node scripts/dev-runner.mjs",
     "dev:app": "node scripts/dev-runner.mjs",
     "dev:ui": "vite --host 127.0.0.1",

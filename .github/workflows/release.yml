@@ -26,10 +26,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libpipewire-0.3-dev libclang-dev meson ninja-build
 
+      - name: Build Native Rust Binaries
+        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi
+
+      - name: Build PipeWire Helper
+        run: |
+          meson setup platform/linux/helper/build platform/linux/helper
+          ninja -C platform/linux/helper/build
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Application Dependencies
         run: cd crates/app-tauri && npm ci
@@ -41,7 +49,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Clearcore-linux-x64
-          path: release/Clearcore-linux-x64.tar.gz
+          path: release/Clearcore-linux-*.tar.gz
 
   build-windows:
     name: Build Windows x64 Package
@@ -55,10 +63,14 @@ jobs:
         with:
           toolchain: 1.90.0
 
+      - name: Build Native Rust Binaries
+        shell: powershell
+        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Application Dependencies
         shell: powershell
@@ -88,10 +100,13 @@ jobs:
         with:
           toolchain: 1.90.0
 
+      - name: Build Native Rust Binaries
+        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Application Dependencies
         run: cd crates/app-tauri && npm ci
@@ -102,8 +117,8 @@ jobs:
       - name: Upload macOS Package Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Clearcore-darwin-x64
-          path: release/Clearcore-darwin-x64.tar.gz
+          name: Clearcore-darwin-app
+          path: release/Clearcore-darwin-*.tar.gz
 
   publish-github-release:
     name: Publish Multi-Platform GitHub Release

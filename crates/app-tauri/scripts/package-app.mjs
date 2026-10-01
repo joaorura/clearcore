@@ -40,6 +40,18 @@ fs.mkdirSync(bundleDir, { recursive: true });
 
 // 3. Verify Electron distribution
 if (!fs.existsSync(electronDist)) {
+  console.log(`⚡ Electron dist directory not found at ${electronDist}, attempting to download Electron binaries...`);
+  const electronInstallJs = path.resolve(appDir, 'node_modules', 'electron', 'install.js');
+  if (fs.existsSync(electronInstallJs)) {
+    try {
+      execSync(`node "${electronInstallJs}"`, { cwd: appDir, stdio: 'inherit' });
+    } catch (e) {
+      console.warn('⚠️ electron install.js execution failed:', e.message);
+    }
+  }
+}
+
+if (!fs.existsSync(electronDist)) {
   console.error(`❌ Electron dist directory not found at ${electronDist}`);
   console.error('Please run "npm install" inside crates/app-tauri first.');
   process.exit(1);
