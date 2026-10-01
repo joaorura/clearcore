@@ -95,11 +95,29 @@ impl ServiceBootstrap {
 
     #[cfg(not(unix))]
     pub fn run(&mut self) -> io::Result<()> {
-        eprintln!(
-            "Named pipe service listener initialized on {}",
-            self.config.endpoint_path.display()
-        );
-        // For non-unix targets (e.g. Windows), named pipe listener placeholder
+        let bind_addr = "127.0.0.1:49215";
+        let listener = std::net::TcpListener::bind(bind_addr)?;
+        println!("Service listening on TCP localhost: {bind_addr}");
+
+        for stream_res in listener.incoming() {
+            if self.daemon.is_shutdown() {
+                break;
+            }
+            match stream_res {
+                Ok(stream) => {
+                    let reader = std::io::BufReader::new(stream.try_clone()?);
+                    let writer = stream;
+                    if let Err(e) = self.daemon.serve_client(reader, writer) {
+                        eprintln!("Error handling client session: {e}");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to accept connection: {e}");
+                }
+            }
+        }
+
+        println!("Service stopped cleanly.");
         Ok(())
     }
 }

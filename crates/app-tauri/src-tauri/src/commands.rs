@@ -58,11 +58,19 @@ pub fn execute_ipc_command(
 
     #[cfg(not(unix))]
     {
-        let _ = (&endpoint, &request);
-        Err(CommandError {
-            code: "SERVICE_UNAVAILABLE".to_string(),
-            message: "Direct IPC stream transport not supported on this platform".to_string(),
-        })
+        use std::net::TcpStream;
+        let stream = TcpStream::connect("127.0.0.1:49215")?;
+        let mut reader = BufReader::new(stream.try_clone()?);
+        let mut writer = BufWriter::new(stream);
+        let response = IpcClient::send_request(&mut reader, &mut writer, &request)?;
+        if response.status != IpcStatus::Ok {
+            let (code, msg) = response.error.map_or_else(
+                || ("IPC_ERROR".to_string(), "Unknown IPC error".to_string()),
+                |err| (err.code, err.message),
+            );
+            return Err(CommandError { code, message: msg });
+        }
+        Ok(response)
     }
 }
 

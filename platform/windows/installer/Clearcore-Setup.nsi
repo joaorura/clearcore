@@ -91,6 +91,11 @@ Section "Uninstall"
   nsExec::Exec 'taskkill /F /IM realtime-noise-service.exe /T'
   Sleep 1000
 
+  ; Execute comprehensive uninstall script if present
+  IfFileExists "$INSTDIR\resources\scripts\uninstall-windows.ps1" 0 SkipPsUninstall
+    ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\scripts\uninstall-windows.ps1"'
+  SkipPsUninstall:
+
   ; Remove shortcuts
   Delete "$DESKTOP\Clearcore.lnk"
   Delete "$SMPROGRAMS\Clearcore\Clearcore.lnk"

@@ -53,19 +53,29 @@ const startInTray =
   process.argv.includes('--hidden') ||
   process.argv.includes('--minimized');
 
-// Path to socket
-function getSocketPath() {
+// Cross-platform IPC endpoint resolution
+function getIpcEndpoint() {
   if (process.platform === 'win32') {
-    return '\\\\.\\pipe\\realtime-noise-control-v1';
+    // Windows supports localhost TCP bridge (port 49215)
+    return { port: 49215, host: '127.0.0.1' };
+  }
+  if (process.platform === 'darwin') {
+    return { path: '/tmp/realtime-noise.sock' };
   }
   const uid = typeof process.getuid === 'function' ? process.getuid() : os.userInfo().uid;
-  return `/run/user/${uid}/realtime-noise.sock`;
+  if (process.env.XDG_RUNTIME_DIR) {
+    return { path: path.join(process.env.XDG_RUNTIME_DIR, 'realtime-noise.sock') };
+  }
+  if (fs.existsSync(`/run/user/${uid}`)) {
+    return { path: `/run/user/${uid}/realtime-noise.sock` };
+  }
+  return { path: '/tmp/realtime-noise.sock' };
 }
 
 // Low-level IPC request to realtime-noise-service daemon
 function sendIpcRequest(command, payload = {}) {
   return new Promise((resolve, reject) => {
-    const socketPath = getSocketPath();
+    const endpoint = getIpcEndpoint();
     const req =
       JSON.stringify({
         version: 'realtime-noise.v1',
@@ -74,7 +84,7 @@ function sendIpcRequest(command, payload = {}) {
         payload,
       }) + '\n';
 
-    const client = net.createConnection(socketPath, () => {
+    const client = net.createConnection(endpoint, () => {
       client.write(req);
     });
 
@@ -99,8 +109,9 @@ function sendIpcRequest(command, payload = {}) {
       }
     });
 
+    const targetDesc = endpoint.path ? endpoint.path : `${endpoint.host}:${endpoint.port}`;
     client.on('error', (err) => {
-      reject(new Error(`Daemon unreachable at ${socketPath}: ${err.message}`));
+      reject(new Error(`Daemon unreachable at ${targetDesc}: ${err.message}`));
     });
 
     // Timeout after 3 seconds

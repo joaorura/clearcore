@@ -185,6 +185,12 @@ const scriptFiles = [
   'check-virtual-mic-windows.ps1',
   'check-virtual-mic-macos.sh',
   'setup-autostart.sh',
+  'setup-autostart.bat',
+  'setup-autostart.ps1',
+  'uninstall-linux.sh',
+  'uninstall-macos.sh',
+  'uninstall-windows.bat',
+  'uninstall-windows.ps1',
 ];
 
 for (const sf of scriptFiles) {
@@ -291,25 +297,73 @@ echo "You can launch Clearcore directly from your application menu or run 'clear
   fs.writeFileSync(installPath, installSh, 'utf8');
   fs.chmodSync(installPath, 0o755);
 
-  // uninstall.sh
+  // Comprehensive uninstall.sh
   const uninstallSh = `#!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 echo "=== Clearcore Uninstaller ==="
 
-if [[ $EUID -eq 0 ]]; then
-    rm -rf "/opt/clearcore"
-    rm -f "/usr/local/bin/clearcore"
-    rm -f "/usr/share/applications/clearcore.desktop"
-    rm -f "/usr/share/icons/hicolor/256x256/apps/clearcore.png"
-else
-    rm -rf "\${HOME}/.local/share/clearcore"
-    rm -f "\${HOME}/.local/bin/clearcore"
-    rm -f "\${HOME}/.local/share/applications/clearcore.desktop"
-    rm -f "\${HOME}/.local/share/icons/hicolor/256x256/apps/clearcore.png"
+# 1. Stop all running processes
+echo "Stopping Clearcore processes..."
+pkill -f "clearcore" >/dev/null 2>&1 || true
+pkill -f "pipewire_helper" >/dev/null 2>&1 || true
+pkill -f "realtime-noise-service" >/dev/null 2>&1 || true
+pkill -f "pw-loopback.*realtime-noise" >/dev/null 2>&1 || true
+
+# 2. Disable and remove user systemd units
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user stop realtime-noise-helper.service >/dev/null 2>&1 || true
+    systemctl --user stop realtime-noise.service >/dev/null 2>&1 || true
+    systemctl --user disable realtime-noise-helper.service >/dev/null 2>&1 || true
+    systemctl --user disable realtime-noise.service >/dev/null 2>&1 || true
+    rm -f "\${HOME}/.config/systemd/user/realtime-noise-helper.service" 2>/dev/null || true
+    rm -f "\${HOME}/.config/systemd/user/realtime-noise.service" 2>/dev/null || true
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
 fi
 
-echo "✅ Clearcore uninstalled successfully."
+# 3. Remove autostart desktop entries
+rm -f "\${HOME}/.config/autostart/clearcore.desktop" 2>/dev/null || true
+rm -f "\${HOME}/.config/autostart/realtime-noise.desktop" 2>/dev/null || true
+
+# 4. Remove PipeWire node
+if command -v pw-cli >/dev/null 2>&1; then
+    NODE_ID=$(pw-cli list-objects Node 2>/dev/null | awk -v name="\\"realtime-noise-source\\"" '
+        $1 == "id" { id = $2; sub(/,/, "", id) }
+        $0 ~ "node.name = " name { print id; exit }
+    ')
+    if [[ -n "\${NODE_ID}" ]]; then
+        pw-cli destroy "\${NODE_ID}" >/dev/null 2>&1 || true
+    fi
+fi
+
+# 5. Clean runtime locks, sockets, and shared memory
+RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/tmp}"
+rm -f "\${RUNTIME_DIR}/clearcore_state" 2>/dev/null || true
+rm -f "\${RUNTIME_DIR}/hippocamp_pipewire_helper.lock" 2>/dev/null || true
+rm -f "\${RUNTIME_DIR}/realtime-noise.sock" 2>/dev/null || true
+rm -f /tmp/realtime-noise-helper.log 2>/dev/null || true
+rm -f /tmp/realtime-noise-service.log 2>/dev/null || true
+
+# 6. Remove installed files
+if [[ $EUID -eq 0 ]]; then
+    rm -rf "/opt/clearcore" 2>/dev/null || true
+    rm -f "/usr/local/bin/clearcore" 2>/dev/null || true
+    rm -f "/usr/share/applications/clearcore.desktop" 2>/dev/null || true
+    rm -f "/usr/share/icons/hicolor/256x256/apps/clearcore.png" 2>/dev/null || true
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "/usr/share/applications" 2>/dev/null || true
+    fi
+else
+    rm -rf "\${HOME}/.local/share/clearcore" 2>/dev/null || true
+    rm -f "\${HOME}/.local/bin/clearcore" 2>/dev/null || true
+    rm -f "\${HOME}/.local/share/applications/clearcore.desktop" 2>/dev/null || true
+    rm -f "\${HOME}/.local/share/icons/hicolor/256x256/apps/clearcore.png" 2>/dev/null || true
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "\${HOME}/.local/share/applications" 2>/dev/null || true
+    fi
+fi
+
+echo "✅ Clearcore uninstalled successfully from Linux."
 `;
   const uninstallPath = path.join(bundleDir, 'uninstall.sh');
   fs.writeFileSync(uninstallPath, uninstallSh, 'utf8');
@@ -361,7 +415,42 @@ echo "You can launch Clearcore from Launchpad or Applications."
 `;
   const installPath = path.join(bundleDir, 'install.sh');
   fs.writeFileSync(installPath, installSh, 'utf8');
-  fs.chmodSync(installPath, 0o755);
+  const uninstallSh = `#!/usr/bin/env bash
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "\${SCRIPT_DIR}/Clearcore.app/Contents/Resources/scripts/uninstall-macos.sh" ]]; then
+    exec "\${SCRIPT_DIR}/Clearcore.app/Contents/Resources/scripts/uninstall-macos.sh" "$@"
+fi
+
+echo "Stopping Clearcore processes..."
+killall "Clearcore" >/dev/null 2>&1 || true
+killall "realtime-noise-service" >/dev/null 2>&1 || true
+pkill -f "Clearcore.app" >/dev/null 2>&1 || true
+
+CURRENT_UID=$(id -u)
+PLIST_USER="\${HOME}/Library/LaunchAgents/com.clearcore.realtime-noise.plist"
+if [[ -f "\${PLIST_USER}" ]]; then
+    launchctl bootout "gui/\${CURRENT_UID}" "\${PLIST_USER}" >/dev/null 2>&1 || true
+    launchctl unload "\${PLIST_USER}" >/dev/null 2>&1 || true
+    rm -f "\${PLIST_USER}"
+fi
+
+DRIVER_NAME="RealtimeNoiseHAL.driver"
+rm -rf "\${HOME}/Library/Audio/Plug-Ins/HAL/\${DRIVER_NAME}" 2>/dev/null || true
+sudo rm -rf "/Library/Audio/Plug-Ins/HAL/\${DRIVER_NAME}" 2>/dev/null || true
+killall coreaudiod >/dev/null 2>&1 || sudo killall coreaudiod >/dev/null 2>&1 || true
+
+rm -rf "/Applications/Clearcore.app" 2>/dev/null || sudo rm -rf "/Applications/Clearcore.app" 2>/dev/null || true
+rm -rf "\${HOME}/Applications/Clearcore.app" 2>/dev/null || true
+rm -rf "\${HOME}/Library/Application Support/Clearcore" 2>/dev/null || true
+rm -rf "\${HOME}/Library/Preferences/com.clearcore.*" 2>/dev/null || true
+
+echo "✅ Clearcore uninstalled successfully from macOS."
+`;
+  const uninstallPath = path.join(bundleDir, 'uninstall.sh');
+  fs.writeFileSync(uninstallPath, uninstallSh, 'utf8');
+  fs.chmodSync(uninstallPath, 0o755);
 
   const tarName = `${bundleName}.tar.gz`;
   const tarPath = path.join(releaseDir, tarName);
@@ -372,6 +461,32 @@ echo "You can launch Clearcore from Launchpad or Applications."
   } catch (err) {
     console.warn('Could not create tar.gz archive:', err.message);
   }
+} else if (platform === 'win32') {
+  console.log('🪟 Creating Windows uninstallers and helper scripts...');
+  const uninstallBat = `@echo off
+setlocal
+set SCRIPT_DIR=%~dp0
+if exist "%SCRIPT_DIR%resources\\scripts\\uninstall-windows.ps1" (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%resources\\scripts\\uninstall-windows.ps1"
+) else if exist "%SCRIPT_DIR%uninstall.ps1" (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%uninstall.ps1"
+)
+pause
+`;
+  fs.writeFileSync(path.join(bundleDir, 'uninstall.bat'), uninstallBat, 'utf8');
+
+  const uninstallPs1 = `# Clearcore Windows Uninstaller
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PsScript = Join-Path $ScriptDir "resources\\scripts\\uninstall-windows.ps1"
+if (Test-Path $PsScript) {
+    & $PsScript
+} else {
+    Write-Host "Encerrando Clearcore..." -ForegroundColor Yellow
+    Stop-Process -Name "Clearcore" -Force -ErrorAction SilentlyContinue
+    Stop-Process -Name "realtime-noise-service" -Force -ErrorAction SilentlyContinue
+}
+`;
+  fs.writeFileSync(path.join(bundleDir, 'uninstall.ps1'), uninstallPs1, 'utf8');
 }
 
 console.log('=====================================================');

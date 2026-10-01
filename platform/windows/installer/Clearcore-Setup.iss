@@ -55,4 +55,5 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--tray"; Description: "{cm:Launc
 [UninstallRun]
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName} /T"; Flags: runhidden
 Filename: "taskkill.exe"; Parameters: "/F /IM realtime-noise-service.exe /T"; Flags: runhidden
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\resources\scripts\uninstall-windows.ps1"""; Flags: runhidden
 Filename: "pnputil.exe"; Parameters: "/delete-driver ""{app}\resources\driver\RealtimeNoise.inf"" /uninstall /force"; Flags: runhidden

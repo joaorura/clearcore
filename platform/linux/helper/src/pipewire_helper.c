@@ -10,6 +10,8 @@
 #include <sys/mman.h>
 #include <errno.h>
 #include <dlfcn.h>
+#include <libgen.h>
+#include <limits.h>
 
 static pipewire_helper_context_t *g_ctx = NULL;
 static int g_lock_fd = -1;
@@ -397,17 +399,56 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_process_fn = NULL;
     ctx->neural_free_fn = NULL;
 
+    char exe_buf[PATH_MAX] = {0};
+    char exe_dir[PATH_MAX] = {0};
+    char lib_same_dir[PATH_MAX + 128] = {0};
+    char lib_parent_dir[PATH_MAX + 128] = {0};
+    char lib_grandparent_dir[PATH_MAX + 128] = {0};
+    char repo_same_dir[PATH_MAX + 128] = {0};
+    char repo_grandparent_dir[PATH_MAX + 128] = {0};
+
+    ssize_t len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    if (len > 0) {
+        exe_buf[len] = '\0';
+        char *d = dirname(exe_buf);
+        if (d) {
+            snprintf(exe_dir, sizeof(exe_dir), "%s", d);
+            snprintf(lib_same_dir, sizeof(lib_same_dir), "%s/libclearcore_filter.so", exe_dir);
+            snprintf(lib_parent_dir, sizeof(lib_parent_dir), "%s/../libclearcore_filter.so", exe_dir);
+            snprintf(lib_grandparent_dir, sizeof(lib_grandparent_dir), "%s/../../libclearcore_filter.so", exe_dir);
+            snprintf(repo_same_dir, sizeof(repo_same_dir), "%s", exe_dir);
+            snprintf(repo_grandparent_dir, sizeof(repo_grandparent_dir), "%s/../..", exe_dir);
+        }
+    }
+
+    const char *env_lib = getenv("CLEARCORE_FILTER_LIB");
+    const char *home = getenv("HOME");
+    char user_lib[PATH_MAX] = {0};
+    char user_bin_lib[PATH_MAX] = {0};
+    if (home) {
+        snprintf(user_lib, sizeof(user_lib), "%s/.local/share/clearcore/libclearcore_filter.so", home);
+        snprintf(user_bin_lib, sizeof(user_bin_lib), "%s/.local/share/clearcore/resources/bin/libclearcore_filter.so", home);
+    }
+
     const char *lib_candidates[] = {
+        env_lib ? env_lib : "",
+        lib_same_dir[0] ? lib_same_dir : "",
+        lib_parent_dir[0] ? lib_parent_dir : "",
+        lib_grandparent_dir[0] ? lib_grandparent_dir : "",
         "platform/linux/helper/lib/libclearcore_filter.so",
         "./libclearcore_filter.so",
-        "/home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/lib/libclearcore_filter.so",
-        "/home/joaorura/orca/workspaces/clearcore/hippocamp/target/release/libclearcore_filter.so",
+        "target/release/libclearcore_filter.so",
+        "/opt/clearcore/libclearcore_filter.so",
+        "/opt/clearcore/resources/bin/libclearcore_filter.so",
+        user_lib[0] ? user_lib : "",
+        user_bin_lib[0] ? user_bin_lib : "",
         "libclearcore_filter.so",
         NULL
     };
 
     void *lib = NULL;
     for (int i = 0; lib_candidates[i] != NULL; i++) {
+        if (lib_candidates[i][0] == '\0') continue;
         lib = dlopen(lib_candidates[i], RTLD_NOW | RTLD_GLOBAL);
         if (lib) {
             fprintf(stderr, "[pipewire_helper] Loaded neural filter library: %s\n", lib_candidates[i]);
@@ -434,15 +475,26 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
         return;
     }
 
+    const char *env_repo = getenv("CLEARCORE_REPO_ROOT");
+    char user_share[PATH_MAX] = {0};
+    if (home) {
+        snprintf(user_share, sizeof(user_share), "%s/.local/share/clearcore", home);
+    }
+
     const char *repo_candidates[] = {
+        env_repo ? env_repo : "",
+        repo_grandparent_dir[0] ? repo_grandparent_dir : "",
+        repo_same_dir[0] ? repo_same_dir : "",
+        "/opt/clearcore",
+        user_share[0] ? user_share : "",
         ".",
-        "/home/joaorura/orca/workspaces/clearcore/hippocamp",
         "..",
         NULL
     };
 
     void *filter = NULL;
     for (int i = 0; repo_candidates[i] != NULL; i++) {
+        if (repo_candidates[i][0] == '\0') continue;
         filter = create_fn(repo_candidates[i]);
         if (filter) {
             fprintf(stderr, "[pipewire_helper] Initialized DeepFilterNet3 neural model from: %s\n", repo_candidates[i]);
