@@ -3,6 +3,7 @@ set -uo pipefail
 
 echo "Stopping Clearcore Realtime Noise Daemon..."
 
+systemctl --user stop realtime-noise-helper.service 2>/dev/null || true
 systemctl --user stop realtime-noise.service 2>/dev/null || true
 pkill -f "realtime-noise-service --run" || true
 pkill -f "pipewire_helper" || true

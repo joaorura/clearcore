@@ -12,6 +12,19 @@ interface EngineStatus {
   total_crashes: number;
 }
 
+export interface VirtualMicStatus {
+  present: boolean;
+  node_id: number | string | null;
+  node_name: string;
+  node_description: string;
+  is_default: boolean;
+  format?: string;
+  rate?: number;
+  channels?: number;
+  quantum?: number;
+  error?: string;
+}
+
 interface ClearcoreApi {
   getStatus: () => Promise<EngineStatus>;
   setMode: (mode: string) => Promise<unknown>;
@@ -21,7 +34,11 @@ interface ClearcoreApi {
   setAutostart: (enabled: boolean) => Promise<boolean>;
   minimizeToTray: () => Promise<void>;
   quitApp: () => Promise<void>;
+  getVirtualMicStatus: () => Promise<VirtualMicStatus>;
+  recreateVirtualMic: () => Promise<VirtualMicStatus>;
+  setDefaultVirtualMic: () => Promise<VirtualMicStatus>;
   onStatusUpdate: (cb: (data: { mode?: DenoiseMode }) => void) => () => void;
+  onVirtualMicUpdate: (cb: (data: VirtualMicStatus) => void) => () => void;
 }
 
 declare global {
@@ -44,6 +61,9 @@ async function invokeBridge<T>(cmd: string, args?: Record<string, unknown>): Pro
     if (cmd === 'set_autostart') return (await api.setAutostart(Boolean(args?.enabled))) as unknown as T;
     if (cmd === 'minimize_to_tray') return (await api.minimizeToTray()) as unknown as T;
     if (cmd === 'quit_app') return (await api.quitApp()) as unknown as T;
+    if (cmd === 'get_virtual_mic_status') return (await api.getVirtualMicStatus()) as unknown as T;
+    if (cmd === 'recreate_virtual_mic') return (await api.recreateVirtualMic()) as unknown as T;
+    if (cmd === 'set_default_virtual_mic') return (await api.setDefaultVirtualMic()) as unknown as T;
   }
   if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -62,6 +82,10 @@ export const App: React.FC = () => {
     crash_count_15m: 0,
     total_crashes: 0,
   });
+  const [virtualMic, setVirtualMic] = useState<VirtualMicStatus | null>(null);
+  const [isCheckingMic, setIsCheckingMic] = useState<boolean>(false);
+  const [micActionMessage, setMicActionMessage] = useState<string | null>(null);
+
   const [diagnostics, setDiagnostics] = useState<DiagnosticsData | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -79,6 +103,17 @@ export const App: React.FC = () => {
     } catch (err) {
       setIsConnected(false);
       setErrorMessage(`Daemon unreachable: ${String(err)}`);
+    }
+  };
+
+  const fetchVirtualMic = async () => {
+    try {
+      const res = await invokeBridge<VirtualMicStatus>('get_virtual_mic_status');
+      if (res) {
+        setVirtualMic(res);
+      }
+    } catch {
+      // Fallback
     }
   };
 
@@ -104,6 +139,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     fetchStatus();
+    fetchVirtualMic();
     fetchDiagnostics();
     fetchAutostart();
 
@@ -117,13 +153,22 @@ export const App: React.FC = () => {
       });
     }
 
+    let cleanupMicListener: (() => void) | undefined;
+    if (window.clearcoreApi?.onVirtualMicUpdate) {
+      cleanupMicListener = window.clearcoreApi.onVirtualMicUpdate((mic) => {
+        setVirtualMic(mic);
+      });
+    }
+
     const interval = setInterval(() => {
       fetchStatus();
+      fetchVirtualMic();
     }, 2500);
 
     return () => {
       clearInterval(interval);
       if (cleanupTrayListener) cleanupTrayListener();
+      if (cleanupMicListener) cleanupMicListener();
     };
   }, []);
 
@@ -143,6 +188,44 @@ export const App: React.FC = () => {
       await fetchDiagnostics();
     } catch (err) {
       setErrorMessage(`Restart generation failed: ${String(err)}`);
+    }
+  };
+
+  const handleRecreateVirtualMic = async () => {
+    setIsCheckingMic(true);
+    setMicActionMessage('Verificando / Recriando microfone virtual no PipeWire...');
+    try {
+      const res = await invokeBridge<VirtualMicStatus>('recreate_virtual_mic');
+      setVirtualMic(res);
+      if (res.present) {
+        setMicActionMessage(`Microfone virtual criado e verificado com sucesso! (Node ID: ${res.node_id ?? 'Ativo'})`);
+      } else {
+        setMicActionMessage(`Não foi possível registrar o microfone virtual: ${res.error ?? 'Erro desconhecido'}`);
+      }
+    } catch (err) {
+      setMicActionMessage(`Erro ao recriar microfone: ${String(err)}`);
+    } finally {
+      setIsCheckingMic(false);
+      setTimeout(() => setMicActionMessage(null), 5000);
+    }
+  };
+
+  const handleSetDefaultVirtualMic = async () => {
+    setIsCheckingMic(true);
+    setMicActionMessage('Definindo microfone virtual como padrão do sistema...');
+    try {
+      const res = await invokeBridge<VirtualMicStatus>('set_default_virtual_mic');
+      setVirtualMic(res);
+      if (res.is_default) {
+        setMicActionMessage('Microfone virtual agora é o microfone padrão do sistema!');
+      } else {
+        setMicActionMessage('Tentativa enviada. Atualizando dispositivos do sistema...');
+      }
+    } catch (err) {
+      setMicActionMessage(`Erro ao definir padrão: ${String(err)}`);
+    } finally {
+      setIsCheckingMic(false);
+      setTimeout(() => setMicActionMessage(null), 5000);
     }
   };
 
@@ -194,6 +277,13 @@ export const App: React.FC = () => {
         </div>
       )}
 
+      {micActionMessage && (
+        <div style={{ padding: '10px 14px', background: '#142a1f', border: '1px solid #166534', borderRadius: 6, marginBottom: 16, color: '#86efac', fontSize: '0.9rem' }}>
+          {micActionMessage}
+        </div>
+      )}
+
+      {/* Modo de Operação */}
       <div className="card">
         <h2 className="card-title">Modo de Operação de Supressão</h2>
         <div className="mode-group">
@@ -218,6 +308,70 @@ export const App: React.FC = () => {
         </div>
       </div>
 
+      {/* Microfone Virtual PipeWire */}
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <h2 className="card-title" style={{ margin: 0 }}>Microfone Virtual do Sistema (PipeWire)</h2>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
+              Ponto de captura exposto para Discord, Teams, Zoom, OBS e navegadores.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="action-btn"
+              disabled={isCheckingMic}
+              onClick={handleRecreateVirtualMic}
+              title="Verifica o grafo do PipeWire e recria o nó caso não tenha sido criado"
+            >
+              {isCheckingMic ? '⏳ Verificando...' : '🔄 Verificar / Recriar'}
+            </button>
+            {virtualMic?.present && (
+              <button
+                className="action-btn"
+                disabled={virtualMic.is_default || isCheckingMic}
+                onClick={handleSetDefaultVirtualMic}
+                style={{
+                  borderColor: virtualMic.is_default ? '#166534' : 'var(--border-color)',
+                  color: virtualMic.is_default ? '#4ade80' : 'var(--text-main)',
+                }}
+              >
+                {virtualMic.is_default ? '✓ Padrão do Sistema' : '🎙 Tornar Padrão'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid-cols-2">
+          <div className="metric-box">
+            <div className="metric-label">Estado do Nó PipeWire</div>
+            <div className="metric-value status-badge" style={{ color: virtualMic?.present ? '#4ade80' : '#f87171' }}>
+              {virtualMic?.present ? `🟢 Ativo (Node ID: ${virtualMic.node_id ?? 'OK'})` : '🔴 Não Criado no PipeWire'}
+            </div>
+          </div>
+          <div className="metric-box">
+            <div className="metric-label">Padrão do Sistema / Dispositivo</div>
+            <div className="metric-value" style={{ color: virtualMic?.is_default ? '#4ade80' : 'var(--text-muted)' }}>
+              {virtualMic?.is_default ? 'Sim (Dispositivo Primário)' : 'Não (Dispositivo Secundário)'}
+            </div>
+          </div>
+        </div>
+
+        {virtualMic?.present ? (
+          <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+            <span><strong>Nome:</strong> {virtualMic.node_name}</span>
+            <span><strong>Formato:</strong> {virtualMic.format || 'F32LE'} @ {virtualMic.rate || 48000}Hz</span>
+            <span><strong>Canais:</strong> {virtualMic.channels || 1} (Mono)</span>
+            <span><strong>Latência do Quantum:</strong> {virtualMic.quantum || 480} amostras (10ms)</span>
+          </div>
+        ) : (
+          <div style={{ marginTop: 12, padding: '10px 14px', background: '#451a1a', border: '1px solid #7f1d1d', borderRadius: 6, color: '#fca5a5', fontSize: '0.85rem' }}>
+            ⚠️ O microfone virtual não foi detectado no PipeWire. Clique em <strong>"Verificar / Recriar"</strong> acima para criar e registrar o nó automaticamente.
+          </div>
+        )}
+      </div>
+
+      {/* Supervisor Status */}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h2 className="card-title" style={{ margin: 0 }}>Status do Supervisor & Motor de Áudio</h2>
@@ -246,6 +400,7 @@ export const App: React.FC = () => {
         </div>
       </div>
 
+      {/* Inicialização e Bandeja */}
       <div className="card">
         <h2 className="card-title">Configurações de Inicialização e Bandeja</h2>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-secondary)', padding: '12px 16px', borderRadius: 6, border: '1px solid var(--border-color)' }}>
@@ -270,7 +425,7 @@ export const App: React.FC = () => {
           </label>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 10 }}>
-          💡 Dica: Ao fechar ou minimizar esta janela, o Clearcore continuará ativo na bandeja do sistema. Clique com o botão direito no ícone da bandeja para trocar de modo instantaneamente ou sair.
+          💡 Dica: Ao fechar ou minimizar esta janela, o Clearcore continuará ativo na bandeja do sistema. Clique com o botão direito no ícone da bandeja para trocar de modo instantaneamente, verificar o microfone ou sair.
         </p>
       </div>
 
@@ -278,10 +433,12 @@ export const App: React.FC = () => {
         diagnostics={diagnostics}
         onRefresh={() => {
           fetchStatus();
+          fetchVirtualMic();
           fetchDiagnostics();
         }}
       />
     </div>
   );
 };
+
 export default App;

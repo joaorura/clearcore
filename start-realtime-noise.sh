@@ -37,7 +37,7 @@ if systemctl --user is-enabled realtime-noise.service >/dev/null 2>&1 || [[ -f "
     sleep 0.5
     if systemctl --user is-active --quiet realtime-noise.service; then
         echo "Status: RUNNING (systemd managed)"
-        echo "Virtual microphone node is ready in PipeWire/WirePlumber."
+        "${SCRIPT_DIR}/scripts/check-virtual-mic.sh"
         echo "To stop: ./stop-realtime-noise.sh"
         exit 0
     fi
@@ -55,7 +55,7 @@ sleep 1
 
 if kill -0 "${SERVICE_PID}" 2>/dev/null; then
     echo "Status: RUNNING"
-    echo "Virtual microphone node is ready in PipeWire/WirePlumber."
+    "${SCRIPT_DIR}/scripts/check-virtual-mic.sh"
     echo "To stop: ./stop-realtime-noise.sh"
 else
     echo "Status: FAILED TO START. Inspecting logs:"

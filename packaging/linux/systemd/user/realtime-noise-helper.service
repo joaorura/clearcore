@@ -1,0 +1,16 @@
+[Unit]
+Description=Realtime Noise PipeWire Virtual Microphone Helper
+Documentation=https://github.com/clearcore/hippocamp
+After=pipewire.service wireplumber.service sound.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/pipewire_helper
+Restart=always
+RestartSec=1s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
