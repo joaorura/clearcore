@@ -113,8 +113,19 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
         }
       }
 
+      const baseConstraints: MediaTrackConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      };
+
+      const finalAudioConstraints: MediaTrackConstraints =
+        typeof audioConstraint === 'boolean'
+          ? baseConstraints
+          : { ...(audioConstraint as MediaTrackConstraints), ...baseConstraints };
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraint,
+        audio: finalAudioConstraints,
         video: false,
       });
 
