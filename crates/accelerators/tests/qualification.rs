@@ -81,7 +81,7 @@ fn qualification_enforces_contracts_adherence() {
     let mut coreml = CoreMlBackend::new_mock();
 
     // Check descriptors
-    assert_eq!(cuda.descriptor().backend, "cuda");
+    assert_eq!(cuda.descriptor().backend, "tensorrt");
     assert_eq!(openvino.descriptor().backend, "openvino");
     assert_eq!(coreml.descriptor().backend, "coreml");
 

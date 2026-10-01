@@ -81,8 +81,8 @@ fn auto_uses_warmed_tract_when_plugin_fails_quality_gate() {
 
 #[test]
 fn auto_selects_accelerator_when_quality_gate_passes() {
-    let passing_cuda_report = CalibrationReport {
-        backend_name: "cuda".to_owned(),
+    let passing_trt_report = CalibrationReport {
+        backend_name: "tensorrt".to_owned(),
         duration_seconds: 300.0,
         total_frames: 30_000,
         p50_latency_ms: 0.50,
@@ -95,9 +95,9 @@ fn auto_selects_accelerator_when_quality_gate_passes() {
         reason: None,
     };
 
-    let selection = select_auto(passing_cuda_report);
-    assert_eq!(selection, BackendSelection::Cuda);
-    assert_eq!(selection.name(), "cuda");
+    let selection = select_auto(passing_trt_report);
+    assert_eq!(selection, BackendSelection::TensorRt);
+    assert_eq!(selection.name(), "tensorrt");
     assert!(!selection.is_tract_cpu());
 }
 
@@ -579,8 +579,8 @@ fn intel_cpu_prefers_openvino_over_onnx_tract() {
 fn directml_is_below_proprietary_gpu_runtimes_but_above_npu() {
     let policy = AutoPolicy::new();
 
-    let cuda_report = CalibrationReport {
-        backend_name: "cuda".to_owned(),
+    let trt_report = CalibrationReport {
+        backend_name: "tensorrt".to_owned(),
         duration_seconds: 300.0,
         total_frames: 30_000,
         p50_latency_ms: 0.50,
@@ -649,10 +649,10 @@ fn directml_is_below_proprietary_gpu_runtimes_but_above_npu() {
         reason: None,
     };
 
-    // 1. Proprietary GPU runtime (CUDA score 95) is preferred over DirectML (score 90)
-    let candidates_with_cuda = [cuda_report, dml_dgpu.clone(), amd_npu.clone()];
-    let sel_cuda = policy.resolve_candidates(BackendRequest::Auto, &candidates_with_cuda);
-    assert_eq!(sel_cuda, BackendSelection::Cuda);
+    // 1. Proprietary GPU runtime (TensorRT score 100) is preferred over DirectML (score 90)
+    let candidates_with_trt = [trt_report, dml_dgpu.clone(), amd_npu.clone()];
+    let sel_trt = policy.resolve_candidates(BackendRequest::Auto, &candidates_with_trt);
+    assert_eq!(sel_trt, BackendSelection::TensorRt);
 
     // 2. When proprietary GPU runtimes are absent, DirectML (score 90) takes top priority over NPU (score 80), iGPU (score 70), and CPU (score 50)
     let candidates_without_cuda = [dml_dgpu, amd_npu, intel_igpu, tract_cpu];

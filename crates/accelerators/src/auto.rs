@@ -73,7 +73,6 @@ pub enum BackendSelection {
     #[default]
     TractCpu,
     TensorRt,
-    Cuda,
     DirectMl,
     Vulkan,
     RyzenAiNpu,
@@ -92,7 +91,6 @@ impl BackendSelection {
         match self {
             Self::TractCpu => "tract",
             Self::TensorRt => "tensorrt",
-            Self::Cuda => "cuda",
             Self::DirectMl => "directml",
             Self::Vulkan => "vulkan",
             Self::RyzenAiNpu => "ryzenai-npu",
@@ -109,7 +107,7 @@ impl BackendSelection {
     #[must_use]
     pub const fn tier(&self) -> DeviceTier {
         match self {
-            Self::TensorRt | Self::Cuda | Self::DirectMl | Self::Vulkan => DeviceTier::DedicatedGpu,
+            Self::TensorRt | Self::DirectMl | Self::Vulkan => DeviceTier::DedicatedGpu,
             Self::RyzenAiNpu | Self::RyzenAi | Self::OpenVinoNpu | Self::CoreMl => DeviceTier::Npu,
             Self::RyzenAiGpu | Self::OpenVinoGpu => DeviceTier::IntegratedGpu,
             Self::OpenVinoCpu | Self::TractCpu | Self::OpenVino => DeviceTier::Cpu,
@@ -123,15 +121,12 @@ impl BackendSelection {
 
     #[must_use]
     pub const fn is_nvidia(&self) -> bool {
-        matches!(self, Self::TensorRt | Self::Cuda)
+        matches!(self, Self::TensorRt)
     }
 
     #[must_use]
     pub const fn is_dedicated_gpu(&self) -> bool {
-        matches!(
-            self,
-            Self::TensorRt | Self::Cuda | Self::DirectMl | Self::Vulkan
-        )
+        matches!(self, Self::TensorRt | Self::DirectMl | Self::Vulkan)
     }
 
     #[must_use]
@@ -164,12 +159,7 @@ impl BackendSelection {
     pub const fn is_gpu(&self) -> bool {
         matches!(
             self,
-            Self::TensorRt
-                | Self::Cuda
-                | Self::DirectMl
-                | Self::Vulkan
-                | Self::OpenVinoGpu
-                | Self::RyzenAiGpu
+            Self::TensorRt | Self::DirectMl | Self::Vulkan | Self::OpenVinoGpu | Self::RyzenAiGpu
         )
     }
 }
@@ -213,9 +203,8 @@ impl CalibrationReport {
 #[must_use]
 pub fn backend_priority_score(backend_name: &str) -> u32 {
     match backend_name.to_ascii_lowercase().as_str() {
-        // Tier 1: Dedicated GPU - Proprietary / Vendor-Specific runtimes (NVIDIA TensorRT, CUDA)
-        "tensorrt" => 100,
-        "cuda" | "nvidia" => 95,
+        // Tier 1: Dedicated GPU - Proprietary / Vendor-Specific runtimes (NVIDIA TensorRT)
+        "tensorrt" | "cuda" | "nvidia" => 100,
         // Tier 1: Dedicated GPU - General / Universal runtimes (DirectML below proprietary runtimes, Vulkan)
         "directml" | "directml-dgpu" | "dx12" => 90,
         "vulkan" | "vulkan-dgpu" => 85,
@@ -239,8 +228,7 @@ pub fn backend_priority_score(backend_name: &str) -> u32 {
 #[must_use]
 pub fn backend_selection_from_name(backend_name: &str) -> BackendSelection {
     match backend_name.to_ascii_lowercase().as_str() {
-        "tensorrt" => BackendSelection::TensorRt,
-        "cuda" | "nvidia" => BackendSelection::Cuda,
+        "tensorrt" | "cuda" | "nvidia" => BackendSelection::TensorRt,
         "vulkan" => BackendSelection::Vulkan,
         "directml" | "dx12" => BackendSelection::DirectMl,
         "ryzenai-npu" | "ryzen-ai" | "ryzenai" | "amd-npu" | "vitisai" | "xdna" => {
@@ -440,7 +428,7 @@ impl AutoPolicy {
                     backend_selection_from_name(&r.backend_name)
                 }),
             BackendRequest::TractCpu => BackendSelection::TractCpu,
-            BackendRequest::TensorRt => candidates
+            BackendRequest::TensorRt | BackendRequest::Cuda => candidates
                 .iter()
                 .find(|r| {
                     r.is_promoted()
@@ -448,10 +436,6 @@ impl AutoPolicy {
                             || r.backend_name.eq_ignore_ascii_case("cuda"))
                 })
                 .map_or(BackendSelection::TractCpu, |_| BackendSelection::TensorRt),
-            BackendRequest::Cuda => candidates
-                .iter()
-                .find(|r| r.is_promoted() && r.backend_name.eq_ignore_ascii_case("cuda"))
-                .map_or(BackendSelection::TractCpu, |_| BackendSelection::Cuda),
             BackendRequest::DirectMl => candidates
                 .iter()
                 .find(|r| r.is_promoted() && r.backend_name.eq_ignore_ascii_case("directml"))

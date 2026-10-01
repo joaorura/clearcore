@@ -14,8 +14,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use realtime_noise_accelerators::{
-    CalibrationReport, CoreMlBackend, CudaBackend, OpenVINOBackend, PromotionDecision,
-    QUALIFICATION_MAX_DEADLINE_MS, QUALIFICATION_MAX_P99_MS, RyzenAiBackend, evaluate_calibration,
+    CalibrationReport, CoreMlBackend, OpenVINOBackend, PromotionDecision,
+    QUALIFICATION_MAX_DEADLINE_MS, QUALIFICATION_MAX_P99_MS, RyzenAiBackend, TensorRtBackend,
+    evaluate_calibration,
 };
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_model::InferenceBackend;
@@ -124,7 +125,7 @@ fn run_calibration(cli: &CliArgs) -> Result<CalibrationReport, String> {
 
     let mut backend_instance: Box<dyn InferenceBackend> = match cli.backend.to_lowercase().as_str()
     {
-        "cuda" | "tensorrt" => Box::new(CudaBackend::new_mock()),
+        "cuda" | "tensorrt" => Box::new(TensorRtBackend::new_mock()),
         "ryzenai" | "ryzen-ai" | "vitisai" | "xdna" | "amd-npu" => {
             Box::new(RyzenAiBackend::new_mock_npu())
         }
