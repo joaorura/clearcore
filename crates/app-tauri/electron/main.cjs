@@ -347,6 +347,7 @@ async function verifyAndAutoCreateVirtualMicOnStartup() {
       );
     }
   }
+  writeClearcoreSharedState({ mode: currentMode });
   updateTrayMenu();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('virtual-mic-update', currentVirtualMicStatus);
@@ -424,6 +425,36 @@ function getTrayIconPath(mode) {
   return candidates[2];
 }
 
+// Shared Memory state synchronization with native helper
+function writeClearcoreSharedState(updates = {}) {
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || '/tmp';
+  const statePath = path.join(runtimeDir, 'clearcore_state');
+  try {
+    let buf = Buffer.alloc(16, 0);
+    if (fs.existsSync(statePath)) {
+      try {
+        const existing = fs.readFileSync(statePath);
+        if (existing.length >= 16) {
+          existing.copy(buf);
+        }
+      } catch {}
+    }
+    if (updates.mode !== undefined) {
+      const modeVal = updates.mode === 'Bypass' ? 1 : updates.mode === 'Mute' ? 2 : 0;
+      buf.writeUInt32LE(modeVal, 0);
+    }
+    if (updates.targetNodeId !== undefined) {
+      buf.writeUInt32LE(Number(updates.targetNodeId) || 0, 4);
+    }
+    if (updates.generation !== undefined) {
+      buf.writeUInt32LE(Number(updates.generation) || 0, 8);
+    }
+    fs.writeFileSync(statePath, buf);
+  } catch (err) {
+    console.warn('[Clearcore] Could not update shared state:', err.message);
+  }
+}
+
 function updateTrayMenu() {
   if (!tray) return;
 
@@ -496,6 +527,7 @@ function updateTrayMenu() {
         try {
           await sendIpcRequest({ SetMode: 'Active' });
           currentMode = 'Active';
+          writeClearcoreSharedState({ mode: 'Active' });
           updateTrayMenu();
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('status-update', { mode: 'Active' });
@@ -513,6 +545,7 @@ function updateTrayMenu() {
         try {
           await sendIpcRequest({ SetMode: 'Bypass' });
           currentMode = 'Bypass';
+          writeClearcoreSharedState({ mode: 'Bypass' });
           updateTrayMenu();
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('status-update', { mode: 'Bypass' });
@@ -530,6 +563,7 @@ function updateTrayMenu() {
         try {
           await sendIpcRequest({ SetMode: 'Mute' });
           currentMode = 'Mute';
+          writeClearcoreSharedState({ mode: 'Mute' });
           updateTrayMenu();
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('status-update', { mode: 'Mute' });
@@ -709,40 +743,48 @@ function enumerateSystemInputDevices() {
 
 function setSystemInputDevice(deviceId) {
   selectedInputDeviceId = deviceId;
+  writeClearcoreSharedState({ targetNodeId: deviceId });
+
   if (process.platform === 'linux' && /^\d+$/.test(deviceId)) {
     try {
-      let targetId = deviceId;
+      const targetId = deviceId;
+      let nodeName = '';
       try {
-        const inspectOut = require('child_process').execSync(`wpctl inspect ${deviceId}`, { encoding: 'utf8', timeout: 2000 });
-        if (inspectOut.includes('Audio/Source/Internal')) {
-          // Internal BlueZ/DSP stream node; find associated public Audio/Source node
-          const devMatch = inspectOut.match(/device\.id = "(\d+)"/);
-          if (devMatch) {
-            const statusOut = require('child_process').execSync('wpctl status', { encoding: 'utf8', timeout: 2000 });
-            const filterMatches = [...statusOut.matchAll(/(?:\*|\s)\s*(\d+)\.\s+([^\n]+)\[Audio\/Source\]/g)];
-            for (const fm of filterMatches) {
-              const candidateId = fm[1];
-              try {
-                const cInspect = require('child_process').execSync(`wpctl inspect ${candidateId}`, { encoding: 'utf8', timeout: 1000 });
-                if (cInspect.includes(`device.id = "${devMatch[1]}"`)) {
-                  targetId = candidateId;
-                  break;
-                }
-              } catch {
-                // Ignore inspection timeout
-              }
-            }
-          }
-        }
-      } catch {
-        // Fallback to direct deviceId
+        const nodeInfo = require('child_process').execSync(`pw-cli info ${targetId}`, { encoding: 'utf8', timeout: 2000 });
+        const nameMatch = nodeInfo.match(/node\.name = "([^"]+)"/);
+        if (nameMatch) nodeName = nameMatch[1];
+      } catch {}
+
+      const pwOut = require('child_process').execSync('pw-link -o', { encoding: 'utf8', timeout: 2000 });
+      const devLinks = require('child_process').execSync('pw-link -l', { encoding: 'utf8', timeout: 2000 });
+
+      // Unlink previous capture input links
+      const capMatches = [...devLinks.matchAll(/\|\<-\s*([^\s]+)/g)];
+      for (const cm of capMatches) {
+        const srcPort = cm[1];
+        try {
+          require('child_process').execSync(`pw-link -d "${srcPort}" "realtime-noise-capture:input_FL" 2>/dev/null || true`);
+          require('child_process').execSync(`pw-link -d "${srcPort}" "realtime-noise-capture:input_FR" 2>/dev/null || true`);
+          require('child_process').execSync(`pw-link -d "${srcPort}" "realtime-noise-capture:input_MONO" 2>/dev/null || true`);
+        } catch {}
       }
 
-      if (targetId) {
-        require('child_process').execSync(`wpctl set-default ${targetId}`, { timeout: 3000 });
+      // Link target ports
+      const outLines = pwOut.split('\n');
+      for (const port of outLines) {
+        const trimmed = port.trim();
+        if (!trimmed || trimmed.includes('realtime-noise')) continue;
+        if (nodeName && trimmed.startsWith(nodeName)) {
+          if (trimmed.endsWith('_FL') || trimmed.endsWith('_1')) {
+            try { require('child_process').execSync(`pw-link "${trimmed}" "realtime-noise-capture:input_FL" 2>/dev/null || pw-link "${trimmed}" "realtime-noise-capture:input_MONO" 2>/dev/null || true`); } catch {}
+          }
+          if (trimmed.endsWith('_FR') || trimmed.endsWith('_2')) {
+            try { require('child_process').execSync(`pw-link "${trimmed}" "realtime-noise-capture:input_FR" 2>/dev/null || true`); } catch {}
+          }
+        }
       }
-    } catch {
-      // Silently ignore if device cannot be set as OS default
+    } catch (err) {
+      console.warn('[Clearcore] Link update for input device:', err.message);
     }
   }
   updateTrayMenu();
@@ -932,6 +974,7 @@ ipcMain.handle('set_mode', async (_event, args) => {
   const mode = args && args.mode ? args.mode : 'Active';
   const res = await sendIpcRequest({ SetMode: mode });
   currentMode = mode;
+  writeClearcoreSharedState({ mode });
   updateTrayMenu();
   return res;
 });

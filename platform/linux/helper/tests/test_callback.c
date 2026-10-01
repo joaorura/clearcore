@@ -183,10 +183,41 @@ void test_process_callback_does_not_call_inference_or_allocate(void) {
     printf("[TEST] test_process_callback_does_not_call_inference_or_allocate passed.\n");
 }
 
+static void test_noise_suppressor_zero_allocations(void) {
+    printf("[TEST] Running test_noise_suppressor_zero_allocations...\n");
+
+    noise_suppressor_t ns;
+    noise_suppressor_init(&ns);
+
+    float in_samples[HOP_SAMPLES];
+    float out_samples[HOP_SAMPLES];
+    for (size_t i = 0; i < HOP_SAMPLES; ++i) {
+        in_samples[i] = sinf((float)i * 0.1f) * 0.5f;
+    }
+
+    /* Reset allocation counter to measure realtime section */
+    g_alloc_count = 0;
+
+    noise_suppressor_process(&ns, in_samples, out_samples, HOP_SAMPLES);
+
+    /* ASSERTION: Zero dynamic heap allocations in noise suppressor processing */
+    assert(g_alloc_count == 0);
+
+    /* Assert all output samples are finite and bounded */
+    for (size_t i = 0; i < HOP_SAMPLES; ++i) {
+        assert(!isnan(out_samples[i]));
+        assert(!isinf(out_samples[i]));
+        assert(out_samples[i] >= -1.0f && out_samples[i] <= 1.0f);
+    }
+
+    printf("[TEST] test_noise_suppressor_zero_allocations passed.\n");
+}
+
 int main(void) {
     test_format_converter();
     test_bounded_transport();
     test_process_callback_does_not_call_inference_or_allocate();
+    test_noise_suppressor_zero_allocations();
     printf("[SUCCESS] All native PipeWire helper tests passed!\n");
     return 0;
 }

@@ -12,6 +12,8 @@
 #include <spa/param/audio/raw.h>
 #include <spa/utils/result.h>
 
+#include "noise_suppressor.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,6 +42,31 @@ extern "C" {
 #define WIRE_VERSION_V1         1
 #define WIRE_PAYLOAD_LEN_BYTES  1920
 #define WIRE_ENVELOPE_SIZE      1960
+
+/* ClearCore Operating Modes */
+#define CLEARCORE_MODE_ACTIVE   0
+#define CLEARCORE_MODE_BYPASS   1
+#define CLEARCORE_MODE_MUTE     2
+#define CLEARCORE_STATE_FILE    "clearcore_state"
+
+/**
+ * Shared memory / control state for mode and physical mic binding.
+ */
+typedef struct clearcore_shared_state {
+    _Atomic uint32_t mode;             /* 0=Active, 1=Bypass, 2=Mute */
+    _Atomic uint32_t target_node_id;   /* Physical microphone node ID (0=auto) */
+    _Atomic uint64_t generation;       /* Engine generation counter */
+} clearcore_shared_state_t;
+
+/**
+ * Bounded accumulator for variable capture period sizes.
+ */
+#define ACCUMULATOR_MAX_SAMPLES 4096
+typedef struct sample_accumulator {
+    float buffer[ACCUMULATOR_MAX_SAMPLES];
+    size_t head;
+    size_t len;
+} sample_accumulator_t;
 
 /**
  * Binary wire envelope matching Rust WireFrameEnvelopeV1 exactly.
@@ -80,13 +107,28 @@ typedef struct pipewire_helper_context {
     struct pw_main_loop *loop;
     struct pw_context *context;
     struct pw_core *core;
-    struct pw_stream *stream;
+    struct pw_stream *stream;                  /* Output/source stream (realtime-noise-source) */
     struct spa_hook stream_listener;
+    struct pw_stream *capture_stream;          /* Input/capture stream (from physical microphone) */
+    struct spa_hook capture_listener;
     struct spa_hook core_listener;
+    struct pw_registry *registry;
+    struct spa_hook core_events_listener;
+    int sync_seq;
+    bool sync_done;
     bounded_transport_t transport;
+    sample_accumulator_t accumulator;
+    noise_suppressor_t suppressor;
+    clearcore_shared_state_t *shared_state;
+    int shared_state_fd;
+    uint32_t target_device_id;
+    char target_device_name[128];
     _Atomic bool running;
     _Atomic bool node_ready;
+    _Atomic bool capture_ready;
     uint32_t node_id;
+    uint32_t capture_node_id;
+    _Atomic uint64_t capture_sequence;
     _Atomic uint64_t process_count;
     _Atomic uint64_t alloc_violations;
     _Atomic uint64_t blocking_violations;
@@ -109,8 +151,9 @@ uint64_t transport_bridge_get_generation(const bounded_transport_t *transport);
 void transport_bridge_set_active(bounded_transport_t *transport, bool active);
 bool transport_bridge_is_active(const bounded_transport_t *transport);
 
-/* Realtime Processing Callback */
+/* Realtime Processing Callbacks */
 void transfer_bounded_buffers(void *userdata);
+void on_capture_process(void *userdata);
 
 /* PipeWire Helper Lifecycle */
 int pipewire_helper_init(pipewire_helper_context_t *ctx);

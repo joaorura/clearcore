@@ -70,7 +70,14 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
       let audioConstraint: boolean | MediaTrackConstraints = true;
 
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.enumerateDevices) {
-        const devs = await navigator.mediaDevices.enumerateDevices();
+        let devs = await navigator.mediaDevices.enumerateDevices();
+        if (devs.length > 0 && devs.every((d) => !d.label)) {
+          try {
+            const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+            probe.getTracks().forEach((t) => t.stop());
+            devs = await navigator.mediaDevices.enumerateDevices();
+          } catch {}
+        }
         const audioInputs = devs.filter((d) => d.kind === 'audioinput');
 
         if (testSource === 'filtered') {

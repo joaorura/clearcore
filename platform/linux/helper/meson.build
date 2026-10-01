@@ -19,7 +19,8 @@ inc_dir = include_directories('src')
 helper_sources = files(
     'src/pipewire_helper.c',
     'src/transport_bridge.c',
-    'src/format_converter.c'
+    'src/format_converter.c',
+    'src/noise_suppressor.c'
 )
 
 executable(
@@ -33,7 +34,8 @@ executable(
 test_sources = files(
     'tests/test_callback.c',
     'src/transport_bridge.c',
-    'src/format_converter.c'
+    'src/format_converter.c',
+    'src/noise_suppressor.c'
 )
 
 test_callback_contract = executable(

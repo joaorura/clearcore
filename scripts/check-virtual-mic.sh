@@ -144,23 +144,56 @@ recreate_node() {
                 "${SCRIPT_DIR}/platform/linux/helper/src/pipewire_helper.c" \
                 "${SCRIPT_DIR}/platform/linux/helper/src/transport_bridge.c" \
                 "${SCRIPT_DIR}/platform/linux/helper/src/format_converter.c" \
-                $(pkg-config --cflags --libs libpipewire-0.3) \
-                -o "${HELPER_BIN}" 2>/dev/null || true
+                "${SCRIPT_DIR}/platform/linux/helper/src/noise_suppressor.c" \
+                $(pkg-config --cflags --libs libpipewire-0.3 2>/dev/null || echo "-I/home/joaorura/.local/usr/include/pipewire-0.3 -I/home/joaorura/.local/usr/include/spa-0.2 -L/home/joaorura/.local/usr/lib64 -lpipewire-0.3") \
+                -lm -o "${HELPER_BIN}" 2>/dev/null || true
         fi
+    fi
+
+    # Detectar microfone físico para passar como alvo explícito
+    local target_arg=""
+    local phys_id=""
+    if command -v wpctl >/dev/null 2>&1; then
+        phys_id=$(wpctl status 2>/dev/null | awk '/Sources:/,/Filters:|Streams:/' | grep -v 'Realtime Noise' | grep -E '^\s*(\*|\s)\s*[0-9]+\.' | head -n1 | grep -o -E '[0-9]+' | head -n1)
+    fi
+    if [[ -z "${phys_id}" ]] && command -v pw-cli >/dev/null 2>&1; then
+        phys_id=$(pw-cli list-objects Node 2>/dev/null | awk '
+            $1 == "id" { id = $2; sub(/,/, "", id) }
+            $0 ~ "media.class = \"Audio/Source\"" { is_source = 1 }
+            $0 ~ "node.name = " { name = $3 }
+            is_source && name != "" {
+                if (name !~ /realtime-noise/) { print id; exit }
+                is_source = 0; name = ""
+            }
+        ')
+    fi
+    if [[ -n "${phys_id}" ]]; then
+        target_arg="--target ${phys_id}"
     fi
 
     # Iniciar pipewire_helper via systemd user unit ou nohup
     if command -v systemd-run >/dev/null 2>&1; then
         systemd-run --user --unit=realtime-noise-helper \
-            "${HELPER_BIN}" >/dev/null 2>&1 || true
+            "${HELPER_BIN}" ${target_arg} >/dev/null 2>&1 || true
     else
-        nohup "${HELPER_BIN}" > /tmp/realtime-noise-helper.log 2>&1 & disown $!
+        nohup "${HELPER_BIN}" ${target_arg} > /tmp/realtime-noise-helper.log 2>&1 & disown $!
     fi
 
     # Polling até 3 segundos
     for _ in {1..15}; do
         sleep 0.2
         if is_node_present; then
+            # Garantir link saudável sem autoconexão circular
+            if command -v pw-link >/dev/null 2>&1; then
+                pw-link -d "${NODE_NAME}:capture_MONO" "realtime-noise-capture:input_MONO" >/dev/null 2>&1 || true
+                if ! pw-link -l 2>/dev/null | grep -A1 "realtime-noise-capture:input_MONO" | grep -q "|<-"; then
+                    local phys_source_port
+                    phys_source_port=$(pw-link -o 2>/dev/null | grep -v "${NODE_NAME}" | grep -E 'alsa_input.*capture_F[L|R]|capture_1' | head -n1)
+                    if [[ -n "${phys_source_port}" ]]; then
+                        pw-link "${phys_source_port}" "realtime-noise-capture:input_MONO" >/dev/null 2>&1 || true
+                    fi
+                fi
+            fi
             return 0
         fi
     done

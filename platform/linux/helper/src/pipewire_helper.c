@@ -7,10 +7,238 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/mman.h>
 #include <errno.h>
 
 static pipewire_helper_context_t *g_ctx = NULL;
 static int g_lock_fd = -1;
+
+/* Sample Accumulator Helpers (Bounded, Zero Allocations) */
+static void accumulator_init(sample_accumulator_t *acc) {
+    if (!acc) return;
+    memset(acc, 0, sizeof(*acc));
+}
+
+static void accumulator_push(sample_accumulator_t *acc, const float *samples, size_t n) {
+    if (!acc || !samples || n == 0) return;
+
+    /* If accumulator would overflow 4096 samples, drop stale head samples to maintain low latency */
+    if (acc->len + n > ACCUMULATOR_MAX_SAMPLES) {
+        size_t excess = (acc->len + n) - ACCUMULATOR_MAX_SAMPLES;
+        if (excess > acc->len) excess = acc->len;
+        acc->head = (acc->head + excess) % ACCUMULATOR_MAX_SAMPLES;
+        acc->len -= excess;
+    }
+
+    size_t to_copy = n;
+    if (to_copy > (ACCUMULATOR_MAX_SAMPLES - acc->len)) {
+        to_copy = ACCUMULATOR_MAX_SAMPLES - acc->len;
+    }
+
+    for (size_t i = 0; i < to_copy; ++i) {
+        size_t idx = (acc->head + acc->len) % ACCUMULATOR_MAX_SAMPLES;
+        acc->buffer[idx] = samples[i];
+        acc->len++;
+    }
+}
+
+static bool accumulator_pop_frame(sample_accumulator_t *acc, float *dst) {
+    if (!acc || !dst || acc->len < HOP_SAMPLES) {
+        return false;
+    }
+
+    for (size_t i = 0; i < HOP_SAMPLES; ++i) {
+        size_t idx = (acc->head + i) % ACCUMULATOR_MAX_SAMPLES;
+        dst[i] = acc->buffer[idx];
+    }
+
+    acc->head = (acc->head + HOP_SAMPLES) % ACCUMULATOR_MAX_SAMPLES;
+    acc->len -= HOP_SAMPLES;
+    return true;
+}
+
+/* Shared Memory State Initialization */
+static void init_shared_state(pipewire_helper_context_t *ctx) {
+    if (!ctx) return;
+    ctx->shared_state = NULL;
+    ctx->shared_state_fd = -1;
+
+    char state_path[256];
+    const char *runtime_dir = getenv("XDG_RUNTIME_DIR");
+    if (!runtime_dir) {
+        runtime_dir = "/tmp";
+    }
+    snprintf(state_path, sizeof(state_path), "%s/%s", runtime_dir, CLEARCORE_STATE_FILE);
+
+    int fd = open(state_path, O_RDWR | O_CREAT, 0666);
+    if (fd < 0) {
+        return;
+    }
+
+    if (ftruncate(fd, sizeof(clearcore_shared_state_t)) != 0) {
+        close(fd);
+        return;
+    }
+
+    void *mapped = mmap(NULL, sizeof(clearcore_shared_state_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mapped == MAP_FAILED) {
+        close(fd);
+        return;
+    }
+
+    ctx->shared_state = (clearcore_shared_state_t *)mapped;
+    ctx->shared_state_fd = fd;
+}
+
+/* Core Events Listener for Synchronous Discovery */
+static void core_event_done(void *data, uint32_t id, int seq) {
+    pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)data;
+    if (ctx && id == PW_ID_CORE && seq == ctx->sync_seq) {
+        ctx->sync_done = true;
+    }
+}
+
+static const struct pw_core_events core_events = {
+    .version = PW_VERSION_CORE_EVENTS,
+    .done = core_event_done,
+};
+
+/* Registry Listener for Auto-detecting Physical Microphone and Severing Self-Loops */
+static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
+                                  const char *type, uint32_t version,
+                                  const struct spa_dict *props) {
+    pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)data;
+    (void)permissions;
+    (void)version;
+    if (!ctx || !props || !type) return;
+
+    if (strcmp(type, PW_TYPE_INTERFACE_Node) == 0) {
+        const char *media_class = spa_dict_lookup(props, PW_KEY_MEDIA_CLASS);
+        const char *node_name = spa_dict_lookup(props, PW_KEY_NODE_NAME);
+
+        if (media_class && strcmp(media_class, "Audio/Source") == 0) {
+            if (node_name && strcmp(node_name, NODE_NAME_DEFAULT) != 0 && strstr(node_name, "realtime-noise") == NULL) {
+                if (ctx->target_device_id == 0 || ctx->target_device_id == id) {
+                    ctx->target_device_id = id;
+                    snprintf(ctx->target_device_name, sizeof(ctx->target_device_name), "%s", node_name);
+                    fprintf(stderr, "[pipewire_helper] Auto-detected physical microphone: %s (Node ID: %u)\n", node_name, id);
+                }
+            }
+        }
+    } else if (strcmp(type, PW_TYPE_INTERFACE_Link) == 0) {
+        /* Fail-safe: Detect and sever any self-referential loop created by WirePlumber */
+        const char *out_node = spa_dict_lookup(props, PW_KEY_LINK_OUTPUT_NODE);
+        const char *in_node = spa_dict_lookup(props, PW_KEY_LINK_INPUT_NODE);
+        if (out_node && in_node && ctx->node_id > 0 && ctx->capture_node_id > 0) {
+            uint32_t out_id = (uint32_t)strtoul(out_node, NULL, 10);
+            uint32_t in_id = (uint32_t)strtoul(in_node, NULL, 10);
+            if (out_id == ctx->node_id && in_id == ctx->capture_node_id) {
+                fprintf(stderr, "[pipewire_helper] Severed self-loop link %u -> %u (Link ID: %u)\n", out_id, in_id, id);
+                if (ctx->registry) {
+                    pw_registry_destroy(ctx->registry, id);
+                }
+            }
+        }
+    }
+}
+
+static const struct pw_registry_events registry_events = {
+    .version = PW_VERSION_REGISTRY_EVENTS,
+    .global = registry_event_global,
+};
+
+/**
+ * Realtime callback for physical microphone capture.
+ * Dequeues captured samples, filters through noise suppressor according to mode,
+ * and pushes envelopes into bounded transport ring.
+ */
+void on_capture_process(void *userdata) {
+    pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)userdata;
+    if (!ctx || !ctx->capture_stream) return;
+
+    struct pw_buffer *b = pw_stream_dequeue_buffer(ctx->capture_stream);
+    if (!b) return;
+
+    struct spa_buffer *buf = b->buffer;
+    if (!buf || buf->n_datas == 0 || !buf->datas[0].data) {
+        pw_stream_queue_buffer(ctx->capture_stream, b);
+        return;
+    }
+
+    const float *src = (const float *)buf->datas[0].data;
+    uint32_t size_bytes = buf->datas[0].chunk->size;
+    uint32_t n_samples = size_bytes / sizeof(float);
+
+    if (n_samples > 0) {
+        accumulator_push(&ctx->accumulator, src, n_samples);
+
+        float raw_frame[HOP_SAMPLES];
+        float processed_frame[HOP_SAMPLES];
+
+        while (accumulator_pop_frame(&ctx->accumulator, raw_frame)) {
+            uint32_t mode = CLEARCORE_MODE_ACTIVE;
+            if (ctx->shared_state) {
+                mode = atomic_load_explicit(&ctx->shared_state->mode, memory_order_relaxed);
+            }
+
+            if (mode == CLEARCORE_MODE_MUTE) {
+                format_converter_zero_silence(processed_frame, HOP_SAMPLES);
+            } else if (mode == CLEARCORE_MODE_BYPASS) {
+                format_converter_f32_sanitize(raw_frame, processed_frame, HOP_SAMPLES);
+            } else {
+                /* Active: Real-time noise suppression & voice enhancement */
+                noise_suppressor_process(&ctx->suppressor, raw_frame, processed_frame, HOP_SAMPLES);
+            }
+
+            wire_frame_envelope_v1_t env;
+            memset(&env, 0, sizeof(env));
+            env.version_le = WIRE_VERSION_V1;
+            env.payload_len_bytes_le = WIRE_PAYLOAD_LEN_BYTES;
+            env.sequence_le = atomic_fetch_add_explicit(&ctx->capture_sequence, 1, memory_order_relaxed);
+            env.generation_le = transport_bridge_get_generation(&ctx->transport);
+            memcpy(env.samples, processed_frame, sizeof(processed_frame));
+
+            transport_bridge_push(&ctx->transport, &env);
+        }
+    }
+
+    pw_stream_queue_buffer(ctx->capture_stream, b);
+}
+
+static void on_capture_stream_state_changed(void *data, enum pw_stream_state old,
+                                            enum pw_stream_state state, const char *error) {
+    pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)data;
+    (void)old;
+
+    switch (state) {
+        case PW_STREAM_STATE_ERROR:
+            fprintf(stderr, "[pipewire_helper] Capture stream error: %s\n", error ? error : "unspecified");
+            atomic_store_explicit(&ctx->capture_ready, false, memory_order_release);
+            break;
+        case PW_STREAM_STATE_STREAMING:
+            ctx->capture_node_id = pw_stream_get_node_id(ctx->capture_stream);
+            atomic_store_explicit(&ctx->capture_ready, true, memory_order_release);
+            fprintf(stderr, "[pipewire_helper] Capture stream streaming (Node ID: %u)\n", ctx->capture_node_id);
+            break;
+        case PW_STREAM_STATE_PAUSED:
+            ctx->capture_node_id = pw_stream_get_node_id(ctx->capture_stream);
+            atomic_store_explicit(&ctx->capture_ready, true, memory_order_release);
+            fprintf(stderr, "[pipewire_helper] Capture stream paused (Node ID: %u)\n", ctx->capture_node_id);
+            break;
+        case PW_STREAM_STATE_UNCONNECTED:
+            atomic_store_explicit(&ctx->capture_ready, false, memory_order_release);
+            fprintf(stderr, "[pipewire_helper] Capture stream unconnected\n");
+            break;
+        default:
+            break;
+    }
+}
+
+static const struct pw_stream_events capture_stream_events = {
+    .version = PW_VERSION_STREAM_EVENTS,
+    .state_changed = on_capture_stream_state_changed,
+    .process = on_capture_process,
+};
 
 /**
  * Realtime callback invoked by PipeWire audio thread when a buffer is available.
@@ -51,7 +279,7 @@ void transfer_bounded_buffers(void *userdata) {
     uint64_t active_gen = transport_bridge_get_generation(&ctx->transport);
 
     if (has_frame && (frame.generation_le == active_gen)) {
-        /* Valid frame received from engine: sanitize against IEEE 754 clipping */
+        /* Valid frame received: sanitize against IEEE 754 clipping */
         format_converter_f32_sanitize(frame.samples, dst, n_samples);
     } else {
         /* Fail-closed digital silence policy: emit pure zeros */
@@ -159,9 +387,15 @@ int pipewire_helper_init(pipewire_helper_context_t *ctx) {
 
     atomic_init(&ctx->running, false);
     atomic_init(&ctx->node_ready, false);
+    atomic_init(&ctx->capture_ready, false);
+    atomic_init(&ctx->capture_sequence, 0);
     atomic_init(&ctx->process_count, 0);
     atomic_init(&ctx->alloc_violations, 0);
     atomic_init(&ctx->blocking_violations, 0);
+
+    accumulator_init(&ctx->accumulator);
+    noise_suppressor_init(&ctx->suppressor);
+    init_shared_state(ctx);
 
     if (transport_bridge_init(&ctx->transport, DEFAULT_CAPACITY_HOPS) != 0) {
         return -1;
@@ -188,12 +422,28 @@ int pipewire_helper_init(pipewire_helper_context_t *ctx) {
         return -1;
     }
 
+    pw_core_add_listener(ctx->core, &ctx->core_events_listener, &core_events, ctx);
+
+    /* Listen for available physical microphones via registry */
+    ctx->registry = pw_core_get_registry(ctx->core, PW_VERSION_REGISTRY, 0);
+    if (ctx->registry) {
+        pw_registry_add_listener(ctx->registry, &ctx->core_listener, &registry_events, ctx);
+    }
+
+    /* Perform initial synchronous discovery so physical microphones are known BEFORE streams start */
+    ctx->sync_done = false;
+    ctx->sync_seq = pw_core_sync(ctx->core, PW_ID_CORE, 0);
+    for (int iter = 0; iter < 100 && !ctx->sync_done; iter++) {
+        pw_loop_iterate(pw_main_loop_get_loop(ctx->loop), 10);
+    }
+
     return 0;
 }
 
 int pipewire_helper_start(pipewire_helper_context_t *ctx) {
     if (!ctx || !ctx->core) return -1;
 
+    /* 1. Initialize Virtual Output/Source Stream (realtime-noise-source) */
     struct pw_properties *props = pw_properties_new(
         PW_KEY_MEDIA_TYPE, "Audio",
         PW_KEY_MEDIA_CATEGORY, "Source",
@@ -249,6 +499,58 @@ int pipewire_helper_start(pipewire_helper_context_t *ctx) {
         return res;
     }
 
+    /* 2. Initialize Physical Microphone Capture Stream */
+    struct pw_properties *cap_props = pw_properties_new(
+        PW_KEY_MEDIA_TYPE, "Audio",
+        PW_KEY_MEDIA_CATEGORY, "Capture",
+        PW_KEY_MEDIA_ROLE, "Communication",
+        PW_KEY_NODE_NAME, "realtime-noise-capture",
+        PW_KEY_NODE_DESCRIPTION, "Realtime Noise Physical Capture",
+        PW_KEY_AUDIO_RATE, "48000",
+        PW_KEY_AUDIO_CHANNELS, "1",
+        PW_KEY_AUDIO_FORMAT, "F32LE",
+        PW_KEY_NODE_LATENCY, "480/48000",
+        PW_KEY_NODE_ALWAYS_PROCESS, "true",
+        PW_KEY_NODE_AUTOCONNECT, "true",
+        NULL
+    );
+
+    /* Bind to target physical microphone if specified or detected */
+    uint32_t target_id = ctx->target_device_id;
+    if (ctx->shared_state) {
+        uint32_t state_target = atomic_load_explicit(&ctx->shared_state->target_node_id, memory_order_relaxed);
+        if (state_target > 0) {
+            target_id = state_target;
+        }
+    }
+
+    if (target_id > 0) {
+        char target_str[32];
+        snprintf(target_str, sizeof(target_str), "%u", target_id);
+        pw_properties_set(cap_props, PW_KEY_TARGET_OBJECT, target_str);
+        fprintf(stderr, "[pipewire_helper] Capture stream targeting physical microphone ID: %u\n", target_id);
+    } else if (strlen(ctx->target_device_name) > 0) {
+        pw_properties_set(cap_props, PW_KEY_TARGET_OBJECT, ctx->target_device_name);
+        fprintf(stderr, "[pipewire_helper] Capture stream targeting physical microphone: %s\n", ctx->target_device_name);
+    }
+
+    ctx->capture_stream = pw_stream_new(ctx->core, "Realtime Noise Physical Capture", cap_props);
+    if (ctx->capture_stream) {
+        pw_stream_add_listener(ctx->capture_stream, &ctx->capture_listener, &capture_stream_events, ctx);
+        int cap_res = pw_stream_connect(
+            ctx->capture_stream,
+            PW_DIRECTION_INPUT,
+            PW_ID_ANY,
+            PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_RT_PROCESS | PW_STREAM_FLAG_AUTOCONNECT,
+            params, 1
+        );
+        if (cap_res < 0) {
+            fprintf(stderr, "[pipewire_helper] Warning: Failed to connect capture stream: %s\n", spa_strerror(cap_res));
+            pw_stream_destroy(ctx->capture_stream);
+            ctx->capture_stream = NULL;
+        }
+    }
+
     atomic_store_explicit(&ctx->running, true, memory_order_release);
     return 0;
 }
@@ -256,6 +558,11 @@ int pipewire_helper_start(pipewire_helper_context_t *ctx) {
 void pipewire_helper_stop(pipewire_helper_context_t *ctx) {
     if (!ctx) return;
     atomic_store_explicit(&ctx->running, false, memory_order_release);
+    if (ctx->capture_stream) {
+        pw_stream_disconnect(ctx->capture_stream);
+        pw_stream_destroy(ctx->capture_stream);
+        ctx->capture_stream = NULL;
+    }
     if (ctx->stream) {
         pw_stream_disconnect(ctx->stream);
         pw_stream_destroy(ctx->stream);
@@ -266,6 +573,12 @@ void pipewire_helper_stop(pipewire_helper_context_t *ctx) {
 void pipewire_helper_destroy(pipewire_helper_context_t *ctx) {
     if (!ctx) return;
     pipewire_helper_stop(ctx);
+    if (ctx->registry) {
+        spa_hook_remove(&ctx->core_listener);
+        pw_proxy_destroy((struct pw_proxy *)ctx->registry);
+        ctx->registry = NULL;
+    }
+    spa_hook_remove(&ctx->core_events_listener);
     if (ctx->core) {
         pw_core_disconnect(ctx->core);
         ctx->core = NULL;
@@ -279,12 +592,17 @@ void pipewire_helper_destroy(pipewire_helper_context_t *ctx) {
         ctx->loop = NULL;
     }
     transport_bridge_free(&ctx->transport);
+    if (ctx->shared_state) {
+        munmap(ctx->shared_state, sizeof(clearcore_shared_state_t));
+        ctx->shared_state = NULL;
+    }
+    if (ctx->shared_state_fd >= 0) {
+        close(ctx->shared_state_fd);
+        ctx->shared_state_fd = -1;
+    }
 }
 
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
-
     pw_init(NULL, NULL);
 
     int lock_res = acquire_instance_lock();
@@ -306,6 +624,27 @@ int main(int argc, char *argv[]) {
         release_instance_lock();
         pw_deinit();
         return 1;
+    }
+
+    /* Parse command line arguments */
+    for (int i = 1; i < argc; ++i) {
+        if ((strcmp(argv[i], "--target") == 0 || strcmp(argv[i], "-t") == 0) && i + 1 < argc) {
+            ctx.target_device_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+            const char *m = argv[++i];
+            uint32_t mode_val = CLEARCORE_MODE_ACTIVE;
+            if (strcmp(m, "bypass") == 0) mode_val = CLEARCORE_MODE_BYPASS;
+            else if (strcmp(m, "mute") == 0) mode_val = CLEARCORE_MODE_MUTE;
+            if (ctx.shared_state) {
+                atomic_store_explicit(&ctx.shared_state->mode, mode_val, memory_order_relaxed);
+            }
+        }
+    }
+
+    /* Environment variable fallback for physical microphone */
+    const char *env_mic = getenv("CLEARCORE_PHYSICAL_MIC");
+    if (env_mic && ctx.target_device_id == 0) {
+        ctx.target_device_id = (uint32_t)strtoul(env_mic, NULL, 10);
     }
 
     signal(SIGINT, signal_handler);
