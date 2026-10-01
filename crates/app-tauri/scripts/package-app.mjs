@@ -297,7 +297,7 @@ Type=Application
 Name=Clearcore
 GenericName=Noise Suppression Virtual Microphone
 Comment=Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
-Exec=clearcore --tray
+Exec=clearcore
 Icon=clearcore
 Terminal=false
 Categories=AudioVideo;Audio;
@@ -347,7 +347,7 @@ if [[ -f "\${INSTALL_DIR}/resources/app/assets/icon.png" ]]; then
     cp "\${INSTALL_DIR}/resources/app/assets/icon.png" "\${ICON_DIR}/clearcore.png"
 fi
 
-sed "s|^Exec=.*|Exec=\${INSTALL_DIR}/clearcore --tray|" "\${INSTALL_DIR}/clearcore.desktop" > "\${DESKTOP_DIR}/clearcore.desktop"
+sed "s|^Exec=.*|Exec=\${INSTALL_DIR}/clearcore|" "\${INSTALL_DIR}/clearcore.desktop" > "\${DESKTOP_DIR}/clearcore.desktop"
 chmod +x "\${DESKTOP_DIR}/clearcore.desktop"
 
 if command -v update-desktop-database >/dev/null 2>&1; then

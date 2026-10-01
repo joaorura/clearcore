@@ -26,8 +26,8 @@ RequestExecutionLevel admin
 !insertmacro MUI_PAGE_INSTFILES
 
 !define MUI_FINISHPAGE_RUN "$INSTDIR\Clearcore.exe"
-!define MUI_FINISHPAGE_RUN_PARAMETERS "--tray"
-!define MUI_FINISHPAGE_RUN_TEXT "Iniciar o Clearcore agora na bandeja do sistema"
+!define MUI_FINISHPAGE_RUN_PARAMETERS ""
+!define MUI_FINISHPAGE_RUN_TEXT "Iniciar o Clearcore agora"
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -67,9 +67,9 @@ Section "Clearcore Core Application" SecCore
 
   ; Start Menu Shortcuts
   CreateDirectory "$SMPROGRAMS\Clearcore"
-  CreateShortcut "$SMPROGRAMS\Clearcore\Clearcore.lnk" "$INSTDIR\Clearcore.exe" "--tray" "$INSTDIR\Clearcore.exe" 0
+  CreateShortcut "$SMPROGRAMS\Clearcore\Clearcore.lnk" "$INSTDIR\Clearcore.exe" "" "$INSTDIR\Clearcore.exe" 0
   CreateShortcut "$SMPROGRAMS\Clearcore\Desinstalar Clearcore.lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
-  CreateShortcut "$DESKTOP\Clearcore.lnk" "$INSTDIR\Clearcore.exe" "--tray" "$INSTDIR\Clearcore.exe" 0
+  CreateShortcut "$DESKTOP\Clearcore.lnk" "$INSTDIR\Clearcore.exe" "" "$INSTDIR\Clearcore.exe" 0
 
   ; Install and Register WaveRT Virtual Audio Driver
   DetailPrint "Instalando driver de áudio virtual Clearcore WaveRT..."

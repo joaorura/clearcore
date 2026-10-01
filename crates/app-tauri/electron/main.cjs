@@ -370,24 +370,29 @@ async function verifyAndAutoCreateVirtualMicOnStartup() {
 }
 
 // Autostart management
-function getAutostartDesktopFilePath() {
+function getAutostartPaths() {
   const homeDir = os.homedir();
-  return path.join(homeDir, '.config', 'autostart', 'realtime-noise.desktop');
+  const autostartDir = path.join(homeDir, '.config', 'autostart');
+  return {
+    autostartDir,
+    clearcoreDesktop: path.join(autostartDir, 'clearcore.desktop'),
+    realtimeNoiseDesktop: path.join(autostartDir, 'realtime-noise.desktop'),
+  };
 }
 
 function isAutostartEnabled() {
   if (process.platform === 'linux') {
-    return fs.existsSync(getAutostartDesktopFilePath());
+    const { clearcoreDesktop, realtimeNoiseDesktop } = getAutostartPaths();
+    return fs.existsSync(clearcoreDesktop) || fs.existsSync(realtimeNoiseDesktop);
   }
   const settings = app.getLoginItemSettings();
-  return settings.openAtLogin;
+  return Boolean(settings.openAtLogin);
 }
 
 function setAutostartEnabled(enabled) {
   if (process.platform === 'linux') {
-    const desktopPath = getAutostartDesktopFilePath();
+    const { autostartDir, clearcoreDesktop, realtimeNoiseDesktop } = getAutostartPaths();
     if (enabled) {
-      const autostartDir = path.dirname(desktopPath);
       if (!fs.existsSync(autostartDir)) {
         fs.mkdirSync(autostartDir, { recursive: true });
       }
@@ -399,29 +404,41 @@ function setAutostartEnabled(enabled) {
       const content = `[Desktop Entry]
 Type=Application
 Name=ClearCore
-Comment=ClearCore - Supressão de Ruído em Tempo Real
+Comment=ClearCore - Supressão de Ruído em Tempo Real (Bandeja)
 Exec=${execCmd}
 Icon=${iconPath}
 Terminal=false
 Categories=AudioVideo;Audio;
 X-GNOME-Autostart-enabled=true
 `;
-      fs.writeFileSync(desktopPath, content, 'utf8');
-      fs.chmodSync(desktopPath, 0o755);
+      fs.writeFileSync(clearcoreDesktop, content, 'utf8');
+      fs.chmodSync(clearcoreDesktop, 0o755);
+      if (fs.existsSync(realtimeNoiseDesktop)) {
+        try { fs.unlinkSync(realtimeNoiseDesktop); } catch {}
+      }
     } else {
-      if (fs.existsSync(desktopPath)) {
-        fs.unlinkSync(desktopPath);
+      if (fs.existsSync(clearcoreDesktop)) {
+        try { fs.unlinkSync(clearcoreDesktop); } catch {}
+      }
+      if (fs.existsSync(realtimeNoiseDesktop)) {
+        try { fs.unlinkSync(realtimeNoiseDesktop); } catch {}
       }
     }
-    return isAutostartEnabled();
+  } else {
+    // Windows & macOS native login item support via Electron
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: true,
+      args: ['--tray'],
+    });
   }
 
-  app.setLoginItemSettings({
-    openAtLogin: enabled,
-    openAsHidden: true,
-    args: ['--tray'],
-  });
-  return isAutostartEnabled();
+  const newState = isAutostartEnabled();
+  updateTrayMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('autostart-update', newState);
+  }
+  return newState;
 }
 
 // Icon helper
@@ -892,21 +909,21 @@ function createWindow() {
     mainWindow.loadURL('http://127.0.0.1:5173');
   }
 
-  // Show window if not explicitly asked to start minimized in tray
+  // Show window in foreground if not explicitly asked to start minimized in tray
   if (!startInTray) {
-    mainWindow.once('ready-to-show', () => {
-      mainWindow.show();
-      mainWindow.focus();
-    });
-    // Fallback: force show after 1s in dev mode if ready-to-show hasn't fired yet
-    if (isDev) {
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }, 1000);
-    }
+    const showAndFocus = () => {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    };
+
+    mainWindow.once('ready-to-show', showAndFocus);
+    mainWindow.webContents.once('did-finish-load', showAndFocus);
+
+    // Guaranteed fallbacks: ensure foreground window appears across Wayland / X11 / Windows
+    setTimeout(showAndFocus, 400);
+    setTimeout(showAndFocus, 1200);
   }
 }
 

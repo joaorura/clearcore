@@ -10,7 +10,7 @@
     "dev:app": "node scripts/dev-runner.mjs",
     "dev:ui": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "start": "electron electron/main.cjs --tray",
+    "start": "electron electron/main.cjs",
     "start:tray": "electron electron/main.cjs --tray",
     "start:window": "electron electron/main.cjs",
     "electron": "electron electron/main.cjs",

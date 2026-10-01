@@ -4,9 +4,8 @@ This directory contains production installer configurations for building a singl
 
 ## Features
 - Installs the standalone `Clearcore` application into `%LOCALAPPDATA%\Programs\Clearcore` or `Program Files\Clearcore`.
-- Automatically installs the Clearcore WaveRT virtual audio driver (`RealtimeNoise.inf`) via `pnputil /add-driver RealtimeNoise.inf /install`.
-- Creates Start Menu and Desktop shortcuts configured to start minimized in the tray (`--tray`).
-- Registers Windows startup if selected by the user.
+- Creates Start Menu and Desktop shortcuts (opens directly in foreground).
+- Registers Windows startup if selected by the user (starts quietly minimized in the tray).
 - Provides a clean uninstaller in Windows Settings / Add-Remove Programs.
 
 ## Build Formats

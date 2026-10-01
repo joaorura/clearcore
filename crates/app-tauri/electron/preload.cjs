@@ -32,6 +32,11 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
     ipcRenderer.on('input-devices-update', handler);
     return () => ipcRenderer.removeListener('input-devices-update', handler);
   },
+  onAutostartUpdate: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('autostart-update', handler);
+    return () => ipcRenderer.removeListener('autostart-update', handler);
+  },
 });
 
 // Provide backward compatibility bridge for invokeTauri in React

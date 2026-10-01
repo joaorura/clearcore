@@ -44,6 +44,7 @@ export interface ClearcoreApi {
   onStatusUpdate: (cb: (data: { mode?: DenoiseMode }) => void) => () => void;
   onVirtualMicUpdate: (cb: (data: VirtualMicStatus) => void) => () => void;
   onInputDevicesUpdate: (cb: (data: { devices: InputDeviceInfo[]; selectedId: string | null }) => void) => () => void;
+  onAutostartUpdate: (cb: (enabled: boolean) => void) => () => void;
 }
 
 declare global {

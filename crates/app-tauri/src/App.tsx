@@ -196,6 +196,13 @@ export const App: React.FC = () => {
       });
     }
 
+    let cleanupAutostartListener: (() => void) | undefined;
+    if (window.clearcoreApi?.onAutostartUpdate) {
+      cleanupAutostartListener = window.clearcoreApi.onAutostartUpdate((enabled) => {
+        setAutostartEnabled(Boolean(enabled));
+      });
+    }
+
     const interval = setInterval(() => {
       fetchStatus();
       fetchVirtualMic();
@@ -206,6 +213,7 @@ export const App: React.FC = () => {
       if (cleanupTrayListener) cleanupTrayListener();
       if (cleanupMicListener) cleanupMicListener();
       if (cleanupDevicesListener) cleanupDevicesListener();
+      if (cleanupAutostartListener) cleanupAutostartListener();
     };
   }, []);
 

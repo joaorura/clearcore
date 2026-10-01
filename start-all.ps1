@@ -55,7 +55,7 @@ $existingElectron = Get-Process -Name "electron" -ErrorAction SilentlyContinue
 if ($existingElectron) {
     Write-Host "Desktop Companion ja esta em execucao na bandeja."
 } else {
-    Start-Process -FilePath "npm.cmd" -ArgumentList "start -- --tray" -WorkingDirectory $AppDir -WindowStyle Hidden
+    Start-Process -FilePath "npm.cmd" -ArgumentList "start" -WorkingDirectory $AppDir
     Start-Sleep -Seconds 1
 }
 
