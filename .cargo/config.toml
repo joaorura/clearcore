@@ -1,3 +1,2 @@
 [net]
-offline = true
-retry = 0
+retry = 2
