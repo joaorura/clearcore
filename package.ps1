@@ -8,7 +8,7 @@ Write-Host "==========================================================" -Foregro
 $DaemonBin = Join-Path $ScriptDir "target\release\realtime-noise-service.exe"
 if (-not (Test-Path $DaemonBin)) {
     if (Get-Command cargo -ErrorAction SilentlyContinue) {
-        Write-Host "🔨 Building Rust realtime-noise-service daemon and filter C-API..." -ForegroundColor Yellow
+        Write-Host "Building Rust realtime-noise-service daemon and filter C-API..." -ForegroundColor Yellow
         cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi
     }
 }
@@ -20,4 +20,6 @@ try {
     Pop-Location
 }
 
-Write-Host "`nPackaging complete! Standalone packages located in: $ScriptDir\release" -ForegroundColor Green
+$OutDir = Join-Path $ScriptDir "release"
+Write-Host ""
+Write-Host "Packaging complete! Standalone packages located in: $OutDir" -ForegroundColor Green

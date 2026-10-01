@@ -28,23 +28,23 @@ if (-not $isAdmin) {
 }
 
 # 2. Encerrar processos ativos
-Write-Host "🛑 Encerrando processos do Clearcore..." -ForegroundColor Yellow
+Write-Host "Encerrando processos do Clearcore..." -ForegroundColor Yellow
 Stop-Process -Name "Clearcore" -Force -ErrorAction SilentlyContinue
 Stop-Process -Name "realtime-noise-service" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 
-# 3. Remover serviço de usuário / tarefa agendada
-Write-Host "⚙️ Removendo serviços e tarefas agendadas..." -ForegroundColor Yellow
+# 3. Remover servico de usuario / tarefa agendada
+Write-Host "Removendo servicos e tarefas agendadas..." -ForegroundColor Yellow
 Unregister-ScheduledTask -TaskName "ClearcoreRealtimeNoise" -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName "RealtimeNoiseService" -Confirm:$false -ErrorAction SilentlyContinue
 
-# 4. Remover inicialização automática do Registro
-Write-Host "🚀 Removendo inicialização automática..." -ForegroundColor Yellow
+# 4. Remover inicializacao automatica do Registro
+Write-Host "Removendo inicializacao automatica..." -ForegroundColor Yellow
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Clearcore" -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Clearcore" -ErrorAction SilentlyContinue
 
 # 5. Desinstalar driver WaveRT via pnputil
-Write-Host "🎤 Desinstalando driver de áudio virtual WaveRT..." -ForegroundColor Yellow
+Write-Host "Desinstalando driver de audio virtual WaveRT..." -ForegroundColor Yellow
 if ($isAdmin) {
     # Procurar o driver publicado correspondente ao RealtimeNoise
     $drivers = pnputil.exe /enum-drivers
@@ -74,7 +74,7 @@ Get-PnpDevice | Where-Object {
 }
 
 # 6. Remover atalhos do Menu Iniciar e Desktop
-Write-Host "🗑️ Removendo atalhos e diretórios do Menu Iniciar..." -ForegroundColor Yellow
+Write-Host "Removendo atalhos e diretorios do Menu Iniciar..." -ForegroundColor Yellow
 $startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Clearcore"
 if (Test-Path $startMenu) {
     Remove-Item -Recurse -Force $startMenu -ErrorAction SilentlyContinue
@@ -87,7 +87,7 @@ Remove-Item -Recurse -Force "HKCU:\Software\Clearcore" -ErrorAction SilentlyCont
 Remove-Item -Recurse -Force "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore" -ErrorAction SilentlyContinue
 
 # 8. Remover diretórios de instalação e dados locais
-Write-Host "📁 Removendo arquivos de instalação..." -ForegroundColor Yellow
+Write-Host "Removendo arquivos de instalacao..." -ForegroundColor Yellow
 $installDirs = @(
     "$env:LOCALAPPDATA\Programs\Clearcore",
     "$env:ProgramFiles\Clearcore",
@@ -102,9 +102,9 @@ foreach ($dir in $installDirs) {
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "✅ Clearcore foi completamente desinstalado do Windows!" -ForegroundColor Green
+Write-Host "Clearcore foi completamente desinstalado do Windows!" -ForegroundColor Green
 Write-Host "   - Processos encerrados" -ForegroundColor Green
 Write-Host "   - Driver WaveRT desinstalado" -ForegroundColor Green
 Write-Host "   - Tarefas agendadas e autostart removidos" -ForegroundColor Green
-Write-Host "   - Atalhos, registros e arquivos excluídos" -ForegroundColor Green
+Write-Host "   - Atalhos, registros e arquivos excluidos" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
