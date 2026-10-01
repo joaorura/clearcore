@@ -2,6 +2,12 @@
 
 See [`AGENTS.md`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/AGENTS.md) for full runbook.
 
+## Build & Packaging (Standalone Installers)
+- **Package Everything (Linux/macOS):** `./package.sh`
+- **Package Everything (Windows):** `.\package.bat` ou `.\package.ps1`
+- **Run Packaged App (Linux):** `./release/Clearcore-linux-x64/clearcore`
+- **Run Packaged App (Windows):** `.\release\Clearcore-win32-x64\Clearcore.exe`
+
 ## Core Commands
 
 ### Linux & macOS

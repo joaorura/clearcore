@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const net = require('net');
 const os = require('os');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 // Enforce single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -16,6 +16,8 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 let currentMode = 'Active';
+let daemonChildProcess = null;
+let daemonSpawnedByApp = false;
 let currentStatus = {
   state: 'Running',
   is_terminal: false,
@@ -105,6 +107,130 @@ function sendIpcRequest(command, payload = {}) {
   });
 }
 
+// Sidecar Daemon Discovery & Supervision
+function findDaemonBinaryPath() {
+  const binName = process.platform === 'win32' ? 'realtime-noise-service.exe' : 'realtime-noise-service';
+  const candidates = [
+    // 1. Packaged locations (resources/bin or resources/)
+    path.join(process.resourcesPath, 'bin', binName),
+    path.join(process.resourcesPath, binName),
+    // 2. Relative to application directory
+    path.resolve(__dirname, '..', 'bin', binName),
+    path.resolve(__dirname, '..', '..', '..', 'bin', binName),
+    // 3. Workspace / development target directories
+    path.resolve(__dirname, '..', '..', '..', 'target', 'release', binName),
+    path.resolve(process.cwd(), 'target', 'release', binName),
+    path.resolve(__dirname, '..', '..', '..', 'target', 'debug', binName),
+    path.resolve(process.cwd(), 'target', 'debug', binName),
+  ];
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      return c;
+    }
+  }
+  return null;
+}
+
+async function isDaemonResponsive() {
+  try {
+    const status = await sendIpcRequest('GetStatus');
+    return Boolean(status && status.mode);
+  } catch {
+    return false;
+  }
+}
+
+async function ensureDaemonRunning() {
+  // If already running (e.g. system service or previous run), do nothing
+  if (await isDaemonResponsive()) {
+    console.log('[Clearcore Daemon] Serviço já está em execução e comunicando via IPC.');
+    return true;
+  }
+
+  const daemonBin = findDaemonBinaryPath();
+  if (!daemonBin) {
+    console.warn('[Clearcore Daemon] Binário realtime-noise-service não encontrado.');
+    return false;
+  }
+
+  console.log(`[Clearcore Daemon] Iniciando sidecar daemon: ${daemonBin} --run`);
+  try {
+    const userData = app.getPath('userData');
+    if (!fs.existsSync(userData)) {
+      fs.mkdirSync(userData, { recursive: true });
+    }
+    const logFile = path.join(userData, 'service.log');
+    const logFd = fs.openSync(logFile, 'a');
+
+    daemonChildProcess = spawn(daemonBin, ['--run'], {
+      detached: false,
+      stdio: ['ignore', logFd, logFd],
+      windowsHide: true,
+    });
+
+    daemonSpawnedByApp = true;
+
+    daemonChildProcess.on('error', (err) => {
+      console.error('[Clearcore Daemon] Erro no processo do serviço:', err.message);
+      daemonChildProcess = null;
+      daemonSpawnedByApp = false;
+    });
+
+    daemonChildProcess.on('exit', (code, signal) => {
+      console.warn(`[Clearcore Daemon] Processo do serviço finalizou (code=${code}, signal=${signal})`);
+      daemonChildProcess = null;
+      daemonSpawnedByApp = false;
+    });
+
+    // Wait up to 3.5 seconds for daemon socket to accept IPC requests
+    for (let attempt = 1; attempt <= 18; attempt++) {
+      await new Promise((r) => setTimeout(r, 200));
+      if (await isDaemonResponsive()) {
+        console.log(`[Clearcore Daemon] Conexão IPC estabelecida com sucesso na tentativa ${attempt}.`);
+        return true;
+      }
+    }
+
+    console.warn('[Clearcore Daemon] Daemon iniciado, mas IPC ainda não respondeu.');
+    return false;
+  } catch (err) {
+    console.error('[Clearcore Daemon] Falha ao iniciar daemon:', err.message);
+    return false;
+  }
+}
+
+function stopDaemon() {
+  if (daemonSpawnedByApp && daemonChildProcess) {
+    console.log('[Clearcore Daemon] Encerrando daemon interno iniciado pelo aplicativo...');
+    try {
+      sendIpcRequest('Shutdown').catch(() => {});
+    } catch {}
+    try {
+      daemonChildProcess.kill('SIGTERM');
+    } catch {}
+    daemonChildProcess = null;
+    daemonSpawnedByApp = false;
+  }
+}
+
+// Script Path Resolution Helper (Package and Dev aware)
+function findScriptPath(filename) {
+  const candidates = [
+    path.join(process.resourcesPath, 'scripts', filename),
+    path.join(process.resourcesPath, filename),
+    path.resolve(__dirname, '..', 'scripts', filename),
+    path.resolve(__dirname, '..', '..', '..', 'scripts', filename),
+    path.resolve(process.cwd(), 'scripts', filename),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      return c;
+    }
+  }
+  return candidates[candidates.length - 1];
+}
+
 // Cross-Platform Virtual Microphone Script Execution
 function executeVirtualMicScript(action) {
   return new Promise((resolve) => {
@@ -117,27 +243,21 @@ function executeVirtualMicScript(action) {
 
     if (isWin) {
       command = 'powershell.exe';
-      const c1 = path.resolve(__dirname, '..', '..', '..', 'scripts', 'check-virtual-mic-windows.ps1');
-      const c2 = path.resolve(process.cwd(), 'scripts', 'check-virtual-mic-windows.ps1');
-      scriptPath = fs.existsSync(c1) ? c1 : c2;
+      scriptPath = findScriptPath('check-virtual-mic-windows.ps1');
       args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Json'];
       if (action === 'recreate') args.push('-Recreate');
       else if (action === 'set_default') args.push('-SetDefault');
       else if (action === 'status') args.push('-Status');
     } else if (isMac) {
       command = '/bin/bash';
-      const c1 = path.resolve(__dirname, '..', '..', '..', 'scripts', 'check-virtual-mic-macos.sh');
-      const c2 = path.resolve(process.cwd(), 'scripts', 'check-virtual-mic-macos.sh');
-      scriptPath = fs.existsSync(c1) ? c1 : c2;
+      scriptPath = findScriptPath('check-virtual-mic-macos.sh');
       args = [scriptPath, '--json'];
       if (action === 'recreate') args.push('--recreate');
       else if (action === 'set_default') args.push('--set-default');
       else if (action === 'status') args.push('--status');
     } else {
       command = '/bin/bash';
-      const c1 = path.resolve(__dirname, '..', '..', '..', 'scripts', 'check-virtual-mic.sh');
-      const c2 = path.resolve(process.cwd(), 'scripts', 'check-virtual-mic.sh');
-      scriptPath = fs.existsSync(c1) ? c1 : c2;
+      scriptPath = findScriptPath('check-virtual-mic.sh');
       args = [scriptPath, '--json'];
       if (action === 'recreate') args.push('--recreate');
       else if (action === 'set_default') args.push('--set-default');
@@ -251,14 +371,17 @@ function setAutostartEnabled(enabled) {
       if (!fs.existsSync(autostartDir)) {
         fs.mkdirSync(autostartDir, { recursive: true });
       }
-      const execPath = process.execPath;
-      const appPath = path.resolve(__dirname, '..');
+      const isPackaged = app.isPackaged || !process.execPath.endsWith('electron');
+      const execCmd = isPackaged
+        ? `"${process.execPath}" --tray`
+        : `"${process.execPath}" "${path.join(__dirname, 'main.cjs')}" --tray`;
+      const iconPath = getTrayIconPath('Active');
       const content = `[Desktop Entry]
 Type=Application
 Name=Clearcore Realtime Noise Suppression
 Comment=Audio Noise Suppression Virtual Microphone (Tray Companion)
-Exec="${execPath}" "${path.join(__dirname, 'main.cjs')}" --tray
-Icon=${path.join(appPath, 'assets', 'icon.png')}
+Exec=${execCmd}
+Icon=${iconPath}
 Terminal=false
 Categories=AudioVideo;Audio;
 X-GNOME-Autostart-enabled=true
@@ -283,17 +406,18 @@ X-GNOME-Autostart-enabled=true
 
 // Icon helper
 function getTrayIconPath(mode) {
-  const assetsDir = path.join(__dirname, '..', 'assets');
-  switch (mode) {
-    case 'Active':
-      return path.join(assetsDir, 'tray-active.png');
-    case 'Bypass':
-      return path.join(assetsDir, 'tray-bypass.png');
-    case 'Mute':
-      return path.join(assetsDir, 'tray-mute.png');
-    default:
-      return path.join(assetsDir, 'tray-active.png');
+  const file =
+    mode === 'Bypass' ? 'tray-bypass.png' : mode === 'Mute' ? 'tray-mute.png' : 'tray-active.png';
+  const candidates = [
+    path.join(process.resourcesPath, 'app', 'assets', file),
+    path.join(process.resourcesPath, 'assets', file),
+    path.resolve(__dirname, '..', 'assets', file),
+    path.resolve(__dirname, 'assets', file),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
   }
+  return candidates[2];
 }
 
 function updateTrayMenu() {
@@ -454,6 +578,7 @@ function updateTrayMenu() {
       label: 'Sair do Clearcore',
       click: () => {
         isQuitting = true;
+        stopDaemon();
         app.quit();
       },
     },
@@ -576,7 +701,10 @@ app.whenReady().then(async () => {
   createTray();
   createWindow();
 
-  // Active startup check for virtual microphone
+  // 1. Ensure daemon is running (auto-start sidecar if not running)
+  await ensureDaemonRunning();
+
+  // 2. Active startup check for virtual microphone
   await verifyAndAutoCreateVirtualMicOnStartup();
 
   // Initial poll and recurring heartbeat
@@ -602,6 +730,7 @@ app.on('second-instance', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  stopDaemon();
 });
 
 // IPC handlers for frontend
@@ -641,6 +770,7 @@ ipcMain.handle('minimize_to_tray', () => {
 
 ipcMain.handle('quit_app', () => {
   isQuitting = true;
+  stopDaemon();
   app.quit();
 });
 

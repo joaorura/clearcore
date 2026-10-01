@@ -14,6 +14,7 @@
     "electron:tray": "electron electron/main.cjs --tray",
     "test": "vitest run",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "package": "node scripts/package-app.mjs",
     "test:smoke": "npm run build && npm run prepare:sidecar && npm run tauri build -- --no-bundle",
     "tauri": "tauri"
   },
