@@ -993,3 +993,115 @@ ipcMain.handle('set_input_device', (_event, args) => {
   return setSystemInputDevice(deviceId);
 });
 
+let currentSelectedBackend = 'auto';
+
+function queryHardwareBackends() {
+  const isLinux = process.platform === 'linux';
+  const isWin = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+
+  if (isLinux) {
+    try {
+      const scriptPath = path.resolve(repoRoot, 'scripts', 'detect-hardware.sh');
+      if (fs.existsSync(scriptPath)) {
+        const out = require('child_process').execSync(`"${scriptPath}" --json`, { encoding: 'utf8', timeout: 4000 });
+        const parsed = JSON.parse(out);
+        return {
+          ...parsed,
+          active_backend: currentSelectedBackend,
+        };
+      }
+    } catch (err) {
+      console.warn('Failed to detect hardware via script:', err.message);
+    }
+  }
+
+  // Cross-platform fallback definition
+  return {
+    backends: [
+      {
+        id: 'auto',
+        name: 'Automático (Melhor Acelerador)',
+        tier: 'Auto',
+        hardware_detected: true,
+        runtime_installed: true,
+        device_info: 'Seleção dinâmica por prioridade de hardware e disponibilidade',
+        runtime_name: 'Agendador Automático',
+        install_script: '',
+        install_command: '',
+        install_instruction: '',
+      },
+      {
+        id: 'nvidia_tensorrt',
+        name: 'NVIDIA GPU (TensorRT / CUDA)',
+        tier: 'DedicatedGpu',
+        hardware_detected: false,
+        runtime_installed: false,
+        device_info: 'GPU Dedicada NVIDIA',
+        runtime_name: isWin ? 'TensorRT (nvinfer.dll)' : 'TensorRT (libnvinfer.so)',
+        install_script: isWin ? '.\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
+        install_command: isWin ? 'powershell .\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
+        install_instruction: 'Instale o NVIDIA CUDA Toolkit e o pacote TensorRT oficial da NVIDIA para acelerar o modelo na GPU.',
+      },
+      {
+        id: 'intel_openvino',
+        name: 'Intel NPU / Arc GPU (OpenVINO)',
+        tier: 'Npu',
+        hardware_detected: false,
+        runtime_installed: false,
+        device_info: 'Intel NPU / Arc iGPU',
+        runtime_name: isWin ? 'OpenVINO (openvino.dll)' : 'OpenVINO (libopenvino.so)',
+        install_script: isWin ? '.\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
+        install_command: isWin ? 'powershell .\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
+        install_instruction: 'Instale o Intel OpenVINO runtime para habilitar o processamento na NPU dedicada ou GPU integrada.',
+      },
+      {
+        id: 'amd_ryzenai',
+        name: 'AMD Ryzen AI NPU (XDNA)',
+        tier: 'Npu',
+        hardware_detected: false,
+        runtime_installed: false,
+        device_info: 'AMD Ryzen AI NPU',
+        runtime_name: 'Ryzen AI Software (XRT / Vitis-AI)',
+        install_script: './scripts/install-ryzenai.sh',
+        install_command: './scripts/install-ryzenai.sh',
+        install_instruction: 'Instale o driver AMD NPU e o Ryzen AI Software para acelerar no processador neural AMD.',
+      },
+      {
+        id: 'apple_coreml',
+        name: 'Apple Silicon (CoreML)',
+        tier: 'Npu',
+        hardware_detected: isMac && process.arch === 'arm64',
+        runtime_installed: isMac && process.arch === 'arm64',
+        device_info: isMac ? 'Apple Silicon M-Series Neural Engine' : 'Exclusivo para computadores Apple Mac com chip Apple Silicon',
+        runtime_name: 'Apple CoreML Framework',
+        install_script: '',
+        install_command: '',
+        install_instruction: isMac ? 'CoreML é nativo do macOS.' : 'Requer computador Apple Silicon rodando macOS.',
+      },
+      {
+        id: 'cpu_tract',
+        name: 'CPU Nativo (Tract Pure-Rust)',
+        tier: 'Cpu',
+        hardware_detected: true,
+        runtime_installed: true,
+        device_info: 'Processador Host CPU (Execução Nativa Segura)',
+        runtime_name: 'Tract (Embarcado, Zero Dependências)',
+        install_script: '',
+        install_command: '',
+        install_instruction: 'Mecanismo padrão 100% seguro em Rust, sempre disponível sem necessidade de drivers.',
+      },
+    ],
+    active_backend: currentSelectedBackend,
+  };
+}
+
+ipcMain.handle('get_hardware_backends', () => {
+  return queryHardwareBackends();
+});
+
+ipcMain.handle('set_hardware_backend', (_event, backendId) => {
+  currentSelectedBackend = String(backendId || 'auto');
+  return { success: true, active_backend: currentSelectedBackend };
+});
+

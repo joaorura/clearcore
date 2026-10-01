@@ -128,6 +128,30 @@ export interface Translations {
     errorMicAccess: string;
     maxLimitReached: string;
   };
+  hardwareBackend: {
+    title: string;
+    badge: string;
+    description: string;
+    activeLabel: string;
+    detectedBadge: string;
+    notDetectedBadge: string;
+    runtimeReadyBadge: string;
+    runtimeMissingBadge: string;
+    clickForInstallHelp: string;
+    modalTitle: string;
+    hardwareDetectedTitle: string;
+    runtimeRequiredTitle: string;
+    installGuideTitle: string;
+    commandToRun: string;
+    copyCommandBtn: string;
+    copiedBtn: string;
+    closeModalBtn: string;
+    switchSuccess: string;
+    cannotSelectMissing: string;
+    autoRecommend: string;
+    refreshBtn: string;
+    refreshingBtn: string;
+  };
 }
 
 export type LocaleCode = string;

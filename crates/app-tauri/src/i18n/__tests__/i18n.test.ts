@@ -50,4 +50,13 @@ describe('i18n Translation Engine', () => {
     const formatted = template.split('{id}').join('42');
     expect(formatted).toBe('Microfone virtual criado e verificado com sucesso! (ID: 42)');
   });
+
+  it('contains complete hardware acceleration keys and guidance in pt-BR and en-US', () => {
+    expect(ptBR.hardwareBackend.title).toBe('Aceleração de Hardware & Runtimes de IA');
+    expect(ptBR.hardwareBackend.modalTitle).toBe('Instalação de Runtime de Aceleração');
+    expect(ptBR.hardwareBackend.copyCommandBtn).toBe('📋 Copiar Comando');
+    expect(enUS.hardwareBackend.title).toBe('Hardware Acceleration & AI Runtimes');
+    expect(enUS.hardwareBackend.modalTitle).toBe('Acceleration Runtime Installation');
+    expect(enUS.hardwareBackend.copyCommandBtn).toBe('📋 Copy Command');
+  });
 });

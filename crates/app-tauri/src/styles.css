@@ -253,3 +253,33 @@ body {
 .active-test-source {
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3);
 }
+
+/* Hardware Accelerator & Runtimes Styles */
+.hardware-card {
+  border: 1px solid #334155;
+}
+
+.modal-overlay {
+  animation: fadeIn 0.15s ease-out;
+}
+
+.modal-content {
+  animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+

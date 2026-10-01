@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
   setDefaultVirtualMic: () => ipcRenderer.invoke('set_default_virtual_mic'),
   getInputDevices: () => ipcRenderer.invoke('get_input_devices'),
   setInputDevice: (deviceId) => ipcRenderer.invoke('set_input_device', deviceId),
+  getHardwareBackends: () => ipcRenderer.invoke('get_hardware_backends'),
+  setHardwareBackend: (backendId) => ipcRenderer.invoke('set_hardware_backend', backendId),
   onStatusUpdate: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('status-update', handler);
