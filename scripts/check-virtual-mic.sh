@@ -75,6 +75,21 @@ is_default_mic() {
     return 1
 }
 
+ensure_capture_link() {
+    if command -v pw-link >/dev/null 2>&1; then
+        # Sever self-loop if present
+        pw-link -d "${NODE_NAME}:capture_MONO" "realtime-noise-capture:input_MONO" >/dev/null 2>&1 || true
+        # Garantir link saudável entre microfone físico e stream de captura
+        if ! pw-link -l 2>/dev/null | grep -A1 "realtime-noise-capture:input_MONO" | grep -q "|<-"; then
+            local phys_source_port
+            phys_source_port=$(pw-link -o 2>/dev/null | grep -v "${NODE_NAME}" | grep -E 'alsa_input.*capture_F[L|R]|capture_1' | head -n1)
+            if [[ -n "${phys_source_port}" ]]; then
+                pw-link "${phys_source_port}" "realtime-noise-capture:input_MONO" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+}
+
 set_default_mic() {
     local node_id
     node_id=$(get_node_id)
@@ -84,7 +99,9 @@ set_default_mic() {
     fi
     if command -v wpctl >/dev/null 2>&1; then
         wpctl set-default "${node_id}"
-        return $?
+        sleep 0.2
+        ensure_capture_link
+        return 0
     fi
     return 1
 }
@@ -127,6 +144,7 @@ EOF
 recreate_node() {
     # Para instâncias anteriores
     systemctl --user stop realtime-noise-helper.service >/dev/null 2>&1 || true
+    systemctl --user reset-failed realtime-noise-helper.service >/dev/null 2>&1 || true
     pkill -f "pipewire_helper" >/dev/null 2>&1 || true
     pkill -f "pw-loopback.*${NODE_NAME}" >/dev/null 2>&1 || true
 
@@ -154,7 +172,7 @@ recreate_node() {
     local target_arg=""
     local phys_id=""
     if command -v wpctl >/dev/null 2>&1; then
-        phys_id=$(wpctl status 2>/dev/null | awk '/Sources:/,/Filters:|Streams:/' | grep -v 'Realtime Noise' | grep -E '^\s*(\*|\s)\s*[0-9]+\.' | head -n1 | grep -o -E '[0-9]+' | head -n1)
+        phys_id=$(wpctl status 2>/dev/null | awk '/Sources:/,/Filters:|Streams:/' | grep -v 'Realtime Noise' | grep -E '[0-9]+\.' | head -n1 | grep -o -E '[0-9]+' | head -n1)
     fi
     if [[ -z "${phys_id}" ]] && command -v pw-cli >/dev/null 2>&1; then
         phys_id=$(pw-cli list-objects Node 2>/dev/null | awk '
@@ -173,6 +191,7 @@ recreate_node() {
 
     # Iniciar pipewire_helper via systemd user unit ou nohup
     if command -v systemd-run >/dev/null 2>&1; then
+        systemctl --user reset-failed realtime-noise-helper >/dev/null 2>&1 || true
         systemd-run --user --unit=realtime-noise-helper \
             "${HELPER_BIN}" ${target_arg} >/dev/null 2>&1 || true
     else

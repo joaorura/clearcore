@@ -67,6 +67,12 @@ async function startElectron() {
     console.log('⚡ Launching Electron Desktop App in development mode (--dev)...');
 
     const electronBin = path.join(appDir, 'node_modules', '.bin', isWin ? 'electron.cmd' : 'electron');
+    if (!fs.existsSync(electronBin)) {
+      console.log('⚡ Electron binary not found, running npm install in crates/app-tauri...');
+      const { execSync } = await import('child_process');
+      execSync('npm install', { cwd: appDir, stdio: 'inherit' });
+    }
+
     const electronProc = spawn(electronBin, ['electron/main.cjs', '--dev'], {
       cwd: appDir,
       stdio: 'inherit',
