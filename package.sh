@@ -23,6 +23,22 @@ if [[ "$(uname -s)" == "Linux" ]] && [[ ! -f "${SCRIPT_DIR}/platform/linux/helpe
     fi
 fi
 
+# 3. Build macOS CoreAudio HAL driver if missing
+if [[ "$(uname -s)" == "Darwin" ]] && [[ ! -d "${SCRIPT_DIR}/platform/macos/HAL/RealtimeNoiseHAL.driver" ]]; then
+    if command -v xcodebuild >/dev/null 2>&1; then
+        echo "🔨 Building macOS CoreAudio HAL driver..."
+        xcodebuild -project "${SCRIPT_DIR}/platform/macos/HAL/RealtimeNoiseHAL.xcodeproj" \
+                   -scheme RealtimeNoiseHAL \
+                   -configuration Release \
+                   -derivedDataPath "${SCRIPT_DIR}/platform/macos/HAL/build" \
+                   CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO build || true
+        
+        if [[ -d "${SCRIPT_DIR}/platform/macos/HAL/build/Build/Products/Release/RealtimeNoiseHAL.driver" ]]; then
+            cp -R "${SCRIPT_DIR}/platform/macos/HAL/build/Build/Products/Release/RealtimeNoiseHAL.driver" "${SCRIPT_DIR}/platform/macos/HAL/RealtimeNoiseHAL.driver"
+        fi
+    fi
+fi
+
 cd "${SCRIPT_DIR}/crates/app-tauri"
 npm run package
 

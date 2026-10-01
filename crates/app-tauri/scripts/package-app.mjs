@@ -273,10 +273,17 @@ To install and use this virtual microphone driver on Windows:
 `;
   fs.writeFileSync(path.join(driverTargetDir, 'README-DRIVER.txt'), readmeContent, 'utf8');
 } else if (isMac) {
-  const halDriver = path.join(repoRoot, 'platform', 'macos', 'HAL', 'RealtimeNoiseHAL.driver');
-  if (fs.existsSync(halDriver)) {
-    fs.cpSync(halDriver, path.join(driverTargetDir, 'RealtimeNoiseHAL.driver'), { recursive: true });
-    console.log('✓ Bundled RealtimeNoiseHAL.driver');
+  const halDriverCandidates = [
+    path.join(repoRoot, 'platform', 'macos', 'HAL', 'RealtimeNoiseHAL.driver'),
+    path.join(repoRoot, 'platform', 'macos', 'HAL', 'build', 'Build', 'Products', 'Release', 'RealtimeNoiseHAL.driver'),
+    path.join(repoRoot, 'platform', 'macos', 'HAL', 'build', 'Release', 'RealtimeNoiseHAL.driver'),
+  ];
+  for (const h of halDriverCandidates) {
+    if (fs.existsSync(h)) {
+      fs.cpSync(h, path.join(driverTargetDir, 'RealtimeNoiseHAL.driver'), { recursive: true });
+      console.log('✓ Bundled RealtimeNoiseHAL.driver');
+      break;
+    }
   }
 }
 
