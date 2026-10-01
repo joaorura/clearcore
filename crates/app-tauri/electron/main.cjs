@@ -614,6 +614,122 @@ function createTray() {
   updateTrayMenu();
 }
 
+let currentInputDevices = [];
+let selectedInputDeviceId = null;
+
+// Enumerate physical/system audio input devices (excluding Clearcore virtual mics)
+function enumerateSystemInputDevices() {
+  const isWin = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+  const devices = [];
+
+  if (isWin) {
+    try {
+      const psCmd = 'Get-CimInstance Win32_SoundDevice | Select-Object -Property DeviceID, Name, Status | ConvertTo-Json';
+      const out = require('child_process').execSync(`powershell.exe -NoProfile -Command "${psCmd}"`, { encoding: 'utf8', timeout: 3000 });
+      const parsed = JSON.parse(out);
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      items.forEach((item, idx) => {
+        if (item && item.Name && !item.Name.toLowerCase().includes('realtime') && !item.Name.toLowerCase().includes('clearcore')) {
+          devices.push({
+            id: item.DeviceID || `win-audio-${idx}`,
+            name: item.Name,
+            is_default: idx === 0,
+          });
+        }
+      });
+    } catch {
+      // Fallback
+    }
+  } else if (isMac) {
+    try {
+      const out = require('child_process').execSync('system_profiler SPAudioDataType -json', { encoding: 'utf8', timeout: 3000 });
+      const data = JSON.parse(out);
+      const audioData = data.SPAudioDataType || [];
+      audioData.forEach((item) => {
+        const devList = item._items || [];
+        devList.forEach((dev) => {
+          if (dev._name && !dev._name.toLowerCase().includes('realtime') && !dev._name.toLowerCase().includes('clearcore')) {
+            devices.push({
+              id: dev._name,
+              name: dev._name,
+              is_default: false,
+            });
+          }
+        });
+      });
+    } catch {
+      // Fallback
+    }
+  } else {
+    // Linux PipeWire / WirePlumber
+    try {
+      const out = require('child_process').execSync('wpctl status', { encoding: 'utf8', timeout: 3000 });
+      const lines = out.split('\n');
+      let inAudio = false;
+      let inSources = false;
+      for (const line of lines) {
+        if (line.trim().startsWith('Audio')) {
+          inAudio = true;
+          continue;
+        }
+        if (inAudio && (line.trim().startsWith('Video') || line.trim().startsWith('Settings'))) {
+          inAudio = false;
+          inSources = false;
+          continue;
+        }
+        if (inAudio && line.includes('Sources:')) {
+          inSources = true;
+          continue;
+        }
+        if (inSources && (line.includes('Filters:') || line.includes('Streams:') || line.includes('Sinks:'))) {
+          inSources = false;
+          continue;
+        }
+        if (inSources) {
+          const match = line.match(/(?:\*|\s)\s*(\d+)\.\s+([^\[]+)(?:\[.*\])?/);
+          if (match) {
+            const id = match[1].trim();
+            const name = match[2].trim();
+            const isDefault = line.includes('*');
+            if (!name.toLowerCase().includes('realtime') && !name.toLowerCase().includes('clearcore')) {
+              devices.push({ id, name, is_default: isDefault });
+            }
+          }
+        }
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  currentInputDevices = devices;
+  return devices;
+}
+
+function setSystemInputDevice(deviceId) {
+  selectedInputDeviceId = deviceId;
+  if (process.platform === 'linux') {
+    // If numeric ID, set via wpctl
+    if (/^\d+$/.test(deviceId)) {
+      try {
+        require('child_process').execSync(`wpctl set-default ${deviceId}`, { timeout: 3000 });
+      } catch (err) {
+        console.warn(`Failed to set-default input device ${deviceId} via wpctl:`, err.message);
+      }
+    }
+  }
+  updateTrayMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('input-devices-update', {
+      devices: currentInputDevices,
+      selectedId: selectedInputDeviceId,
+    });
+  }
+  return { success: true, selectedId: selectedInputDeviceId };
+}
+
+
 function createWindow() {
   const assetsDir = path.join(__dirname, '..', 'assets');
   const iconPath = path.join(assetsDir, 'icon.png');
@@ -632,6 +748,22 @@ function createWindow() {
       sandbox: false,
     },
   });
+
+  // Enable microphone/media permissions for navigator.mediaDevices
+  if (mainWindow.webContents && mainWindow.webContents.session) {
+    mainWindow.webContents.session.setPermissionCheckHandler((_webContents, permission) => {
+      if (permission === 'media' || permission === 'microphone') {
+        return true;
+      }
+      return true;
+    });
+    mainWindow.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+      if (permission === 'media' || permission === 'microphone') {
+        return callback(true);
+      }
+      return callback(true);
+    });
+  }
 
   // Minimize to tray
   mainWindow.on('minimize', (event) => {
@@ -825,3 +957,13 @@ ipcMain.handle('set_default_virtual_mic', async () => {
   updateTrayMenu();
   return res;
 });
+
+ipcMain.handle('get_input_devices', () => {
+  return enumerateSystemInputDevices();
+});
+
+ipcMain.handle('set_input_device', (_event, args) => {
+  const deviceId = typeof args === 'string' ? args : (args && args.deviceId ? args.deviceId : '');
+  return setSystemInputDevice(deviceId);
+});
+

@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
   getVirtualMicStatus: () => ipcRenderer.invoke('get_virtual_mic_status'),
   recreateVirtualMic: () => ipcRenderer.invoke('recreate_virtual_mic'),
   setDefaultVirtualMic: () => ipcRenderer.invoke('set_default_virtual_mic'),
+  getInputDevices: () => ipcRenderer.invoke('get_input_devices'),
+  setInputDevice: (deviceId) => ipcRenderer.invoke('set_input_device', deviceId),
   onStatusUpdate: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('status-update', handler);
@@ -21,6 +23,11 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('virtual-mic-update', handler);
     return () => ipcRenderer.removeListener('virtual-mic-update', handler);
+  },
+  onInputDevicesUpdate: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('input-devices-update', handler);
+    return () => ipcRenderer.removeListener('input-devices-update', handler);
   },
 });
 

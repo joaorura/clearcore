@@ -190,3 +190,30 @@ body {
 .status-badge {
   font-weight: 600;
 }
+
+/* Audio Device Selector Styles */
+.device-select {
+  width: 100%;
+  padding: 10px 14px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-main);
+  font-size: 0.95rem;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.device-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.device-select option {
+  background-color: #1a1e27;
+  color: var(--text-main);
+  padding: 6px 10px;
+}
+

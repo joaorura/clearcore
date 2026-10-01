@@ -31,6 +31,12 @@ export interface VirtualMicStatus {
   error?: string;
 }
 
+export interface InputDeviceInfo {
+  id: string;
+  name: string;
+  is_default?: boolean;
+}
+
 interface ClearcoreApi {
   getStatus: () => Promise<EngineStatus>;
   setMode: (mode: string) => Promise<unknown>;
@@ -43,8 +49,11 @@ interface ClearcoreApi {
   getVirtualMicStatus: () => Promise<VirtualMicStatus>;
   recreateVirtualMic: () => Promise<VirtualMicStatus>;
   setDefaultVirtualMic: () => Promise<VirtualMicStatus>;
+  getInputDevices: () => Promise<InputDeviceInfo[]>;
+  setInputDevice: (deviceId: string) => Promise<{ success: boolean; selectedId: string }>;
   onStatusUpdate: (cb: (data: { mode?: DenoiseMode }) => void) => () => void;
   onVirtualMicUpdate: (cb: (data: VirtualMicStatus) => void) => () => void;
+  onInputDevicesUpdate: (cb: (data: { devices: InputDeviceInfo[]; selectedId: string | null }) => void) => () => void;
 }
 
 declare global {
@@ -70,6 +79,8 @@ async function invokeBridge<T>(cmd: string, args?: Record<string, unknown>): Pro
     if (cmd === 'get_virtual_mic_status') return (await api.getVirtualMicStatus()) as unknown as T;
     if (cmd === 'recreate_virtual_mic') return (await api.recreateVirtualMic()) as unknown as T;
     if (cmd === 'set_default_virtual_mic') return (await api.setDefaultVirtualMic()) as unknown as T;
+    if (cmd === 'get_input_devices') return (await api.getInputDevices()) as unknown as T;
+    if (cmd === 'set_input_device') return (await api.setInputDevice(String(args?.deviceId ?? ''))) as unknown as T;
   }
   if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -96,6 +107,91 @@ export const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
+
+  const [inputDevices, setInputDevices] = useState<InputDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [isLoadingDevices, setIsLoadingDevices] = useState<boolean>(false);
+
+  const fetchInputDevices = async () => {
+    setIsLoadingDevices(true);
+    let devList: InputDeviceInfo[] = [];
+
+    // 1. Try native backend enumeration via IPC bridge
+    try {
+      const res = await invokeBridge<InputDeviceInfo[]>('get_input_devices');
+      if (Array.isArray(res) && res.length > 0) {
+        devList = res;
+      }
+    } catch {
+      // Ignore
+    }
+
+    // 2. Supplement or fallback with browser navigator.mediaDevices.enumerateDevices
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.enumerateDevices) {
+      try {
+        const mediaDevs = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = mediaDevs.filter(
+          (d) =>
+            d.kind === 'audioinput' &&
+            !d.label.toLowerCase().includes('realtime') &&
+            !d.label.toLowerCase().includes('clearcore')
+        );
+        if (audioInputs.length > 0) {
+          audioInputs.forEach((d, idx) => {
+            const label = d.label || `Microfone ${idx + 1}`;
+            // Avoid duplicate by name
+            if (!devList.some((existing) => existing.name === label)) {
+              devList.push({
+                id: d.deviceId || `device-${idx}`,
+                name: label,
+                is_default: idx === 0 && devList.length === 0,
+              });
+            }
+          });
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
+    // Filter out any virtual mics that might match
+    const filtered = devList.filter(
+      (d) =>
+        !d.name.toLowerCase().includes('realtime') &&
+        !d.name.toLowerCase().includes('clearcore')
+    );
+
+    setInputDevices(filtered);
+
+    // Restore selected device from localStorage or pick the default
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_selected_input_device') : null;
+    if (saved && filtered.some((d) => d.id === saved)) {
+      setSelectedDeviceId(saved);
+    } else if (filtered.length > 0) {
+      const defaultDev = filtered.find((d) => d.is_default) || filtered[0];
+      setSelectedDeviceId(defaultDev.id);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('clearcore_selected_input_device', defaultDev.id);
+      }
+    }
+    setIsLoadingDevices(false);
+  };
+
+  const handleDeviceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newId = e.target.value;
+    setSelectedDeviceId(newId);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('clearcore_selected_input_device', newId);
+    }
+    const dev = inputDevices.find((d) => d.id === newId);
+    try {
+      await invokeBridge('set_input_device', { deviceId: newId });
+      setMicActionMessage(`Dispositivo de entrada selecionado: ${dev ? dev.name : newId}`);
+      setTimeout(() => setMicActionMessage(null), 4000);
+    } catch (err) {
+      setErrorMessage(`Falha ao selecionar dispositivo de entrada: ${String(err)}`);
+    }
+  };
 
   const fetchStatus = async () => {
     try {
@@ -148,6 +244,7 @@ export const App: React.FC = () => {
     fetchVirtualMic();
     fetchDiagnostics();
     fetchAutostart();
+    fetchInputDevices();
 
     // Listen to real-time status push from electron tray if available
     let cleanupTrayListener: (() => void) | undefined;
@@ -166,6 +263,18 @@ export const App: React.FC = () => {
       });
     }
 
+    let cleanupDevicesListener: (() => void) | undefined;
+    if (window.clearcoreApi?.onInputDevicesUpdate) {
+      cleanupDevicesListener = window.clearcoreApi.onInputDevicesUpdate((data) => {
+        if (data.devices) {
+          setInputDevices(data.devices);
+        }
+        if (data.selectedId) {
+          setSelectedDeviceId(data.selectedId);
+        }
+      });
+    }
+
     const interval = setInterval(() => {
       fetchStatus();
       fetchVirtualMic();
@@ -175,6 +284,7 @@ export const App: React.FC = () => {
       clearInterval(interval);
       if (cleanupTrayListener) cleanupTrayListener();
       if (cleanupMicListener) cleanupMicListener();
+      if (cleanupDevicesListener) cleanupDevicesListener();
     };
   }, []);
 
@@ -317,6 +427,59 @@ export const App: React.FC = () => {
             🔇 Mudo (Silêncio Digital)
           </button>
         </div>
+      </div>
+
+      {/* Dispositivo de Entrada de Áudio (Microfone Físico) */}
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 className="card-title" style={{ margin: 0 }}>Dispositivo de Entrada de Áudio (Microfone Físico)</h2>
+              <span style={{ fontSize: '0.75rem', background: '#1e293b', border: '1px solid #334155', borderRadius: 4, padding: '2px 8px', color: '#93c5fd' }}>
+                Entrada
+              </span>
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>
+              Selecione qual microfone físico do computador o Clearcore deve capturar para remover o ruído.
+            </div>
+          </div>
+          <button
+            className="action-btn"
+            disabled={isLoadingDevices}
+            onClick={fetchInputDevices}
+            title="Atualizar lista de dispositivos de áudio conectados"
+            style={{ fontSize: '0.85rem', padding: '6px 12px' }}
+          >
+            {isLoadingDevices ? '⏳ Atualizando...' : '🔄 Atualizar Lista'}
+          </button>
+        </div>
+
+        <div style={{ marginTop: 8 }}>
+          {inputDevices.length > 0 ? (
+            <select
+              className="device-select"
+              value={selectedDeviceId}
+              onChange={handleDeviceChange}
+              aria-label="Selecionar microfone de entrada"
+            >
+              {inputDevices.map((dev) => (
+                <option key={dev.id} value={dev.id}>
+                  🎙 {dev.name} {dev.is_default ? '(Padrão do Sistema)' : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+              Nenhum microfone físico detectado no momento. Conecte um microfone e clique em "Atualizar Lista".
+            </div>
+          )}
+        </div>
+
+        {selectedDeviceId && (
+          <div style={{ marginTop: 8, fontSize: '0.8rem', color: '#4ade80' }}>
+            ✓ Entrada ativa: {inputDevices.find((d) => d.id === selectedDeviceId)?.name || selectedDeviceId}
+          </div>
+        )}
       </div>
 
       {/* Microfone Virtual Multi-Plataforma */}
