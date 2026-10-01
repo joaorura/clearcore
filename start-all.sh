@@ -34,23 +34,29 @@ if [[ -x "${BIN_CLI}" ]]; then
     "${BIN_CLI}" --status || true
 fi
 
-# 4. Iniciar a interface Web/Desktop Companion
-echo "[4/4] Iniciando UI / Desktop Companion..."
-if systemctl --user is-active --quiet realtime-noise-ui.service 2>/dev/null; then
-    echo "Interface UI ja esta em execucao."
+# 4. Iniciar a interface Electron na Bandeja do Sistema
+echo "[4/4] Iniciando Desktop Companion (Electron Tray)..."
+if [[ ! -f "${SCRIPT_DIR}/crates/app-tauri/dist/index.html" ]]; then
+    echo "Compilando frontend React para producao..."
+    (cd "${SCRIPT_DIR}/crates/app-tauri" && npm run build >/dev/null 2>&1)
+fi
+
+if pgrep -f "electron.*main.cjs" >/dev/null 2>&1; then
+    echo "Desktop Companion Electron ja esta em execucao na bandeja."
 elif command -v systemd-run >/dev/null 2>&1; then
-    systemd-run --user --unit=realtime-noise-ui \
+    systemd-run --user --unit=realtime-noise-electron \
         --working-directory="${SCRIPT_DIR}/crates/app-tauri" \
-        /usr/bin/npm run dev >/dev/null 2>&1 || true
+        /usr/bin/npm start >/dev/null 2>&1 || true
     sleep 1
 else
-    (cd "${SCRIPT_DIR}/crates/app-tauri" && nohup npm run dev > /tmp/realtime-noise-ui.log 2>&1 & disown $!)
+    (cd "${SCRIPT_DIR}/crates/app-tauri" && nohup npm start > /tmp/realtime-noise-electron.log 2>&1 & disown $!)
 fi
 
 echo "=========================================================="
 echo " Tudo pronto e em execucao!"
-echo " - Daemon Audio:    Ativo no PipeWire / WirePlumber"
-echo " - Socket IPC:      /run/user/$(id -u)/realtime-noise.sock"
-echo " - Interface UI:    http://127.0.0.1:5173"
-echo " - Para parar tudo: ./stop-all.sh"
+echo " - Daemon Audio:       Ativo no PipeWire / WirePlumber"
+echo " - Socket IPC:         /run/user/$(id -u)/realtime-noise.sock"
+echo " - Bandeja do Sistema: Icone ativo (Electron Tray Companion)"
+echo " - Auto-inicializacao: ./scripts/setup-autostart.sh status"
+echo " - Para parar tudo:    ./stop-all.sh"
 echo "=========================================================="

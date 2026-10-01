@@ -6,10 +6,11 @@ First-party realtime noise-suppression virtual microphone powered by DeepFilterN
 ## Quick Commands
 
 ### Startup & Lifecycle
-- **Start Everything (Daemon + UI):** `./start-all.sh`
+- **Start Everything (Daemon + Electron Tray):** `./start-all.sh`
 - **Stop Everything:** `./stop-all.sh`
 - **Start Daemon Only:** `./start-realtime-noise.sh`
 - **Stop Daemon Only:** `./stop-realtime-noise.sh`
+- **Configure Autostart on Boot (Tray):** `./scripts/setup-autostart.sh [enable|disable|status]`
 - **Check Status (IPC):** `cargo run --release -p realtime-noise-app-tauri -- --status`
 
 ### Audio Denoise Modes

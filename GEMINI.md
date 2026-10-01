@@ -3,8 +3,9 @@
 See [`AGENTS.md`](file:///home/joaorura/orca/clearcore/AGENTS.md) for full runbook.
 
 ## Core Commands
-- **Start All (Daemon + UI):** `./start-all.sh`
+- **Start All (Daemon + Electron Tray):** `./start-all.sh`
 - **Stop All:** `./stop-all.sh`
+- **Configure Autostart on Boot (Tray):** `./scripts/setup-autostart.sh [enable|disable|status]`
 - **Status (IPC Query):** `cargo run --release -p realtime-noise-app-tauri -- --status`
 - **Switch Modes:**
   - Active: `cargo run --release -p realtime-noise-app-tauri -- --mode active`
