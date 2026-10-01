@@ -487,6 +487,21 @@ if (Test-Path $PsScript) {
 }
 `;
   fs.writeFileSync(path.join(bundleDir, 'uninstall.ps1'), uninstallPs1, 'utf8');
+
+  const zipName = `${bundleName}.zip`;
+  const zipPath = path.join(releaseDir, zipName);
+  console.log(`📦 Creating distribution zip archive: ${zipName}...`);
+  try {
+    execSync(`tar -a -c -f "${zipPath}" -C "${releaseDir}" "${bundleName}"`, { stdio: 'inherit' });
+    console.log(`✓ Distribution archive created at release/${zipName}`);
+  } catch {
+    try {
+      execSync(`powershell.exe -NoProfile -Command "Compress-Archive -Path '${bundleDir}' -DestinationPath '${zipPath}' -Force"`, { stdio: 'inherit' });
+      console.log(`✓ Distribution archive created at release/${zipName}`);
+    } catch (err) {
+      console.warn('Could not create zip archive:', err.message);
+    }
+  }
 }
 
 console.log('=====================================================');

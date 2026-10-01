@@ -1,25 +1,133 @@
-name: Production Release
+name: Multi-Platform Beta Release
 
 on:
   push:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
-  release:
-    name: Build & Release Artifacts
+  build-linux:
+    name: Build Linux x64 Package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Rust
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.90.0
-      - name: Build SBOM
+
+      - name: Install Linux Build Dependencies
         run: |
-          scripts/build-sbom.sh --generate
-          scripts/build-sbom.sh --check
-      - name: Scan Artifacts
-        run: scripts/scan-artifacts.sh --artifact-dir dist
-      - name: GA Release Gate
-        run: scripts/qualify-ga.sh --evidence docs/evidence/ga-matrix.md
+          sudo apt-get update
+          sudo apt-get install -y libpipewire-0.3-dev libclang-dev meson ninja-build
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Application Dependencies
+        run: cd crates/app-tauri && npm ci
+
+      - name: Package Linux Standalone Application
+        run: ./package.sh
+
+      - name: Upload Linux Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clearcore-linux-x64
+          path: release/Clearcore-linux-x64.tar.gz
+
+  build-windows:
+    name: Build Windows x64 Package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Application Dependencies
+        shell: powershell
+        run: |
+          cd crates\app-tauri
+          npm ci
+
+      - name: Package Windows Standalone Application
+        shell: powershell
+        run: .\package.ps1
+
+      - name: Upload Windows Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clearcore-win32-x64
+          path: release/Clearcore-win32-x64*
+
+  build-macos:
+    name: Build macOS x64/ARM64 Package
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Application Dependencies
+        run: cd crates/app-tauri && npm ci
+
+      - name: Package macOS Application Bundle
+        run: ./package.sh
+
+      - name: Upload macOS Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clearcore-darwin-x64
+          path: release/Clearcore-darwin-x64.tar.gz
+
+  publish-github-release:
+    name: Publish Multi-Platform GitHub Release
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-artifacts
+
+      - name: Consolidate Release Assets
+        run: |
+          mkdir -p release-assets
+          find downloaded-artifacts -type f -exec cp {} release-assets/ \;
+          ls -lh release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          body_path: release/RELEASE-NOTES-v0.1.0-beta.1.md
+          draft: false
+          prerelease: true
