@@ -8,7 +8,7 @@ param()
 $ErrorActionPreference = "SilentlyContinue"
 
 Write-Host "=========================================================="
-Write-Host " Parando Orca / Clearcore no Windows (Daemon + App UI)"
+Write-Host " Parando ClearCore no Windows (Daemon + App UI)"
 Write-Host "=========================================================="
 
 # 1. Parar o daemon de audio

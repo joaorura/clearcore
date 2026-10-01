@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useI18n } from './i18n';
 
 export interface LatencyPercentiles {
   p50_us: number;
@@ -42,12 +43,13 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
   diagnostics,
   onRefresh,
 }) => {
+  const { t } = useI18n();
   const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   const handleExport = async () => {
     try {
       const res = await invokeTauri<string>('export_diagnostics');
-      setExportMessage('Diagnostics exported successfully. Privacy verified: Zero audio, embeddings, or meeting data.');
+      setExportMessage(t('diagnostics.exportSuccess'));
       // Auto-clear message
       setTimeout(() => setExportMessage(null), 5000);
       if (res && typeof res === 'string') {
@@ -55,12 +57,12 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `realtime-noise-diag-${Date.now()}.json`;
+        a.download = `clearcore-diagnostics-${Date.now()}.json`;
         a.click();
         URL.revokeObjectURL(url);
       }
     } catch (err) {
-      setExportMessage(`Export error: ${String(err)}`);
+      setExportMessage(t('diagnostics.exportError', { error: String(err) }));
     }
   };
 
@@ -71,7 +73,7 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
     derived_us: 800,
     unobservable_us: 200,
   };
-  const causes = diagnostics?.causes ?? ['Engine running normally'];
+  const causes = diagnostics?.causes ?? [t('diagnostics.normalState')];
   const deviceHash = diagnostics?.device_id_hash ?? 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
   const generation = diagnostics?.generation ?? 1;
   const lastAttempt = diagnostics?.last_attempt ?? null;
@@ -79,10 +81,10 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 className="card-title" style={{ margin: 0 }}>Engine Diagnostics & Privacy Telemetry</h2>
+        <h2 className="card-title" style={{ margin: 0 }}>{t('diagnostics.title')}</h2>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="action-btn" onClick={onRefresh}>Refresh</button>
-          <button className="export-btn" onClick={handleExport}>Export Diagnostics</button>
+          <button className="action-btn" onClick={onRefresh}>{t('diagnostics.refresh')}</button>
+          <button className="export-btn" onClick={handleExport}>{t('diagnostics.exportBtn')}</button>
         </div>
       </div>
 
@@ -93,7 +95,7 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
       )}
 
       <div style={{ marginBottom: 16 }}>
-        <div className="metric-label">Salted Device Identifier (Installation Hashed)</div>
+        <div className="metric-label">{t('diagnostics.deviceIdLabel')}</div>
         <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
           {deviceHash}
         </div>
@@ -101,52 +103,54 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
 
       <div className="grid-cols-2" style={{ marginBottom: 16 }}>
         <div className="metric-box">
-          <div className="metric-label">Supervisor Generation</div>
-          <div className="metric-value">Gen #{generation}</div>
+          <div className="metric-label">{t('diagnostics.supervisorGen')}</div>
+          <div className="metric-value">{t('diagnostics.genNumber', { num: generation })}</div>
         </div>
         <div className="metric-box">
-          <div className="metric-label">Last Restart Attempt</div>
-          <div className="metric-value">{lastAttempt !== null ? `Attempt #${lastAttempt}` : 'None (Healthy)'}</div>
+          <div className="metric-label">{t('diagnostics.lastRestart')}</div>
+          <div className="metric-value">
+            {lastAttempt !== null ? t('diagnostics.attemptNumber', { num: lastAttempt }) : t('diagnostics.noneHealthy')}
+          </div>
         </div>
       </div>
 
-      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 8 }}>Processing Latency Percentiles</h3>
+      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 8 }}>{t('diagnostics.latenciesTitle')}</h3>
       <div className="grid-cols-2" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 16 }}>
         <div className="metric-box">
-          <div className="metric-label">p50 Median</div>
+          <div className="metric-label">{t('diagnostics.p50')}</div>
           <div className="metric-value">{(latencies.p50_us / 1000).toFixed(2)} ms</div>
         </div>
         <div className="metric-box">
-          <div className="metric-label">p95 Tail</div>
+          <div className="metric-label">{t('diagnostics.p95')}</div>
           <div className="metric-value">{(latencies.p95_us / 1000).toFixed(2)} ms</div>
         </div>
         <div className="metric-box">
-          <div className="metric-label">p99 Tail</div>
+          <div className="metric-label">{t('diagnostics.p99')}</div>
           <div className="metric-value">{(latencies.p99_us / 1000).toFixed(2)} ms</div>
         </div>
       </div>
 
-      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 8 }}>Hop Budget Breakdown (Microseconds)</h3>
+      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 8 }}>{t('diagnostics.budgetTitle')}</h3>
       <div className="grid-cols-2" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 16 }}>
         <div className="metric-box">
-          <div className="metric-label">Measured (DSP)</div>
+          <div className="metric-label">{t('diagnostics.measured')}</div>
           <div className="metric-value">{budget.measured_us} µs</div>
         </div>
         <div className="metric-box">
-          <div className="metric-label">Configured</div>
+          <div className="metric-label">{t('diagnostics.configured')}</div>
           <div className="metric-value">{budget.configured_us} µs</div>
         </div>
         <div className="metric-box">
-          <div className="metric-label">Derived</div>
+          <div className="metric-label">{t('diagnostics.derived')}</div>
           <div className="metric-value">{budget.derived_us} µs</div>
         </div>
         <div className="metric-box">
-          <div className="metric-label">Unobservable</div>
+          <div className="metric-label">{t('diagnostics.unobservable')}</div>
           <div className="metric-value">{budget.unobservable_us} µs</div>
         </div>
       </div>
 
-      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 8 }}>Operational Causes & Log Entries</h3>
+      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 8 }}>{t('diagnostics.causesTitle')}</h3>
       <ul className="causes-list">
         {causes.map((c, i) => (
           <li key={i}>{c}</li>
@@ -154,9 +158,9 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
       </ul>
 
       <p className="privacy-notice">
-        Privacy Guarantee: Exported archives never contain raw audio waveforms, float PCM samples,
-        neural embeddings, meeting names, or transcripts. Device IDs are irreversibly salted and hashed.
+        {t('diagnostics.privacyNotice')}
       </p>
     </div>
   );
 };
+

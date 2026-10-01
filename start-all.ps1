@@ -14,7 +14,7 @@ $BinCli = "$ScriptDir\target\release\realtime-noise-app-tauri.exe"
 $AppDir = "$ScriptDir\crates\app-tauri"
 
 Write-Host "=========================================================="
-Write-Host " Iniciando Orca / Clearcore no Windows (Daemon + App UI)"
+Write-Host " Iniciando ClearCore no Windows (Daemon + App UI)"
 Write-Host "=========================================================="
 
 # 1. Compilar binários automaticamente se faltarem

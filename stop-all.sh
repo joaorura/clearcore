@@ -4,7 +4,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=========================================================="
-echo " Parando Orca / Clearcore (Daemon + App UI)"
+echo " Parando ClearCore (Daemon + App UI)"
 echo "=========================================================="
 
 # 1. Parar o daemon de audio

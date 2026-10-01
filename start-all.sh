@@ -9,7 +9,7 @@ BIN_HELPER="${SCRIPT_DIR}/platform/linux/helper/build/pipewire_helper"
 BIN_CLI="${SCRIPT_DIR}/target/release/realtime-noise-app-tauri"
 
 echo "=========================================================="
-echo " Starting Orca / Clearcore (Daemon + App UI)"
+echo " Iniciando ClearCore (Daemon + App UI)"
 echo "=========================================================="
 
 # 1. Compilar binários automaticamente se faltarem

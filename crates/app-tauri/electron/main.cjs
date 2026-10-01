@@ -382,8 +382,8 @@ function setAutostartEnabled(enabled) {
       const iconPath = getTrayIconPath('Active');
       const content = `[Desktop Entry]
 Type=Application
-Name=Clearcore Realtime Noise Suppression
-Comment=Audio Noise Suppression Virtual Microphone (Tray Companion)
+Name=ClearCore
+Comment=ClearCore - Supressão de Ruído em Tempo Real
 Exec=${execCmd}
 Icon=${iconPath}
 Terminal=false
@@ -579,7 +579,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Sair do Clearcore',
+      label: 'Sair do ClearCore',
       click: () => {
         isQuitting = true;
         stopDaemon();
@@ -588,7 +588,7 @@ function updateTrayMenu() {
     },
   ]);
 
-  tray.setToolTip(`Clearcore Noise Suppression (${currentMode})`);
+  tray.setToolTip(`ClearCore (${currentMode})`);
   tray.setContextMenu(contextMenu);
 }
 
@@ -599,7 +599,7 @@ function createTray() {
     : nativeImage.createEmpty();
 
   tray = new Tray(icon);
-  tray.setToolTip('Clearcore Realtime Noise Suppression');
+  tray.setToolTip('ClearCore');
 
   tray.on('click', () => {
     if (!mainWindow) return;

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DiagnosticsPanel, DiagnosticsData } from './diagnostics';
+import { useI18n } from './i18n';
 
 export type DenoiseMode = 'Active' | 'Bypass' | 'Mute';
 
@@ -90,6 +91,7 @@ async function invokeBridge<T>(cmd: string, args?: Record<string, unknown>): Pro
 }
 
 export const App: React.FC = () => {
+  const { t, locale, setLocale, availableLocales } = useI18n();
   const [mode, setMode] = useState<DenoiseMode>('Active');
   const [status, setStatus] = useState<EngineStatus | null>({
     state: 'Running',
@@ -186,10 +188,10 @@ export const App: React.FC = () => {
     const dev = inputDevices.find((d) => d.id === newId);
     try {
       await invokeBridge('set_input_device', { deviceId: newId });
-      setMicActionMessage(`Dispositivo de entrada selecionado: ${dev ? dev.name : newId}`);
+      setMicActionMessage(t('inputDevice.deviceSelectedFeedback', { name: dev ? dev.name : newId }));
       setTimeout(() => setMicActionMessage(null), 4000);
     } catch (err) {
-      setErrorMessage(`Falha ao selecionar dispositivo de entrada: ${String(err)}`);
+      setErrorMessage(t('inputDevice.selectionFailed', { error: String(err) }));
     }
   };
 
@@ -204,7 +206,7 @@ export const App: React.FC = () => {
       }
     } catch (err) {
       setIsConnected(false);
-      setErrorMessage(`Daemon unreachable: ${String(err)}`);
+      setErrorMessage(t('app.daemonUnreachable', { error: String(err) }));
     }
   };
 
@@ -293,7 +295,7 @@ export const App: React.FC = () => {
       await invokeBridge('set_mode', { mode: newMode });
       setMode(newMode);
     } catch (err) {
-      setErrorMessage(`Failed to switch mode: ${String(err)}`);
+      setErrorMessage(t('modes.switchFailed', { error: String(err) }));
     }
   };
 
@@ -303,24 +305,24 @@ export const App: React.FC = () => {
       await fetchStatus();
       await fetchDiagnostics();
     } catch (err) {
-      setErrorMessage(`Restart generation failed: ${String(err)}`);
+      setErrorMessage(t('supervisor.restartFailed', { error: String(err) }));
     }
   };
 
   const handleRecreateVirtualMic = async () => {
     setIsCheckingMic(true);
-    const platLabel = virtualMic?.platform_label || 'Sistema';
-    setMicActionMessage(`Verificando / Criando microfone virtual (${platLabel})...`);
+    const platLabel = virtualMic?.platform_label || t('virtualMic.systemDefault');
+    setMicActionMessage(t('virtualMic.actionVerifying', { platform: platLabel }));
     try {
       const res = await invokeBridge<VirtualMicStatus>('recreate_virtual_mic');
       setVirtualMic(res);
       if (res.present) {
-        setMicActionMessage(`Microfone virtual criado e verificado com sucesso! (ID: ${res.node_id ?? 'Ativo'})`);
+        setMicActionMessage(t('virtualMic.actionSuccess', { id: String(res.node_id ?? t('virtualMic.activeStatus')) }));
       } else {
-        setMicActionMessage(`Não foi possível registrar o microfone virtual: ${res.error ?? 'Verifique permissões de Administrador/Root'}`);
+        setMicActionMessage(t('virtualMic.actionFailed', { error: res.error ?? t('virtualMic.permissionHint') }));
       }
     } catch (err) {
-      setMicActionMessage(`Erro ao criar microfone: ${String(err)}`);
+      setMicActionMessage(t('virtualMic.createError', { error: String(err) }));
     } finally {
       setIsCheckingMic(false);
       setTimeout(() => setMicActionMessage(null), 5000);
@@ -329,17 +331,17 @@ export const App: React.FC = () => {
 
   const handleSetDefaultVirtualMic = async () => {
     setIsCheckingMic(true);
-    setMicActionMessage('Definindo microfone virtual como padrão do sistema...');
+    setMicActionMessage(t('virtualMic.actionSettingDefault'));
     try {
       const res = await invokeBridge<VirtualMicStatus>('set_default_virtual_mic');
       setVirtualMic(res);
       if (res.is_default) {
-        setMicActionMessage('Microfone virtual agora é o microfone padrão do sistema!');
+        setMicActionMessage(t('virtualMic.actionDefaultSuccess'));
       } else {
-        setMicActionMessage('Tentativa enviada. Atualizando dispositivos do sistema...');
+        setMicActionMessage(t('virtualMic.actionDefaultSent'));
       }
     } catch (err) {
-      setMicActionMessage(`Erro ao definir padrão: ${String(err)}`);
+      setMicActionMessage(t('virtualMic.setDefaultError', { error: String(err) }));
     } finally {
       setIsCheckingMic(false);
       setTimeout(() => setMicActionMessage(null), 5000);
@@ -352,7 +354,7 @@ export const App: React.FC = () => {
       const res = await invokeBridge<boolean>('set_autostart', { enabled: nextVal });
       setAutostartEnabled(res);
     } catch (err) {
-      setErrorMessage(`Failed to change autostart: ${String(err)}`);
+      setErrorMessage(t('autostart.changeFailed', { error: String(err) }));
     }
   };
 
@@ -372,22 +374,35 @@ export const App: React.FC = () => {
     <div className="container">
       <header className="header">
         <div className="title-area">
-          <h1>Clearcore / Orca Noise Suppression</h1>
+          <h1>{t('app.title')}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>
-            Companion Desktop Multi-Plataforma (Linux, Windows, macOS) com Bandeja e Início Automático
+            {t('app.subtitle')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <select
+            className="lang-select"
+            value={locale}
+            onChange={(e) => setLocale(e.target.value)}
+            title={t('app.language')}
+            aria-label={t('app.language')}
+          >
+            {availableLocales.map((loc) => (
+              <option key={loc.code} value={loc.code}>
+                🌐 {loc.name}
+              </option>
+            ))}
+          </select>
           <span className={`service-badge ${isConnected ? 'online' : 'offline'}`}>
-            ● {isConnected ? 'Daemon Conectado' : 'Daemon Desconectado'}
+            ● {isConnected ? t('app.daemonOnline') : t('app.daemonOffline')}
           </span>
           <button
             className="action-btn"
             style={{ fontSize: '0.8rem', padding: '6px 12px' }}
-            title="Minimizar janela para a bandeja do sistema"
+            title={t('app.minimizeToTray')}
             onClick={handleMinimizeToTray}
           >
-            📥 Minimizar para a Bandeja
+            {t('app.minimizeToTray')}
           </button>
         </div>
       </header>
@@ -406,25 +421,25 @@ export const App: React.FC = () => {
 
       {/* Modo de Operação */}
       <div className="card">
-        <h2 className="card-title">Modo de Operação de Supressão</h2>
+        <h2 className="card-title">{t('modes.title')}</h2>
         <div className="mode-group">
           <button
             className={`mode-btn ${mode === 'Active' ? 'active-mode' : ''}`}
             onClick={() => handleModeChange('Active')}
           >
-            🛡 Ativo (DeepFilterNet3)
+            {t('modes.active')}
           </button>
           <button
             className={`mode-btn ${mode === 'Bypass' ? 'bypass-mode' : ''}`}
             onClick={() => handleModeChange('Bypass')}
           >
-            🔄 Bypass (Passagem Direta)
+            {t('modes.bypass')}
           </button>
           <button
             className={`mode-btn ${mode === 'Mute' ? 'mute-mode' : ''}`}
             onClick={() => handleModeChange('Mute')}
           >
-            🔇 Mudo (Silêncio Digital)
+            {t('modes.mute')}
           </button>
         </div>
       </div>
@@ -434,23 +449,23 @@ export const App: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 className="card-title" style={{ margin: 0 }}>Dispositivo de Entrada de Áudio (Microfone Físico)</h2>
+              <h2 className="card-title" style={{ margin: 0 }}>{t('inputDevice.title')}</h2>
               <span style={{ fontSize: '0.75rem', background: '#1e293b', border: '1px solid #334155', borderRadius: 4, padding: '2px 8px', color: '#93c5fd' }}>
-                Entrada
+                {t('inputDevice.badge')}
               </span>
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>
-              Selecione qual microfone físico do computador o Clearcore deve capturar para remover o ruído.
+              {t('inputDevice.description')}
             </div>
           </div>
           <button
             className="action-btn"
             disabled={isLoadingDevices}
             onClick={fetchInputDevices}
-            title="Atualizar lista de dispositivos de áudio conectados"
+            title={t('inputDevice.refreshTitle')}
             style={{ fontSize: '0.85rem', padding: '6px 12px' }}
           >
-            {isLoadingDevices ? '⏳ Atualizando...' : '🔄 Atualizar Lista'}
+            {isLoadingDevices ? t('inputDevice.refreshing') : t('inputDevice.refresh')}
           </button>
         </div>
 
@@ -460,24 +475,26 @@ export const App: React.FC = () => {
               className="device-select"
               value={selectedDeviceId}
               onChange={handleDeviceChange}
-              aria-label="Selecionar microfone de entrada"
+              aria-label={t('inputDevice.selectAria')}
             >
               {inputDevices.map((dev) => (
                 <option key={dev.id} value={dev.id}>
-                  🎙 {dev.name} {dev.is_default ? '(Padrão do Sistema)' : ''}
+                  🎙 {dev.name} {dev.is_default ? t('inputDevice.defaultSuffix') : ''}
                 </option>
               ))}
             </select>
           ) : (
             <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Nenhum microfone físico detectado no momento. Conecte um microfone e clique em "Atualizar Lista".
+              {t('inputDevice.noDevices')}
             </div>
           )}
         </div>
 
         {selectedDeviceId && (
           <div style={{ marginTop: 8, fontSize: '0.8rem', color: '#4ade80' }}>
-            ✓ Entrada ativa: {inputDevices.find((d) => d.id === selectedDeviceId)?.name || selectedDeviceId}
+            {t('inputDevice.activeDevice', {
+              name: inputDevices.find((d) => d.id === selectedDeviceId)?.name || selectedDeviceId,
+            })}
           </div>
         )}
       </div>
@@ -487,13 +504,13 @@ export const App: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 className="card-title" style={{ margin: 0 }}>Microfone Virtual do Sistema</h2>
+              <h2 className="card-title" style={{ margin: 0 }}>{t('virtualMic.title')}</h2>
               <span style={{ fontSize: '0.75rem', background: '#1e293b', border: '1px solid #334155', borderRadius: 4, padding: '2px 8px', color: '#93c5fd' }}>
                 {platformTitle}
               </span>
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>
-              Dispositivo virtual de captura exposto para Discord, Teams, Zoom, OBS e navegadores.
+              {t('virtualMic.description')}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -501,9 +518,9 @@ export const App: React.FC = () => {
               className="action-btn"
               disabled={isCheckingMic}
               onClick={handleRecreateVirtualMic}
-              title="Verifica o subsistema de áudio e recria/instala o microfone virtual caso não tenha sido criado"
+              title={t('virtualMic.verifyTitle')}
             >
-              {isCheckingMic ? '⏳ Verificando...' : '🔄 Verificar / Criar'}
+              {isCheckingMic ? t('virtualMic.verifying') : t('virtualMic.verifyCreate')}
             </button>
             {virtualMic?.present && (
               <button
@@ -515,7 +532,7 @@ export const App: React.FC = () => {
                   color: virtualMic.is_default ? '#4ade80' : 'var(--text-main)',
                 }}
               >
-                {virtualMic.is_default ? '✓ Padrão do Sistema' : '🎙 Tornar Padrão'}
+                {virtualMic.is_default ? t('virtualMic.isDefault') : t('virtualMic.makeDefault')}
               </button>
             )}
           </div>
@@ -524,48 +541,38 @@ export const App: React.FC = () => {
         <div className="grid-cols-2">
           <div className="metric-box">
             <div className="metric-label">
-              {isWindows ? 'Status do Driver WaveRT / PnP' : isMac ? 'Status do Plug-In CoreAudio HAL' : 'Estado do Nó PipeWire'}
+              {isWindows ? t('virtualMic.statusWaveRt') : isMac ? t('virtualMic.statusCoreAudio') : t('virtualMic.statusPipeWire')}
             </div>
             <div className="metric-value status-badge" style={{ color: virtualMic?.present ? '#4ade80' : '#f87171' }}>
-              {virtualMic?.present ? `🟢 Ativo (ID: ${virtualMic.node_id ?? 'OK'})` : '🔴 Não Detectado no Sistema'}
+              {virtualMic?.present
+                ? t('virtualMic.statusActive', { id: String(virtualMic.node_id ?? 'OK') })
+                : t('virtualMic.statusNotDetected')}
             </div>
           </div>
           <div className="metric-box">
-            <div className="metric-label">Padrão do Sistema / Dispositivo</div>
+            <div className="metric-label">{t('virtualMic.systemDefaultLabel')}</div>
             <div className="metric-value" style={{ color: virtualMic?.is_default ? '#4ade80' : 'var(--text-muted)' }}>
-              {virtualMic?.is_default ? 'Sim (Dispositivo Primário)' : 'Não (Dispositivo Secundário)'}
+              {virtualMic?.is_default ? t('virtualMic.systemDefaultYes') : t('virtualMic.systemDefaultNo')}
             </div>
           </div>
         </div>
 
         {virtualMic?.present ? (
           <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-            <span><strong>Dispositivo:</strong> {virtualMic.node_name}</span>
-            <span><strong>Formato:</strong> {virtualMic.format || 'F32LE'} @ {virtualMic.rate || 48000}Hz</span>
-            <span><strong>Canais:</strong> {virtualMic.channels || 1} (Mono)</span>
-            <span><strong>Latência:</strong> {virtualMic.quantum || 480} amostras (10ms)</span>
+            <span><strong>{t('virtualMic.deviceLabel')}</strong> {virtualMic.node_name}</span>
+            <span><strong>{t('virtualMic.formatLabel')}</strong> {virtualMic.format || 'F32LE'} @ {virtualMic.rate || 48000}Hz</span>
+            <span><strong>{t('virtualMic.channelsLabel')}</strong> {virtualMic.channels || 1} ({t('virtualMic.channelMono')})</span>
+            <span><strong>{t('virtualMic.latencyLabel')}</strong> {t('virtualMic.latencySamples', { quantum: String(virtualMic.quantum || 480) })}</span>
           </div>
         ) : (
           <div style={{ marginTop: 12, padding: '12px 14px', background: '#451a1a', border: '1px solid #7f1d1d', borderRadius: 6, color: '#fca5a5', fontSize: '0.85rem', lineHeight: 1.5 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>
-              ⚠️ O microfone virtual não foi detectado no subsistema de áudio ({platformTitle}).
+              {t('virtualMic.notDetectedWarning', { platform: platformTitle })}
             </div>
             <div>
-              {isWindows && (
-                <span>
-                  O driver WaveRT <code>Root\RealtimeNoise</code> não está ativo. Clique em <strong>"Verificar / Criar"</strong> ou execute como Administrador: <code>pnputil /add-driver platform\windows\driver\RealtimeNoise.inf /install</code>.
-                </span>
-              )}
-              {isMac && (
-                <span>
-                  O bundle <code>RealtimeNoiseHAL.driver</code> não está em <code>/Library/Audio/Plug-Ins/HAL/</code>. Clique em <strong>"Verificar / Criar"</strong> para instalar e reiniciar o <code>coreaudiod</code>.
-                </span>
-              )}
-              {!isWindows && !isMac && (
-                <span>
-                  O nó <code>realtime-noise-source</code> não foi criado no PipeWire. Clique em <strong>"Verificar / Criar"</strong> para registrar o nó e carregar o helper C nativo.
-                </span>
-              )}
+              {isWindows && <span>{t('virtualMic.windowsInstruction')}</span>}
+              {isMac && <span>{t('virtualMic.macosInstruction')}</span>}
+              {!isWindows && !isMac && <span>{t('virtualMic.linuxInstruction')}</span>}
             </div>
           </div>
         )}
@@ -574,25 +581,25 @@ export const App: React.FC = () => {
       {/* Supervisor Status */}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h2 className="card-title" style={{ margin: 0 }}>Status do Supervisor & Motor de Áudio</h2>
+          <h2 className="card-title" style={{ margin: 0 }}>{t('supervisor.title')}</h2>
           <button
             className="action-btn"
             disabled={!status?.can_restart}
             onClick={handleRestartGeneration}
           >
-            Reiniciar Geração
+            {t('supervisor.restartBtn')}
           </button>
         </div>
 
         <div className="grid-cols-2">
           <div className="metric-box">
-            <div className="metric-label">Estado do Supervisor</div>
+            <div className="metric-label">{t('supervisor.stateLabel')}</div>
             <div className="metric-value status-badge" style={{ color: status?.state === 'Running' ? '#4ade80' : '#f87171' }}>
               {status?.state ?? 'Unknown'}
             </div>
           </div>
           <div className="metric-box">
-            <div className="metric-label">Falhas (Janela de 15m / Total)</div>
+            <div className="metric-label">{t('supervisor.crashesLabel')}</div>
             <div className="metric-value">
               {status?.crash_count_15m ?? 0} / {status?.total_crashes ?? 0}
             </div>
@@ -602,14 +609,14 @@ export const App: React.FC = () => {
 
       {/* Inicialização e Bandeja */}
       <div className="card">
-        <h2 className="card-title">Configurações de Inicialização e Bandeja</h2>
+        <h2 className="card-title">{t('autostart.title')}</h2>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-secondary)', padding: '12px 16px', borderRadius: 6, border: '1px solid var(--border-color)' }}>
           <div>
             <div style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.95rem' }}>
-              Iniciar com o Sistema (Minimizado na Bandeja)
+              {t('autostart.itemTitle')}
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
-              Inicia o Clearcore silenciosamente na barra de tarefas ao ligar o computador ({platformTitle}).
+              {t('autostart.itemDesc', { platform: platformTitle })}
             </div>
           </div>
           <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
@@ -620,12 +627,12 @@ export const App: React.FC = () => {
               style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#22c55e' }}
             />
             <span style={{ fontSize: '0.9rem', color: autostartEnabled ? '#4ade80' : 'var(--text-muted)' }}>
-              {autostartEnabled ? 'Ativado' : 'Desativado'}
+              {autostartEnabled ? t('autostart.enabled') : t('autostart.disabled')}
             </span>
           </label>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 10 }}>
-          💡 Dica: Ao fechar ou minimizar esta janela, o Clearcore continuará ativo na bandeja do sistema. Clique com o botão direito no ícone da bandeja para trocar de modo instantaneamente, verificar o microfone virtual ou sair.
+          {t('autostart.tip')}
         </p>
       </div>
 

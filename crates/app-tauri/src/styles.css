@@ -217,3 +217,27 @@ body {
   padding: 6px 10px;
 }
 
+/* Language Selector Styles */
+.lang-select {
+  padding: 6px 10px;
+  background-color: #1e293b;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-main);
+  font-size: 0.8rem;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.lang-select:focus {
+  border-color: #3b82f6;
+}
+
+.lang-select option {
+  background-color: #0f172a;
+  color: var(--text-main);
+}
+
+
