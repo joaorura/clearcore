@@ -4,6 +4,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const { execFile, spawn } = require('child_process');
+const clearcoreState = require('./clearcore-state.cjs');
 const { planCaptureLinks } = require('./capture-link-plan.cjs');
 const { parseHardwareJson } = require('./hardware-json.cjs');
 const { resolveBackendSelection } = require('./backend-selection.cjs');
@@ -461,32 +462,27 @@ function getTrayIconPath(mode) {
 }
 
 // Shared Memory state synchronization with native helper
-function writeClearcoreSharedState(updates = {}) {
+function clearcoreStatePath() {
   const runtimeDir = process.env.XDG_RUNTIME_DIR || '/tmp';
-  const statePath = path.join(runtimeDir, 'clearcore_state');
+  return path.join(runtimeDir, 'clearcore_state');
+}
+
+function writeClearcoreSharedState(updates = {}) {
   try {
-    let buf = Buffer.alloc(16, 0);
-    if (fs.existsSync(statePath)) {
-      try {
-        const existing = fs.readFileSync(statePath);
-        if (existing.length >= 16) {
-          existing.copy(buf);
-        }
-      } catch {}
-    }
-    if (updates.mode !== undefined) {
-      const modeVal = updates.mode === 'Bypass' ? 1 : updates.mode === 'Mute' ? 2 : 0;
-      buf.writeUInt32LE(modeVal, 0);
-    }
-    if (updates.targetNodeId !== undefined) {
-      buf.writeUInt32LE(Number(updates.targetNodeId) || 0, 4);
-    }
-    if (updates.generation !== undefined) {
-      buf.writeUInt32LE(Number(updates.generation) || 0, 8);
-    }
-    fs.writeFileSync(statePath, buf);
+    clearcoreState.updateStateFile(clearcoreStatePath(), updates);
   } catch (err) {
     console.warn('[Clearcore] Could not update shared state:', err.message);
+  }
+}
+
+// The service owns the studio preset (settings.json); the native helper only reads the copy kept in
+// the shared state file. Call it with the preset reported by GetStatus (`res.preset`). The IPC
+// protocol has no command to change the preset yet, and the service does not report one yet, so
+// `preset` is undefined today and nothing is written until it does.
+function syncPresetToHelper(preset) {
+  if (process.platform !== 'linux' || !clearcoreState.isPreset(preset)) return;
+  if (clearcoreState.readPreset(clearcoreStatePath()) !== preset) {
+    writeClearcoreSharedState({ preset });
   }
 }
 
@@ -937,6 +933,7 @@ async function pollDaemonStatus() {
         currentMode = res.mode;
         updateTrayMenu();
       }
+      syncPresetToHelper(res.preset);
     }
   } catch {
     // Daemon not running yet or unreachable
@@ -1190,9 +1187,11 @@ function queryHardwareBackends() {
         runtime_installed: false,
         device_info: hasNvidiaGpu ? 'GPU Dedicada NVIDIA Detectada' : 'Nenhuma GPU dedicada NVIDIA detectada neste sistema.',
         runtime_name: isWin ? 'TensorRT (nvinfer.dll)' : 'TensorRT (libnvinfer.so)',
-        install_script: isWin ? '.\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
-        install_command: isWin ? 'powershell .\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
-        install_instruction: 'Instale o NVIDIA CUDA Toolkit e o pacote TensorRT oficial da NVIDIA para acelerar o modelo na GPU.',
+        // Detected only: no inference path yet (mirrors DetectedHardware::runs_inference() in Rust),
+        // so there is nothing to install that would make the model faster.
+        install_script: '',
+        install_command: '',
+        install_instruction: 'GPU NVIDIA detectada; o caminho de inferência (TensorRT) ainda não está implementado, então não há nada para instalar.',
       },
       {
         id: 'openvino_npu',
@@ -1252,9 +1251,10 @@ function queryHardwareBackends() {
           ? `${cpuModel} (NPU AMD Ryzen AI XDNA)`
           : 'Requer processador AMD Ryzen AI com NPU XDNA integrada.',
         runtime_name: isWin ? 'Ryzen AI Software (xrt_core.dll)' : 'Ryzen AI Software (libxrt_core.so)',
-        install_script: isWin ? '.\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
-        install_command: isWin ? 'powershell .\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
-        install_instruction: 'Instale o driver AMD NPU e o Ryzen AI Software para acelerar no processador neural AMD.',
+        // Detected only: no inference path yet (mirrors DetectedHardware::runs_inference() in Rust).
+        install_script: '',
+        install_command: '',
+        install_instruction: 'NPU AMD detectada; o caminho de inferência (Ryzen AI) ainda não está implementado, então não há nada para instalar.',
       },
       {
         id: 'amd_ryzenai_gpu',
@@ -1266,9 +1266,10 @@ function queryHardwareBackends() {
           ? `${cpuModel} (Gráficos Integrados AMD Radeon)`
           : 'Requer processador AMD Ryzen com GPU integrada Radeon.',
         runtime_name: isWin ? 'DirectML / Vulkan (DirectML.dll)' : 'AMD ROCm / Vulkan',
-        install_script: isWin ? '.\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
-        install_command: isWin ? 'powershell .\\scripts\\install-ryzenai.ps1' : './scripts/install-ryzenai.sh',
-        install_instruction: 'Instale os drivers gráficos AMD mais recentes para aceleração gráfica integrada.',
+        // Detected only: no DirectML / Vulkan inference path yet.
+        install_script: '',
+        install_command: '',
+        install_instruction: 'GPU AMD detectada; o caminho de inferência (DirectML / Vulkan) ainda não está implementado, então não há nada para instalar.',
       },
       {
         id: 'apple_coreml',

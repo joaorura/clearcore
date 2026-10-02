@@ -13,6 +13,7 @@
 #include <spa/utils/result.h>
 
 #include "noise_suppressor.h"
+#include "clearcore_state.h"
 #include "target_resolver.h"
 
 #ifdef __cplusplus
@@ -44,20 +45,8 @@ extern "C" {
 #define WIRE_PAYLOAD_LEN_BYTES  1920
 #define WIRE_ENVELOPE_SIZE      1960
 
-/* ClearCore Operating Modes */
-#define CLEARCORE_MODE_ACTIVE   0
-#define CLEARCORE_MODE_BYPASS   1
-#define CLEARCORE_MODE_MUTE     2
-#define CLEARCORE_STATE_FILE    "clearcore_state"
-
-/**
- * Shared memory / control state for mode and physical mic binding.
- */
-typedef struct clearcore_shared_state {
-    _Atomic uint32_t mode;             /* 0=Active, 1=Bypass, 2=Mute */
-    _Atomic uint32_t target_node_id;   /* Physical microphone node ID (0=auto) */
-    _Atomic uint64_t generation;       /* Engine generation counter */
-} clearcore_shared_state_t;
+/* ClearCore operating modes, the shared state file layout and the studio preset helpers live in
+ * clearcore_state.h (no PipeWire dependency, so they can be unit tested without it). */
 
 /**
  * Bounded accumulator for variable capture period sizes.
@@ -124,6 +113,8 @@ typedef struct pipewire_helper_context {
     void *neural_filter;
     int (*neural_process_fn)(void *filter, const float *in_samples, float *out_samples);
     void (*neural_free_fn)(void *filter);
+    int (*neural_set_preset_fn)(void *filter, uint8_t preset); /* optional: NULL on an old library */
+    int applied_preset;                                        /* CLEARCORE_PRESET_* last applied */
     clearcore_shared_state_t *shared_state;
     int shared_state_fd;
     uint32_t target_device_id;

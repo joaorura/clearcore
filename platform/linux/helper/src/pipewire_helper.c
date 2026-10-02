@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <sys/mman.h>
 #include <errno.h>
 #include <dlfcn.h>
@@ -73,11 +74,14 @@ static void init_shared_state(pipewire_helper_context_t *ctx) {
     }
     snprintf(state_path, sizeof(state_path), "%s/%s", runtime_dir, CLEARCORE_STATE_FILE);
 
-    int fd = open(state_path, O_RDWR | O_CREAT, 0666);
+    /* O_NOFOLLOW + owner/regular-file check: see clearcore_state_open(). */
+    int fd = clearcore_state_open(state_path);
     if (fd < 0) {
         return;
     }
 
+    /* The file is exactly CLEARCORE_STATE_SIZE (16) bytes, as it has always been. An older file
+     * keeps working: offset 12 (preset) is zero there, which means Off. See clearcore_state.h. */
     if (ftruncate(fd, sizeof(clearcore_shared_state_t)) != 0) {
         close(fd);
         return;
@@ -91,6 +95,13 @@ static void init_shared_state(pipewire_helper_context_t *ctx) {
 
     ctx->shared_state = (clearcore_shared_state_t *)mapped;
     ctx->shared_state_fd = fd;
+}
+
+/* Studio finishing preset: copy the value written by the Electron app into the filter. Runs in the
+ * realtime callback, in Active mode only; costs one relaxed atomic load per hop. */
+static void apply_studio_preset(pipewire_helper_context_t *ctx) {
+    clearcore_state_sync_preset(ctx->shared_state, ctx->neural_filter, ctx->neural_set_preset_fn,
+                                &ctx->applied_preset);
 }
 
 /* Core Events Listener for Synchronous Discovery */
@@ -155,6 +166,14 @@ static const struct pw_registry_events registry_events = {
  * Realtime callback for physical microphone capture.
  * Dequeues captured samples, filters through noise suppressor according to mode,
  * and pushes envelopes into bounded transport ring.
+ *
+ * Order of decisions for every hop (the mode is read from the shared state first):
+ *   1. Mute   -> digital silence; neither the neural model nor the studio chain runs.
+ *   2. Bypass -> sanitized raw frame; neither the neural model nor the studio chain runs.
+ *   3. Active -> the studio preset is synchronized, then neural_process_fn runs the model and the
+ *                studio chain together (StudioBackend inside libclearcore_filter.so).
+ *      Fallback (no library, or rc != 0): noise_suppressor_process, which has NO studio chain
+ *      (documented degraded mode, see clearcore_state.h).
  */
 void on_capture_process(void *userdata) {
     pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)userdata;
@@ -192,6 +211,7 @@ void on_capture_process(void *userdata) {
             } else {
                 /* Active: Real-time neural noise suppression (DeepFilterNet3) */
                 if (ctx->neural_filter && ctx->neural_process_fn) {
+                    apply_studio_preset(ctx);
                     int rc = ctx->neural_process_fn(ctx->neural_filter, raw_frame, processed_frame);
                     if (rc != 0) {
                         /* Fallback to DSP suppressor if neural inference reports an issue */
@@ -366,9 +386,27 @@ static int acquire_instance_lock(void) {
     }
     snprintf(lock_path, sizeof(lock_path), "%s/hippocamp_pipewire_helper.lock", runtime_dir);
 
-    g_lock_fd = open(lock_path, O_CREAT | O_RDWR, 0600);
+    g_lock_fd = open(lock_path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0600);
     if (g_lock_fd < 0) {
         return -errno;
+    }
+
+    /* The lock may live in a world-writable directory (/tmp without XDG_RUNTIME_DIR): O_NOFOLLOW
+     * stops a planted symlink, and this check on the open descriptor stops a planted foreign or
+     * special file from being locked (or used to make the helper report "busy"). */
+    struct stat lock_st;
+    int lock_err = 0;
+    if (fstat(g_lock_fd, &lock_st) != 0) {
+        lock_err = errno;
+    } else if (!S_ISREG(lock_st.st_mode)) {
+        lock_err = EINVAL;
+    } else if (lock_st.st_uid != geteuid()) {
+        lock_err = EPERM;
+    }
+    if (lock_err != 0) {
+        close(g_lock_fd);
+        g_lock_fd = -1;
+        return -lock_err;
     }
 
     if (flock(g_lock_fd, LOCK_EX | LOCK_NB) < 0) {
@@ -399,6 +437,8 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_filter = NULL;
     ctx->neural_process_fn = NULL;
     ctx->neural_free_fn = NULL;
+    ctx->neural_set_preset_fn = NULL;
+    ctx->applied_preset = CLEARCORE_PRESET_OFF;
 
     char exe_buf[PATH_MAX] = {0};
     char exe_dir[PATH_MAX] = {0};
@@ -470,6 +510,13 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     process_fn_t process_fn = (process_fn_t)dlsym(lib, "clearcore_filter_process");
     free_fn_t free_fn = (free_fn_t)dlsym(lib, "clearcore_filter_free");
 
+    /* Optional: libraries built before the studio chain have no preset symbol. */
+    clearcore_set_preset_fn_t set_preset_fn =
+        (clearcore_set_preset_fn_t)dlsym(lib, "clearcore_filter_set_preset");
+    if (!set_preset_fn) {
+        fprintf(stderr, "[pipewire_helper] clearcore_filter_set_preset not found; studio presets disabled (Off).\n");
+    }
+
     if (!create_fn || !process_fn || !free_fn) {
         fprintf(stderr, "[pipewire_helper] Failed to resolve clearcore_filter symbols: %s\n", dlerror());
         dlclose(lib);
@@ -520,6 +567,7 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_filter = filter;
     ctx->neural_process_fn = process_fn;
     ctx->neural_free_fn = free_fn;
+    ctx->neural_set_preset_fn = set_preset_fn;
     fprintf(stderr, "[pipewire_helper] ClearCore DeepFilterNet3 neural suppressor ACTIVE!\n");
 }
 
@@ -535,6 +583,8 @@ static void neural_filter_free(pipewire_helper_context_t *ctx) {
     }
     ctx->neural_process_fn = NULL;
     ctx->neural_free_fn = NULL;
+    ctx->neural_set_preset_fn = NULL;
+    ctx->applied_preset = CLEARCORE_PRESET_OFF;
 }
 
 int pipewire_helper_init(pipewire_helper_context_t *ctx) {

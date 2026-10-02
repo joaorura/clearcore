@@ -56,3 +56,11 @@ test_target_resolver = executable(
 )
 
 test('target_resolver_contract', test_target_resolver)
+
+test_shared_state = executable(
+    'test_shared_state',
+    'tests/test_shared_state.c',
+    include_directories: inc_dir
+)
+
+test('shared_state_layout', test_shared_state)
