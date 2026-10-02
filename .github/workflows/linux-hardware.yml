@@ -2,8 +2,6 @@ name: Linux Hardware Staging Qualification
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 2 * * *'
 
 jobs:
   linux-pipewire-wireplumber:
