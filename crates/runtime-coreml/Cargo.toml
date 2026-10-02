@@ -1,0 +1,19 @@
+[package]
+name = "realtime-noise-runtime-coreml"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+realtime-noise-contracts = { path = "../contracts" }
+realtime-noise-model = { path = "../model" }
+serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { version = "=0.2.189", default-features = false }
+
+[lints.rust]
+unsafe_code = "allow"

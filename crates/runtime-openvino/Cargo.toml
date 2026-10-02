@@ -1,0 +1,20 @@
+[package]
+name = "realtime-noise-runtime-openvino"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+realtime-noise-contracts = { path = "../contracts" }
+realtime-noise-model = { path = "../model" }
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "=0.2.189", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
+
+[lints.rust]
+unsafe_code = "allow"
