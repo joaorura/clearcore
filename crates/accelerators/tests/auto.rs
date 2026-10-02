@@ -80,9 +80,9 @@ fn auto_uses_warmed_tract_when_plugin_fails_quality_gate() {
 }
 
 #[test]
-fn auto_selects_accelerator_when_quality_gate_passes() {
+fn auto_selects_inference_accelerator_when_quality_gate_passes() {
     let passing_trt_report = CalibrationReport {
-        backend_name: "tensorrt".to_owned(),
+        backend_name: "openvino-npu".to_owned(),
         duration_seconds: 300.0,
         total_frames: 30_000,
         p50_latency_ms: 0.50,
@@ -96,8 +96,8 @@ fn auto_selects_accelerator_when_quality_gate_passes() {
     };
 
     let selection = select_auto(passing_trt_report);
-    assert_eq!(selection, BackendSelection::TensorRt);
-    assert_eq!(selection.name(), "tensorrt");
+    assert_eq!(selection, BackendSelection::OpenVinoNpu);
+    assert_eq!(selection.name(), "openvino-npu");
     assert!(!selection.is_tract_cpu());
 }
 
@@ -147,16 +147,15 @@ fn user_can_select_tensorrt_openvino_or_directml_explicitly() {
         reason: None,
     };
 
-    // 1. AUTO prioritizes TensorRT when NVIDIA TensorRT passes calibration
+    // 1. TensorRT does not run inference yet (CUDA round trip only), so a promoted report for it
+    //    is never chosen, neither by AUTO nor by an explicit request: both fall back to tract.
     let selection = policy.resolve_request(BackendRequest::Auto, Some(&passing_tensorrt_report));
-    assert_eq!(selection, BackendSelection::TensorRt);
-    assert_eq!(selection.name(), "tensorrt");
-    assert!(selection.is_nvidia());
+    assert_eq!(selection, BackendSelection::TractCpu);
 
-    // 2. User explicitly selects TensorRT
+    // 2. User explicitly selects TensorRT: same honest fallback
     let explicit_trt =
         policy.resolve_request(BackendRequest::TensorRt, Some(&passing_tensorrt_report));
-    assert_eq!(explicit_trt, BackendSelection::TensorRt);
+    assert_eq!(explicit_trt, BackendSelection::TractCpu);
 
     // 3. User explicitly selects OpenVINO (supported on both Linux and Windows)
     let passing_openvino_report = CalibrationReport {
@@ -177,7 +176,7 @@ fn user_can_select_tensorrt_openvino_or_directml_explicitly() {
     assert_eq!(explicit_ov, BackendSelection::OpenVino);
     assert_eq!(explicit_ov.name(), "openvino");
 
-    // 4. User explicitly selects DirectML (Windows)
+    // 4. User explicitly selects DirectML (Windows): passthrough today, so it falls back to tract
     let passing_directml_report = CalibrationReport {
         backend_name: "directml".to_owned(),
         duration_seconds: 300.0,
@@ -193,8 +192,7 @@ fn user_can_select_tensorrt_openvino_or_directml_explicitly() {
     };
     let explicit_dml =
         policy.resolve_request(BackendRequest::DirectMl, Some(&passing_directml_report));
-    assert_eq!(explicit_dml, BackendSelection::DirectMl);
-    assert_eq!(explicit_dml.name(), "directml");
+    assert_eq!(explicit_dml, BackendSelection::TractCpu);
 }
 
 #[test]
@@ -283,7 +281,8 @@ fn auto_four_tier_hierarchy_priority() {
         reason: None,
     };
 
-    // 1. All candidates present: Tier 1 Specific (TensorRT) wins
+    // 1. All candidates present: the passthrough runtimes (TensorRT, Vulkan, Ryzen AI) are
+    //    skipped even though promoted, so the best *inference* backend (OpenVINO NPU) wins.
     let all_candidates = [
         trt_report.clone(),
         vulkan_report.clone(),
@@ -293,40 +292,26 @@ fn auto_four_tier_hierarchy_priority() {
         tract_cpu_report.clone(),
     ];
     let sel = select_best(&all_candidates);
-    assert_eq!(sel, BackendSelection::TensorRt);
-    assert_eq!(sel.tier(), DeviceTier::DedicatedGpu);
-
-    // 2. If TensorRT is absent/fails, Tier 1 General (Vulkan) wins over NPU, iGPU, and CPU
-    let no_trt = [
-        vulkan_report.clone(),
-        ryzenai_npu_report.clone(),
-        openvino_gpu_report.clone(),
-        tract_cpu_report.clone(),
-    ];
-    let sel = select_best(&no_trt);
-    assert_eq!(sel, BackendSelection::Vulkan);
-    assert_eq!(sel.tier(), DeviceTier::DedicatedGpu);
-
-    // 3. If all Dedicated GPUs fail/absent, Tier 2 (NPU: Ryzen AI or OpenVINO NPU) wins over iGPU and CPU
-    let npu_and_igpu = [
-        ryzenai_npu_report.clone(),
-        openvino_gpu_report.clone(),
-        tract_cpu_report.clone(),
-    ];
-    let sel = select_best(&npu_and_igpu);
-    assert_eq!(sel, BackendSelection::RyzenAiNpu);
+    assert_eq!(sel, BackendSelection::OpenVinoNpu);
     assert_eq!(sel.tier(), DeviceTier::Npu);
     assert!(sel.is_npu());
-    assert!(sel.is_amd());
 
-    // 4. If NPU is also absent/fails, Tier 3 (Integrated GPU: OpenVINO GPU) wins over CPU
-    let igpu_and_cpu = [openvino_gpu_report.clone(), tract_cpu_report.clone()];
+    // 2. Without the NPU, Tier 3 (Integrated GPU: OpenVINO GPU) wins over CPU
+    let igpu_and_cpu = [
+        vulkan_report.clone(),
+        openvino_gpu_report.clone(),
+        tract_cpu_report.clone(),
+    ];
     let sel = select_best(&igpu_and_cpu);
     assert_eq!(sel, BackendSelection::OpenVinoGpu);
     assert_eq!(sel.tier(), DeviceTier::IntegratedGpu);
     assert!(sel.is_integrated_gpu());
 
-    // 5. If iGPU also fails/absent, Tier 4 (CPU: Tract) is selected safely
+    // 3. Only passthrough candidates: nothing may be chosen, AUTO stays on tract
+    let passthrough_only = [trt_report, vulkan_report, ryzenai_npu_report];
+    assert_eq!(select_best(&passthrough_only), BackendSelection::TractCpu);
+
+    // 4. CPU only: Tier 4 (Tract) is selected safely
     let cpu_only = [tract_cpu_report];
     let sel = select_best(&cpu_only);
     assert_eq!(sel, BackendSelection::TractCpu);
@@ -382,10 +367,11 @@ fn user_can_select_by_device_category() {
 
     let candidates = [trt_report, openvino_npu, openvino_gpu];
 
-    // User forces Dedicated GPU
+    // User forces Dedicated GPU: the only candidate is TensorRT, which does not run inference
+    // yet, so the request falls back to tract.
     assert_eq!(
         policy.resolve_candidates(BackendRequest::DedicatedGpu, &candidates),
-        BackendSelection::TensorRt
+        BackendSelection::TractCpu
     );
 
     // User forces NPU (skipping Dedicated GPU)
@@ -405,7 +391,7 @@ fn user_can_select_by_device_category() {
 }
 
 #[test]
-fn user_can_select_amd_ryzen_ai_on_linux_and_windows() {
+fn ryzen_ai_and_vulkan_requests_fall_back_while_passthrough() {
     let policy = AutoPolicy::new();
 
     let passing_ryzenai_report = CalibrationReport {
@@ -422,16 +408,14 @@ fn user_can_select_amd_ryzen_ai_on_linux_and_windows() {
         reason: None,
     };
 
-    // User explicitly selects Ryzen AI
+    // The Ryzen AI path does not run inference yet: a promoted report is not enough to select it
     let explicit_ryzen =
         policy.resolve_request(BackendRequest::RyzenAi, Some(&passing_ryzenai_report));
-    assert_eq!(explicit_ryzen, BackendSelection::RyzenAiNpu);
-    assert_eq!(explicit_ryzen.name(), "ryzenai-npu");
-    assert!(explicit_ryzen.is_amd());
-    assert!(explicit_ryzen.is_npu());
-    assert_eq!(explicit_ryzen.tier(), DeviceTier::Npu);
+    assert_eq!(explicit_ryzen, BackendSelection::TractCpu);
+    assert_eq!(BackendSelection::RyzenAiNpu.tier(), DeviceTier::Npu);
+    assert!(BackendSelection::RyzenAiNpu.is_amd());
 
-    // User explicitly selects Vulkan for AMD iGPU or dGPU
+    // Vulkan is a passthrough as well, so an explicit request falls back to tract
     let passing_vulkan_report = CalibrationReport {
         backend_name: "vulkan".to_owned(),
         duration_seconds: 300.0,
@@ -447,9 +431,8 @@ fn user_can_select_amd_ryzen_ai_on_linux_and_windows() {
     };
     let explicit_vulkan =
         policy.resolve_request(BackendRequest::Vulkan, Some(&passing_vulkan_report));
-    assert_eq!(explicit_vulkan, BackendSelection::Vulkan);
-    assert_eq!(explicit_vulkan.name(), "vulkan");
-    assert!(explicit_vulkan.is_dedicated_gpu());
+    assert_eq!(explicit_vulkan, BackendSelection::TractCpu);
+    assert!(BackendSelection::Vulkan.is_dedicated_gpu());
 
     // If Ryzen AI report fails quality gate, falls back to TractCpu safely
     let failed_ryzenai_report = CalibrationReport {
@@ -471,7 +454,7 @@ fn user_can_select_amd_ryzen_ai_on_linux_and_windows() {
 }
 
 #[test]
-fn ryzen_ai_supports_both_npu_and_igpu() {
+fn ryzen_ai_npu_and_igpu_are_not_selectable_while_passthrough() {
     let policy = AutoPolicy::new();
 
     let passing_npu = CalibrationReport {
@@ -502,26 +485,29 @@ fn ryzen_ai_supports_both_npu_and_igpu() {
         reason: None,
     };
 
-    // 1. AMD NPU reports as Tier 2 (NPU)
-    let sel_npu = policy.resolve_request(BackendRequest::RyzenAiNpu, Some(&passing_npu));
-    assert_eq!(sel_npu, BackendSelection::RyzenAiNpu);
-    assert_eq!(sel_npu.name(), "ryzenai-npu");
-    assert_eq!(sel_npu.tier(), DeviceTier::Npu);
-    assert!(sel_npu.is_npu());
-    assert!(sel_npu.is_amd());
+    // Ryzen AI NPU / iGPU keep their tier metadata, but neither runs inference yet, so promoted
+    // reports for them are never selected, by name or by category.
+    assert_eq!(BackendSelection::RyzenAiNpu.name(), "ryzenai-npu");
+    assert_eq!(BackendSelection::RyzenAiNpu.tier(), DeviceTier::Npu);
+    assert_eq!(BackendSelection::RyzenAiGpu.name(), "ryzenai-gpu");
+    assert_eq!(
+        BackendSelection::RyzenAiGpu.tier(),
+        DeviceTier::IntegratedGpu
+    );
 
-    // 2. AMD iGPU reports as Tier 3 (Integrated GPU)
-    let sel_igpu = policy.resolve_request(BackendRequest::RyzenAiGpu, Some(&passing_igpu));
-    assert_eq!(sel_igpu, BackendSelection::RyzenAiGpu);
-    assert_eq!(sel_igpu.name(), "ryzenai-gpu");
-    assert_eq!(sel_igpu.tier(), DeviceTier::IntegratedGpu);
-    assert!(sel_igpu.is_integrated_gpu());
-    assert!(sel_igpu.is_amd());
-
-    // 3. User requests RyzenAi category: prefers NPU over iGPU
+    assert_eq!(
+        policy.resolve_request(BackendRequest::RyzenAiNpu, Some(&passing_npu)),
+        BackendSelection::TractCpu
+    );
+    assert_eq!(
+        policy.resolve_request(BackendRequest::RyzenAiGpu, Some(&passing_igpu)),
+        BackendSelection::TractCpu
+    );
     let candidates = [passing_igpu, passing_npu];
-    let sel_auto_ryzen = policy.resolve_candidates(BackendRequest::RyzenAi, &candidates);
-    assert_eq!(sel_auto_ryzen, BackendSelection::RyzenAiNpu);
+    assert_eq!(
+        policy.resolve_candidates(BackendRequest::RyzenAi, &candidates),
+        BackendSelection::TractCpu
+    );
 }
 
 #[test]
@@ -576,7 +562,7 @@ fn intel_cpu_prefers_openvino_over_onnx_tract() {
 }
 
 #[test]
-fn directml_is_below_proprietary_gpu_runtimes_but_above_npu() {
+fn passthrough_gpu_runtimes_are_skipped_even_when_promoted() {
     let policy = AutoPolicy::new();
 
     let trt_report = CalibrationReport {
@@ -649,21 +635,86 @@ fn directml_is_below_proprietary_gpu_runtimes_but_above_npu() {
         reason: None,
     };
 
-    // 1. Proprietary GPU runtime (TensorRT score 100) is preferred over DirectML (score 90)
-    let candidates_with_trt = [trt_report, dml_dgpu.clone(), amd_npu.clone()];
-    let sel_trt = policy.resolve_candidates(BackendRequest::Auto, &candidates_with_trt);
-    assert_eq!(sel_trt, BackendSelection::TensorRt);
+    // 1. TensorRT, DirectML and the Ryzen AI NPU rank highest by score, but none of them runs
+    //    inference yet, so AUTO falls back to tract.
+    let passthrough_only = [trt_report, dml_dgpu.clone(), amd_npu.clone()];
+    let sel = policy.resolve_candidates(BackendRequest::Auto, &passthrough_only);
+    assert_eq!(sel, BackendSelection::TractCpu);
 
-    // 2. When proprietary GPU runtimes are absent, DirectML (score 90) takes top priority over NPU (score 80), iGPU (score 70), and CPU (score 50)
-    let candidates_without_cuda = [dml_dgpu, amd_npu, intel_igpu, tract_cpu];
-    let sel_dml = policy.resolve_candidates(BackendRequest::Auto, &candidates_without_cuda);
-    assert_eq!(sel_dml, BackendSelection::DirectMl);
-    assert_eq!(sel_dml.name(), "directml");
-    assert_eq!(sel_dml.tier(), DeviceTier::DedicatedGpu);
-    assert!(sel_dml.is_dedicated_gpu());
+    // 2. With an inference-capable iGPU in the mix, it is chosen over the higher-scored passthroughs
+    let mixed = [dml_dgpu, amd_npu, intel_igpu, tract_cpu];
+    let sel = policy.resolve_candidates(BackendRequest::Auto, &mixed);
+    assert_eq!(sel, BackendSelection::OpenVinoGpu);
+    assert_eq!(sel.tier(), DeviceTier::IntegratedGpu);
 
-    // 3. User forces Dedicated GPU: selects DirectML when it's the available dGPU
-    let dgpu_sel =
-        policy.resolve_candidates(BackendRequest::DedicatedGpu, &candidates_without_cuda);
-    assert_eq!(dgpu_sel, BackendSelection::DirectMl);
+    // 3. User forces Dedicated GPU: DirectML is the only dGPU candidate and is a passthrough
+    let dgpu_sel = policy.resolve_candidates(BackendRequest::DedicatedGpu, &mixed);
+    assert_eq!(dgpu_sel, BackendSelection::TractCpu);
+}
+
+fn promoted_report(name: &str) -> CalibrationReport {
+    CalibrationReport {
+        backend_name: name.to_owned(),
+        duration_seconds: 300.0,
+        total_frames: 30_000,
+        p50_latency_ms: 0.5,
+        p95_latency_ms: 0.8,
+        p99_latency_ms: 1.0,
+        max_latency_ms: 1.5,
+        deadline_miss_count: 0,
+        discontinuities: 0,
+        decision: PromotionDecision::Promoted,
+        reason: None,
+    }
+}
+
+#[test]
+fn deserialized_promoted_passthrough_report_is_never_selected() {
+    // A report loaded from disk can name any backend as promoted, e.g. "vulkan", which only copies
+    // samples today. select_auto, select_best and resolve_candidates must all refuse it.
+    let policy = AutoPolicy::new();
+    for name in [
+        "vulkan",
+        "directml",
+        "tensorrt",
+        "cuda",
+        "ryzenai-npu",
+        "ryzenai-gpu",
+        "coreml",
+    ] {
+        let json = serde_json::to_string(&promoted_report(name)).unwrap();
+        let report: CalibrationReport = serde_json::from_str(&json).unwrap();
+        assert!(
+            report.is_promoted(),
+            "{name}: the report itself is promoted"
+        );
+
+        assert_eq!(
+            select_auto(report.clone()),
+            BackendSelection::TractCpu,
+            "{name}"
+        );
+        assert_eq!(
+            select_best(std::slice::from_ref(&report)),
+            BackendSelection::TractCpu,
+            "{name}"
+        );
+        for request in [
+            BackendRequest::Auto,
+            BackendRequest::DedicatedGpu,
+            BackendRequest::IntegratedGpu,
+            BackendRequest::Npu,
+            BackendRequest::RyzenAi,
+            BackendRequest::Vulkan,
+            BackendRequest::DirectMl,
+            BackendRequest::TensorRt,
+            BackendRequest::CoreMl,
+        ] {
+            assert_eq!(
+                policy.resolve_candidates(request, std::slice::from_ref(&report)),
+                BackendSelection::TractCpu,
+                "{name} via {request:?}"
+            );
+        }
+    }
 }

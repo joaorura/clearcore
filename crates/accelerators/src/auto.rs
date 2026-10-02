@@ -1,6 +1,10 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::doc_markdown)]
 
+use realtime_noise_contracts::AudioFrame;
+use realtime_noise_model::{
+    ALGORITHM_LATENCY_SAMPLES, BackendDescriptor, InferenceBackend, InferenceError, ProcessedFrame,
+};
 use serde::{Deserialize, Serialize};
 
 /// Maximum allowable p99 latency for qualification promotion (10.0 ms @ 48 kHz).
@@ -162,6 +166,163 @@ impl BackendSelection {
             Self::TensorRt | Self::DirectMl | Self::Vulkan | Self::OpenVinoGpu | Self::RyzenAiGpu
         )
     }
+
+    #[must_use]
+    pub const fn is_directml(&self) -> bool {
+        matches!(self, Self::DirectMl)
+    }
+
+    #[must_use]
+    pub const fn is_vulkan(&self) -> bool {
+        matches!(self, Self::Vulkan)
+    }
+
+    /// Whether this runtime runs real inference in this build.
+    ///
+    /// `OpenVINO` (compiled DeepFilterNet3 graphs) and the `Tract` CPU baseline do. `TensorRT`
+    /// (CUDA round trip, no engine), `DirectML`, `Vulkan`, `Ryzen AI` and `CoreML` only copy
+    /// samples from input to output today, so nothing may select them as an accelerator: the
+    /// hardware resolver and [`Self::instantiate_hardware_backend`] skip them and AUTO falls back
+    /// to `Tract`. Flip an entry only together with the backend's own `executes_inference()`.
+    ///
+    /// [`select_auto`], [`select_best`] and [`AutoPolicy::resolve_candidates`] also consult this,
+    /// so a deserialized report that names a passthrough backend as promoted is never chosen.
+    #[must_use]
+    pub const fn executes_inference(&self) -> bool {
+        matches!(
+            self,
+            Self::TractCpu
+                | Self::OpenVinoNpu
+                | Self::OpenVinoGpu
+                | Self::OpenVinoCpu
+                | Self::OpenVino
+        )
+    }
+
+    /// Instantiates a mock instance of the selected backend implementing [`realtime_noise_model::InferenceBackend`].
+    ///
+    /// Mocks pass frames through (check each backend's `executes_inference()`); the mock for
+    /// [`Self::TractCpu`] is labelled `tract`, not borrowed from another runtime.
+    #[must_use]
+    pub fn instantiate_mock_backend(&self) -> Box<dyn realtime_noise_model::InferenceBackend> {
+        match self {
+            Self::DirectMl => Box::new(crate::directml::DirectMlBackend::new_mock_dgpu()),
+            Self::Vulkan => Box::new(crate::vulkan::VulkanBackend::new_mock_dgpu()),
+            Self::RyzenAiNpu | Self::RyzenAi => {
+                Box::new(crate::ryzenai::RyzenAiBackend::new_mock_npu())
+            }
+            Self::RyzenAiGpu => Box::new(crate::ryzenai::RyzenAiBackend::new_mock_gpu()),
+            Self::TensorRt => Box::new(crate::tensorrt::TensorRtBackend::new_mock()),
+            Self::OpenVinoNpu | Self::OpenVino => {
+                Box::new(crate::openvino::OpenVINOBackend::new_mock_npu())
+            }
+            Self::OpenVinoGpu => Box::new(crate::openvino::OpenVINOBackend::new_mock_gpu()),
+            Self::OpenVinoCpu => Box::new(crate::openvino::OpenVINOBackend::new_mock_cpu()),
+            Self::TractCpu => Box::new(MockTractBackend::new()),
+            Self::CoreMl => Box::new(crate::coreml::CoreMlBackend::new_mock()),
+        }
+    }
+
+    /// Instantiates the selected backend on real hardware, failing (instead of degrading to a
+    /// mock) when the native runtime, the device or the model assets are missing, so the caller
+    /// can fall back to the next candidate.
+    ///
+    /// Wired runtimes: `OpenVINO` NPU / GPU / CPU, which load the stateful DeepFilterNet3 graphs
+    /// from `model_dir` (verified against [`crate::APPROVED_STATEFUL_DIGESTS`]). Every selection
+    /// for which [`Self::executes_inference`] is `false` returns an error, `TensorRT` included:
+    /// its hardware path is a CUDA copy with no engine, and handing that back as `Ok` would let a
+    /// caller ship unfiltered audio believing it was denoised.
+    pub fn instantiate_hardware_backend(
+        &self,
+        model_dir: &std::path::Path,
+        asset_id: &str,
+        asset_sha256: &str,
+    ) -> Result<Box<dyn realtime_noise_model::InferenceBackend>, realtime_noise_model::InferenceError>
+    {
+        use crate::openvino::OpenVINOBackend;
+        if !self.executes_inference() {
+            return Err(realtime_noise_model::InferenceError::InferenceExecution(
+                format!(
+                    "{} does not execute inference in this build (it only copies samples from \
+                     input to output) and cannot be used as an accelerator",
+                    self.name()
+                ),
+            ));
+        }
+        match self {
+            Self::OpenVinoNpu => Ok(Box::new(OpenVINOBackend::load_stateful(
+                model_dir,
+                "NPU",
+                asset_id,
+                asset_sha256,
+            )?)),
+            Self::OpenVinoGpu => Ok(Box::new(OpenVINOBackend::load_stateful(
+                model_dir,
+                "GPU",
+                asset_id,
+                asset_sha256,
+            )?)),
+            Self::OpenVinoCpu => Ok(Box::new(OpenVINOBackend::load_stateful(
+                model_dir,
+                "CPU",
+                asset_id,
+                asset_sha256,
+            )?)),
+            Self::OpenVino => Ok(Box::new(OpenVINOBackend::load_stateful_auto(
+                model_dir,
+                asset_id,
+                asset_sha256,
+            )?)),
+            other => Err(realtime_noise_model::InferenceError::InferenceExecution(
+                format!(
+                    "{} is not instantiated through this entry point",
+                    other.name()
+                ),
+            )),
+        }
+    }
+}
+
+/// Passthrough stand-in for the `Tract` CPU baseline, used only by
+/// [`BackendSelection::instantiate_mock_backend`]. The real baseline is
+/// `realtime_noise_model::TractBackend`, which needs a verified asset.
+struct MockTractBackend {
+    descriptor: BackendDescriptor,
+}
+
+impl MockTractBackend {
+    fn new() -> Self {
+        Self {
+            descriptor: BackendDescriptor {
+                backend: "tract",
+                backend_version: "mock",
+                runtime: "tract",
+                runtime_version: "mock",
+                asset_id: "df-compatible-release-asset-v1".to_owned(),
+                asset_sha256: "mock-asset-sha256".to_owned(),
+                cpu_profile: "mock-cpu",
+            },
+        }
+    }
+}
+
+impl InferenceBackend for MockTractBackend {
+    fn descriptor(&self) -> BackendDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn process(&mut self, input: &AudioFrame) -> Result<ProcessedFrame, InferenceError> {
+        if input.iter().any(|sample| !sample.is_finite()) {
+            return Err(InferenceError::InputContract(
+                "input frame contains a non-finite sample".to_owned(),
+            ));
+        }
+        ProcessedFrame::checked(*input, ALGORITHM_LATENCY_SAMPLES, self.descriptor())
+    }
+
+    fn algorithmic_latency_samples(&self) -> u32 {
+        ALGORITHM_LATENCY_SAMPLES
+    }
 }
 
 /// Offline calibration report generated outside the real-time audio pipeline.
@@ -308,10 +469,18 @@ pub fn evaluate_calibration(
 #[must_use]
 #[allow(clippy::needless_pass_by_value)]
 pub fn select_auto(report: CalibrationReport) -> BackendSelection {
-    if !report.is_promoted() {
+    if !is_selectable(&report) {
         return BackendSelection::TractCpu;
     }
     backend_selection_from_name(&report.backend_name)
+}
+
+/// A report may only be chosen when it is promoted **and** its backend really runs inference in
+/// this build. A deserialized `CalibrationReport` can name any backend (for example a promoted
+/// "vulkan" written by hand or by an older tool), so the decision cannot rely on the producer
+/// having refused passthrough candidates.
+fn is_selectable(report: &CalibrationReport) -> bool {
+    report.is_promoted() && backend_selection_from_name(&report.backend_name).executes_inference()
 }
 
 /// Evaluates a list of candidate calibration reports and selects the best promoted backend
@@ -324,7 +493,7 @@ pub fn select_auto(report: CalibrationReport) -> BackendSelection {
 pub fn select_best(reports: &[CalibrationReport]) -> BackendSelection {
     reports
         .iter()
-        .filter(|r| r.is_promoted())
+        .filter(|r| is_selectable(r))
         .max_by_key(|r| backend_priority_score(&r.backend_name))
         .map_or(BackendSelection::TractCpu, |r| {
             backend_selection_from_name(&r.backend_name)
@@ -372,7 +541,7 @@ impl AutoPolicy {
             BackendRequest::DedicatedGpu => candidates
                 .iter()
                 .filter(|r| {
-                    if !r.is_promoted() {
+                    if !is_selectable(r) {
                         return false;
                     }
                     backend_selection_from_name(&r.backend_name).is_dedicated_gpu()
@@ -384,7 +553,7 @@ impl AutoPolicy {
             BackendRequest::Npu => candidates
                 .iter()
                 .filter(|r| {
-                    if !r.is_promoted() {
+                    if !is_selectable(r) {
                         return false;
                     }
                     let sel = backend_selection_from_name(&r.backend_name);
@@ -402,7 +571,7 @@ impl AutoPolicy {
             BackendRequest::IntegratedGpu => candidates
                 .iter()
                 .filter(|r| {
-                    if !r.is_promoted() {
+                    if !is_selectable(r) {
                         return false;
                     }
                     backend_selection_from_name(&r.backend_name).is_integrated_gpu()
@@ -415,7 +584,7 @@ impl AutoPolicy {
             BackendRequest::Cpu => candidates
                 .iter()
                 .filter(|r| {
-                    if !r.is_promoted() {
+                    if !is_selectable(r) {
                         return false;
                     }
                     matches!(
@@ -431,23 +600,23 @@ impl AutoPolicy {
             BackendRequest::TensorRt | BackendRequest::Cuda => candidates
                 .iter()
                 .find(|r| {
-                    r.is_promoted()
+                    is_selectable(r)
                         && (r.backend_name.eq_ignore_ascii_case("tensorrt")
                             || r.backend_name.eq_ignore_ascii_case("cuda"))
                 })
                 .map_or(BackendSelection::TractCpu, |_| BackendSelection::TensorRt),
             BackendRequest::DirectMl => candidates
                 .iter()
-                .find(|r| r.is_promoted() && r.backend_name.eq_ignore_ascii_case("directml"))
+                .find(|r| is_selectable(r) && r.backend_name.eq_ignore_ascii_case("directml"))
                 .map_or(BackendSelection::TractCpu, |_| BackendSelection::DirectMl),
             BackendRequest::Vulkan => candidates
                 .iter()
-                .find(|r| r.is_promoted() && r.backend_name.eq_ignore_ascii_case("vulkan"))
+                .find(|r| is_selectable(r) && r.backend_name.eq_ignore_ascii_case("vulkan"))
                 .map_or(BackendSelection::TractCpu, |_| BackendSelection::Vulkan),
             BackendRequest::RyzenAiNpu => candidates
                 .iter()
                 .find(|r| {
-                    r.is_promoted()
+                    is_selectable(r)
                         && (r.backend_name.eq_ignore_ascii_case("ryzenai-npu")
                             || r.backend_name.eq_ignore_ascii_case("ryzen-ai")
                             || r.backend_name.eq_ignore_ascii_case("ryzenai")
@@ -459,7 +628,7 @@ impl AutoPolicy {
             BackendRequest::RyzenAiGpu => candidates
                 .iter()
                 .find(|r| {
-                    r.is_promoted()
+                    is_selectable(r)
                         && (r.backend_name.eq_ignore_ascii_case("ryzenai-gpu")
                             || r.backend_name.eq_ignore_ascii_case("ryzen-ai-gpu")
                             || r.backend_name.eq_ignore_ascii_case("amd-igpu")
@@ -469,7 +638,7 @@ impl AutoPolicy {
             BackendRequest::RyzenAi => candidates
                 .iter()
                 .filter(|r| {
-                    if !r.is_promoted() {
+                    if !is_selectable(r) {
                         return false;
                     }
                     backend_selection_from_name(&r.backend_name).is_amd()
@@ -481,7 +650,7 @@ impl AutoPolicy {
             BackendRequest::OpenVinoNpu => candidates
                 .iter()
                 .find(|r| {
-                    r.is_promoted()
+                    is_selectable(r)
                         && (r.backend_name.eq_ignore_ascii_case("openvino-npu")
                             || r.backend_name.eq_ignore_ascii_case("npu")
                             || r.backend_name.eq_ignore_ascii_case("intel-npu")
@@ -493,7 +662,7 @@ impl AutoPolicy {
             BackendRequest::OpenVinoGpu => candidates
                 .iter()
                 .find(|r| {
-                    r.is_promoted()
+                    is_selectable(r)
                         && (r.backend_name.eq_ignore_ascii_case("openvino-gpu")
                             || r.backend_name.eq_ignore_ascii_case("intel-gpu")
                             || r.backend_name.eq_ignore_ascii_case("arc"))
@@ -504,7 +673,7 @@ impl AutoPolicy {
             BackendRequest::OpenVinoCpu => candidates
                 .iter()
                 .find(|r| {
-                    r.is_promoted()
+                    is_selectable(r)
                         && (r.backend_name.eq_ignore_ascii_case("openvino-cpu")
                             || r.backend_name.eq_ignore_ascii_case("intel-cpu"))
                 })
@@ -514,7 +683,7 @@ impl AutoPolicy {
             BackendRequest::OpenVino => candidates
                 .iter()
                 .find(|r| {
-                    r.is_promoted()
+                    is_selectable(r)
                         && (r.backend_name.eq_ignore_ascii_case("openvino")
                             || r.backend_name.eq_ignore_ascii_case("openvino-npu")
                             || r.backend_name.eq_ignore_ascii_case("openvino-gpu")
@@ -524,7 +693,7 @@ impl AutoPolicy {
             BackendRequest::CoreMl => candidates
                 .iter()
                 .find(|r| {
-                    r.is_promoted()
+                    is_selectable(r)
                         && (r.backend_name.eq_ignore_ascii_case("coreml")
                             || r.backend_name.eq_ignore_ascii_case("ane"))
                 })
@@ -541,5 +710,36 @@ impl AutoPolicy {
         report.map_or(BackendSelection::TractCpu, |rep| {
             self.resolve_candidates(request, std::slice::from_ref(rep))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backend_priority_score;
+
+    #[test]
+    fn backend_priority_order_is_tensorrt_directml_vulkan_npu_igpu_tract() {
+        let ordered = [
+            ("tensorrt", 100),
+            ("directml", 90),
+            ("vulkan", 85),
+            ("openvino-npu", 80),
+            ("openvino-gpu", 70),
+            ("tract", 50),
+        ];
+        for (name, score) in ordered {
+            assert_eq!(backend_priority_score(name), score, "{name}");
+        }
+        for pair in ordered.windows(2) {
+            assert!(
+                backend_priority_score(pair[0].0) > backend_priority_score(pair[1].0),
+                "{} must outrank {}",
+                pair[0].0,
+                pair[1].0
+            );
+        }
+        // Unknown names rank below the CPU baseline and the lookup is case-insensitive.
+        assert!(backend_priority_score("unknown") < backend_priority_score("tract"));
+        assert_eq!(backend_priority_score("TensorRT"), 100);
     }
 }

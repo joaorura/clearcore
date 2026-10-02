@@ -14,9 +14,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use realtime_noise_accelerators::{
-    CalibrationReport, CoreMlBackend, OpenVINOBackend, PromotionDecision,
+    CalibrationReport, CoreMlBackend, DirectMlBackend, OpenVINOBackend, PromotionDecision,
     QUALIFICATION_MAX_DEADLINE_MS, QUALIFICATION_MAX_P99_MS, RyzenAiBackend, TensorRtBackend,
-    evaluate_calibration,
+    VulkanBackend, evaluate_calibration,
 };
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_model::InferenceBackend;
@@ -116,6 +116,68 @@ fn calculate_percentile(sorted_samples: &[f64], pct: f64) -> f64 {
     sorted_samples[idx.min(sorted_samples.len() - 1)]
 }
 
+/// Marker prefixed to `reason` when the candidate only copies samples (no neural network runs).
+const PASSTHROUGH_MARKER: &str = "PASSTHROUGH";
+
+/// A calibration candidate and whether it runs real inference.
+struct Candidate {
+    backend: Box<dyn InferenceBackend>,
+    executes_inference: bool,
+}
+
+/// Builds the candidate for `name`.
+///
+/// Every candidate built here is a mock or a stub (no model assets are loaded), and the
+/// accelerator ones copy input to output, so their latency says nothing about a real network.
+/// The flag comes from the backend itself, not from a list kept here, so it turns true for a
+/// backend only when that backend starts executing inference.
+fn build_candidate(name: &str) -> Result<Candidate, String> {
+    macro_rules! candidate {
+        ($backend:expr) => {{
+            let backend = $backend;
+            let executes_inference = backend.executes_inference();
+            Candidate {
+                backend: Box::new(backend),
+                executes_inference,
+            }
+        }};
+    }
+    Ok(match name.to_lowercase().as_str() {
+        "cuda" | "tensorrt" => candidate!(TensorRtBackend::new_mock()),
+        "directml" | "dx12" => candidate!(DirectMlBackend::new_mock()),
+        "vulkan" => candidate!(VulkanBackend::new_mock()),
+        "ryzenai" | "ryzen-ai" | "vitisai" | "xdna" | "amd-npu" => {
+            candidate!(RyzenAiBackend::new_mock_npu())
+        }
+        "ryzenai-gpu" | "ryzen-ai-gpu" | "amd-igpu" => candidate!(RyzenAiBackend::new_mock_gpu()),
+        "openvino" | "npu" | "openvino-npu" => candidate!(OpenVINOBackend::new_mock_npu()),
+        "openvino-gpu" | "gpu" => candidate!(OpenVINOBackend::new_mock_gpu()),
+        // "cpu" is an alias kept for compatibility; the stub it measures is OpenVINO's.
+        "openvino-cpu" | "cpu" => candidate!(OpenVINOBackend::new_mock_cpu()),
+        "coreml" | "ane" => candidate!(CoreMlBackend::new_mock()),
+        other => {
+            return Err(format!(
+                "unsupported accelerator backend for calibration: {other}"
+            ));
+        }
+    })
+}
+
+/// Forces a passthrough candidate to `NotPromoted` and says why, keeping any gate failures that
+/// were already recorded. Not overridable by `--force-promote`: that flag bypasses the staging
+/// gate, and a candidate that does not denoise has nothing to be staged.
+fn reject_passthrough(report: &mut CalibrationReport) {
+    let note = format!(
+        "{PASSTHROUGH_MARKER}: candidate only copies input to output (no neural network executed); \
+         its latency is not evidence for AUTO and it is never promoted"
+    );
+    report.decision = PromotionDecision::NotPromoted;
+    report.reason = Some(match report.reason.take() {
+        Some(existing) => format!("{note}; {existing}"),
+        None => note,
+    });
+}
+
 fn run_calibration(cli: &CliArgs) -> Result<CalibrationReport, String> {
     let effective_seconds = cli.duration_seconds.unwrap_or(cli.duration_minutes * 60.0);
     // In real-time audio at 48kHz with 480 samples per hop, 1 second = 100 hops.
@@ -123,22 +185,16 @@ fn run_calibration(cli: &CliArgs) -> Result<CalibrationReport, String> {
     // We calibrate over sample frames (up to 30,000 hops for 5 minutes, or minimum 100 hops)
     let hops_to_benchmark = total_hops.clamp(100, 30_000);
 
-    let mut backend_instance: Box<dyn InferenceBackend> = match cli.backend.to_lowercase().as_str()
-    {
-        "cuda" | "tensorrt" => Box::new(TensorRtBackend::new_mock()),
-        "ryzenai" | "ryzen-ai" | "vitisai" | "xdna" | "amd-npu" => {
-            Box::new(RyzenAiBackend::new_mock_npu())
-        }
-        "openvino" | "npu" | "openvino-npu" => Box::new(OpenVINOBackend::new_mock_npu()),
-        "openvino-gpu" | "gpu" => Box::new(OpenVINOBackend::new_mock_gpu()),
-        "openvino-cpu" | "cpu" => Box::new(OpenVINOBackend::new_mock_cpu()),
-        "coreml" | "ane" => Box::new(CoreMlBackend::new_mock()),
-        other => {
-            return Err(format!(
-                "unsupported accelerator backend for calibration: {other}"
-            ));
-        }
-    };
+    let Candidate {
+        backend: mut backend_instance,
+        executes_inference,
+    } = build_candidate(&cli.backend)?;
+    if !executes_inference {
+        eprintln!(
+            "warning: backend '{}' is a passthrough here (no neural network runs); it will not be promoted",
+            cli.backend
+        );
+    }
 
     let sample_frame: AudioFrame = [0.0; HOP_SAMPLES];
     let mut latencies_ms = Vec::with_capacity(hops_to_benchmark);
@@ -209,6 +265,11 @@ fn run_calibration(cli: &CliArgs) -> Result<CalibrationReport, String> {
         }
     }
 
+    // Outside the `force_promote` check above on purpose: passthrough is never promoted.
+    if !executes_inference {
+        reject_passthrough(&mut report);
+    }
+
     Ok(report)
 }
 
@@ -273,6 +334,18 @@ fn main() -> ExitCode {
                         PromotionDecision::NotPromoted => "NOT_PROMOTED",
                     }
                 );
+                println!(
+                    "Inference:          {}",
+                    if report
+                        .reason
+                        .as_deref()
+                        .is_some_and(|r| r.starts_with(PASSTHROUGH_MARKER))
+                    {
+                        "PASSTHROUGH (copies input to output; no neural network)"
+                    } else {
+                        "executed"
+                    }
+                );
                 if let Some(ref reason) = report.reason {
                     println!("Reason:             {reason}");
                 }
@@ -284,5 +357,77 @@ fn main() -> ExitCode {
             eprintln!("Calibration failed: {err}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    fn cli(backend: &str, force_promote: bool) -> CliArgs {
+        CliArgs {
+            duration_minutes: 0.0,
+            duration_seconds: Some(1.0),
+            backend: backend.to_owned(),
+            output_path: None,
+            json_output: false,
+            force_promote,
+        }
+    }
+
+    #[test]
+    fn every_mock_accelerator_candidate_is_a_passthrough() {
+        for name in [
+            "tensorrt",
+            "cuda",
+            "directml",
+            "dx12",
+            "vulkan",
+            "ryzenai",
+            "ryzenai-gpu",
+            "openvino",
+            "npu",
+            "openvino-gpu",
+            "gpu",
+            "openvino-cpu",
+            "cpu",
+            "coreml",
+            "ane",
+        ] {
+            let candidate = build_candidate(name).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(
+                !candidate.executes_inference,
+                "{name} is a mock and cannot be reported as running inference"
+            );
+        }
+        assert!(build_candidate("no-such-backend").is_err());
+    }
+
+    #[test]
+    fn passthrough_candidates_are_never_promoted_even_when_forced() {
+        for name in ["vulkan", "directml", "ryzenai", "openvino-cpu", "tensorrt"] {
+            for force in [false, true] {
+                let report = run_calibration(&cli(name, force)).unwrap();
+                assert_eq!(
+                    report.decision,
+                    PromotionDecision::NotPromoted,
+                    "{name} {force}"
+                );
+                assert!(!report.is_promoted());
+                let reason = report.reason.unwrap();
+                assert!(reason.starts_with(PASSTHROUGH_MARKER), "{name}: {reason}");
+            }
+        }
+    }
+
+    #[test]
+    fn rejection_keeps_the_earlier_gate_reason() {
+        let mut report = evaluate_calibration("vulkan", 1.0, 100, 1.0, 1.0, 20.0, 20.0, 1, 0);
+        let earlier = report.reason.clone().unwrap();
+        reject_passthrough(&mut report);
+        let reason = report.reason.unwrap();
+        assert!(reason.starts_with(PASSTHROUGH_MARKER));
+        assert!(reason.ends_with(&earlier));
     }
 }

@@ -8,9 +8,15 @@ publish = false
 
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
-realtime-noise-model = { path = "../model" }
+deep_filter = { path = "../../vendor/crates/deep_filter", package = "deep_filter_fork", default-features = false, features = ["tract"] }
+realtime-noise-model = { path = "../model", features = ["tract"] }
+realtime-noise-runtime-coreml = { path = "../runtime-coreml" }
+realtime-noise-runtime-gpu-compute = { path = "../runtime-gpu-compute" }
+realtime-noise-runtime-openvino = { path = "../runtime-openvino" }
+realtime-noise-runtime-tensorrt = { path = "../runtime-tensorrt" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
+sha2 = { version = "=0.10.9", default-features = false, features = ["std"] }
 
 [features]
 tract = ["realtime-noise-model/tract"]

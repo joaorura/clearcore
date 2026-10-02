@@ -1,9 +1,15 @@
 #![forbid(unsafe_code)]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::float_cmp)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::float_cmp,
+    clippy::cognitive_complexity
+)]
 
 use realtime_noise_accelerators::{
-    CoreMlBackend, CudaBackend, OpenVINOBackend, PromotionDecision, QUALIFICATION_MAX_DEADLINE_MS,
-    QUALIFICATION_MAX_P99_MS, evaluate_calibration,
+    CoreMlBackend, DirectMlBackend, OpenVINOBackend, PromotionDecision,
+    QUALIFICATION_MAX_DEADLINE_MS, QUALIFICATION_MAX_P99_MS, RyzenAiBackend, TensorRtBackend,
+    VulkanBackend, evaluate_calibration,
 };
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES, SAMPLE_RATE_HZ};
 use realtime_noise_model::{InferenceBackend, InferenceError};
@@ -76,31 +82,52 @@ fn qualification_enforces_contracts_adherence() {
     assert_eq!(SAMPLE_RATE_HZ, 48_000);
 
     // 2. All backends must implement InferenceBackend and adhere to contracts
-    let mut cuda = CudaBackend::new_mock();
+    let mut tensorrt = TensorRtBackend::new_mock();
     let mut openvino = OpenVINOBackend::new_mock();
     let mut coreml = CoreMlBackend::new_mock();
+    let mut directml = DirectMlBackend::new_mock();
+    let mut vulkan = VulkanBackend::new_mock();
+    let mut ryzenai = RyzenAiBackend::new_mock();
 
     // Check descriptors
-    assert_eq!(cuda.descriptor().backend, "tensorrt");
+    assert_eq!(tensorrt.descriptor().backend, "tensorrt");
     assert_eq!(openvino.descriptor().backend, "openvino");
     assert_eq!(coreml.descriptor().backend, "coreml");
+    assert_eq!(directml.descriptor().backend, "directml");
+    assert_eq!(vulkan.descriptor().backend, "vulkan");
+    assert_eq!(ryzenai.descriptor().backend, "ryzenai");
 
     // Check algorithmic latency contract (1440 samples = 30 ms)
-    assert_eq!(cuda.algorithmic_latency_samples(), 1_440);
+    assert_eq!(tensorrt.algorithmic_latency_samples(), 1_440);
     assert_eq!(openvino.algorithmic_latency_samples(), 1_440);
     assert_eq!(coreml.algorithmic_latency_samples(), 1_440);
+    assert_eq!(directml.algorithmic_latency_samples(), 1_440);
+    assert_eq!(vulkan.algorithmic_latency_samples(), 1_440);
+    assert_eq!(ryzenai.algorithmic_latency_samples(), 1_440);
 
     // Check finite input processing contract
     let input: AudioFrame = [0.0; HOP_SAMPLES];
-    let cuda_out = cuda.process(&input).unwrap();
-    assert_eq!(cuda_out.samples.len(), HOP_SAMPLES);
-    assert!(cuda_out.samples.iter().all(|s| s.is_finite()));
+    let tensorrt_out = tensorrt.process(&input).unwrap();
+    assert_eq!(tensorrt_out.samples.len(), HOP_SAMPLES);
+    assert!(tensorrt_out.samples.iter().all(|s| s.is_finite()));
+
+    let directml_out = directml.process(&input).unwrap();
+    assert_eq!(directml_out.samples.len(), HOP_SAMPLES);
+    assert!(directml_out.samples.iter().all(|s| s.is_finite()));
+
+    let vulkan_out = vulkan.process(&input).unwrap();
+    assert_eq!(vulkan_out.samples.len(), HOP_SAMPLES);
+    assert!(vulkan_out.samples.iter().all(|s| s.is_finite()));
+
+    let ryzenai_out = ryzenai.process(&input).unwrap();
+    assert_eq!(ryzenai_out.samples.len(), HOP_SAMPLES);
+    assert!(ryzenai_out.samples.iter().all(|s| s.is_finite()));
 
     // Check non-finite input rejection (contracts enforcement)
     let mut nan_input = [0.0; HOP_SAMPLES];
     nan_input[0] = f32::NAN;
     assert!(matches!(
-        cuda.process(&nan_input),
+        tensorrt.process(&nan_input),
         Err(InferenceError::InputContract(_))
     ));
     assert!(matches!(
@@ -109,6 +136,18 @@ fn qualification_enforces_contracts_adherence() {
     ));
     assert!(matches!(
         coreml.process(&nan_input),
+        Err(InferenceError::InputContract(_))
+    ));
+    assert!(matches!(
+        directml.process(&nan_input),
+        Err(InferenceError::InputContract(_))
+    ));
+    assert!(matches!(
+        vulkan.process(&nan_input),
+        Err(InferenceError::InputContract(_))
+    ));
+    assert!(matches!(
+        ryzenai.process(&nan_input),
         Err(InferenceError::InputContract(_))
     ));
 }

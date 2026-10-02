@@ -21,7 +21,10 @@ fn prompt_tracker_warns_three_times_then_suppresses() {
     let m1 = msg1.unwrap();
     assert!(m1.contains("[1/3]"));
     assert!(m1.contains("TensorRT"));
-    assert!(m1.contains("scripts/install-tensorrt.sh"));
+    // TensorRT has no inference path yet: the message must not tell the user to install it.
+    assert!(!m1.contains("scripts/install-tensorrt.sh"));
+    assert!(!m1.contains("execute"));
+    assert!(m1.contains("ainda não está implementado"));
 
     // 2nd prompt: should warn with counter [2/3]
     let msg2 = tracker.record_prompt(DetectedHardware::NvidiaGpu);
@@ -46,6 +49,28 @@ fn prompt_tracker_warns_three_times_then_suppresses() {
 
     assert_eq!(tracker.prompt_count(DetectedHardware::NvidiaGpu), 5);
     assert!(!tracker.should_prompt(DetectedHardware::NvidiaGpu));
+}
+
+#[test]
+fn only_hardware_with_an_inference_path_is_told_to_install_a_runtime() {
+    let mut tracker = RuntimeRecommendationTracker::new();
+    for hardware in [
+        DetectedHardware::NvidiaGpu,
+        DetectedHardware::AmdNpu,
+        DetectedHardware::AmdGpu,
+        DetectedHardware::AppleSilicon,
+    ] {
+        assert!(!hardware.runs_inference(), "{hardware:?}");
+        let msg = tracker.record_prompt(hardware).unwrap();
+        assert!(msg.contains("ainda não está implementado"), "{msg}");
+        assert!(!msg.contains("scripts/"), "{msg}");
+        assert!(!msg.contains("execute"), "{msg}");
+    }
+    for hardware in [DetectedHardware::IntelNpu, DetectedHardware::IntelGpu] {
+        assert!(hardware.runs_inference(), "{hardware:?}");
+        let msg = tracker.record_prompt(hardware).unwrap();
+        assert!(msg.contains("scripts/install-openvino.sh"), "{msg}");
+    }
 }
 
 #[test]
@@ -101,7 +126,8 @@ fn hardware_detected_without_runtime_prompts_and_falls_back_to_npu() {
     assert_eq!(sel1, BackendSelection::OpenVinoNpu);
     assert_eq!(msgs1.len(), 1);
     assert!(msgs1[0].contains("[1/3]"));
-    assert!(msgs1[0].contains("scripts/install-tensorrt.sh"));
+    assert!(msgs1[0].contains("ainda não está implementado"));
+    assert!(!msgs1[0].contains("scripts/install-tensorrt.sh"));
 
     // 2nd run: prompts for TensorRT, falls back to Intel NPU
     let (sel2, msgs2) = HardwareScanner::resolve_audits_to_backend(&mut tracker, &audits);
@@ -180,7 +206,8 @@ fn sem_cuda_so_tensorrt_contract() {
     assert!(trt.is_dedicated_gpu());
     assert_eq!(trt.tier(), DeviceTier::DedicatedGpu);
 
-    // 3. User requesting legacy BackendRequest::Cuda resolves to TensorRt
+    // 3. Legacy BackendRequest::Cuda maps to TensorRt, which does not run inference yet, so even a
+    //    promoted report resolves to the tract baseline
     let policy = realtime_noise_accelerators::AutoPolicy::new();
     let candidates = [realtime_noise_accelerators::CalibrationReport {
         backend_name: "cuda".to_owned(),
@@ -196,5 +223,5 @@ fn sem_cuda_so_tensorrt_contract() {
         reason: None,
     }];
     let sel = policy.resolve_candidates(BackendRequest::Cuda, &candidates);
-    assert_eq!(sel, BackendSelection::TensorRt);
+    assert_eq!(sel, BackendSelection::TractCpu);
 }
