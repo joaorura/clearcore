@@ -17,7 +17,7 @@ All 17 project implementation tracks have been fully realized with zero compromi
    - macOS 13+ CoreAudio HAL plugin & XPC bridge.
    - Linux PipeWire 1.6.9 native helper & rebind supervisor.
 4. **Desktop UI & Diagnostics:** Tauri 2.0 control client, system tray, and privacy-first diagnostics exporter with salted device hashes and zero PCM audio leakage.
-5. **Accelerators:** OpenVINO, CUDA, CoreML plugins with conservative AUTO fallback policy and offline calibration CLI.
+5. **Accelerators:** OpenVINO, CUDA, CoreML plugins are stubs in staging, not promoted; the only engine that processes audio is Tract on the CPU. Conservative AUTO fallback policy and offline calibration CLI are in place.
 6. **Packaging & Security:** WiX installer, MSIX manifest, macOS pkg, RPM/DEB packages, CycloneDX/SPDX 2.3 SBOM, and fail-closed artifact scanner.
 7. **Simultaneous GA Matrix:** All 4 target platforms verified.
 

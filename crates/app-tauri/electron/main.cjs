@@ -4,9 +4,12 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const { execFile, spawn } = require('child_process');
+const { planCaptureLinks } = require('./capture-link-plan.cjs');
+const { parseHardwareJson } = require('./hardware-json.cjs');
+const { resolveBackendSelection } = require('./backend-selection.cjs');
 
 // ClearCore Runtime Application Version
-const APP_VERSION = '0.1.0-beta.1';
+const APP_VERSION = '0.1.0-beta.2';
 app.setVersion(APP_VERSION);
 
 // Enforce single instance lock (in production)
@@ -801,19 +804,16 @@ function setSystemInputDevice(deviceId) {
         } catch {}
       }
 
-      // Link target ports
-      const outLines = pwOut.split('\n');
-      for (const port of outLines) {
-        const trimmed = port.trim();
-        if (!trimmed || trimmed.includes('realtime-noise')) continue;
-        if (nodeName && trimmed.startsWith(nodeName)) {
-          if (trimmed.endsWith('_FL') || trimmed.endsWith('_1')) {
-            try { require('child_process').execSync(`pw-link "${trimmed}" "realtime-noise-capture:input_FL" 2>/dev/null || pw-link "${trimmed}" "realtime-noise-capture:input_MONO" 2>/dev/null || true`); } catch {}
-          }
-          if (trimmed.endsWith('_FR') || trimmed.endsWith('_2')) {
-            try { require('child_process').execSync(`pw-link "${trimmed}" "realtime-noise-capture:input_FR" 2>/dev/null || true`); } catch {}
-          }
-        }
+      // Link target ports: stereo FL/FR -> FL/FR; mono (e.g. Bluetooth headset) -> every input
+      let pwIn = '';
+      try { pwIn = require('child_process').execSync('pw-link -i', { encoding: 'utf8', timeout: 2000 }); } catch {}
+      const plan = planCaptureLinks({
+        nodeName,
+        outPorts: pwOut.split('\n'),
+        inPorts: pwIn.split('\n'),
+      });
+      for (const { src, dst } of plan) {
+        try { require('child_process').execFileSync('pw-link', [src, dst], { stdio: 'ignore', timeout: 2000 }); } catch {}
       }
     } catch (err) {
       console.warn('[Clearcore] Link update for input device:', err.message);
@@ -962,7 +962,15 @@ async function pollDaemonStatus() {
 }
 
 app.whenReady().then(async () => {
-  createTray();
+  // The tray is optional: GNOME shows no tray icon without the AppIndicator extension,
+  // and a failure here must not stop the window from opening (it stays reachable from the
+  // app menu: launching again hits 'second-instance' and shows the window).
+  try {
+    createTray();
+  } catch (err) {
+    tray = null;
+    console.warn('[Clearcore] System tray unavailable, continuing without it:', err.message);
+  }
   createWindow();
 
   // 1. Ensure daemon is running (auto-start sidecar if not running)
@@ -1079,18 +1087,28 @@ function queryHardwareBackends() {
   const isWin = process.platform === 'win32';
   const isMac = process.platform === 'darwin';
 
+  // Motivo curto da falha do detector (script/powershell); vai no resultado como
+  // `detection_error` para a UI nao mostrar "Runtime Ausente" sem explicar nada.
+  let detectionError = null;
+  const shortError = (err) => String((err && err.message) || err).split('\n')[0].slice(0, 200);
+
   if (isLinux) {
     try {
       const scriptPath = findScriptPath('detect-hardware.sh');
       if (fs.existsSync(scriptPath)) {
-        const out = require('child_process').execSync(`"${scriptPath}" --json`, { encoding: 'utf8', timeout: 5000 });
-        const parsed = JSON.parse(out);
-        return {
-          ...parsed,
-          active_backend: currentSelectedBackend,
-        };
+        const out = require('child_process').execSync(`"${scriptPath}" --json`, { encoding: 'utf8', timeout: 15000 });
+        const result = parseHardwareJson(out);
+        if (result.ok) {
+          return {
+            ...result.data,
+            active_backend: currentSelectedBackend,
+          };
+        }
+        detectionError = result.error;
+        console.warn('Failed to parse hardware detection output:', result.error);
       }
     } catch (err) {
+      detectionError = `falha ao executar detect-hardware.sh: ${shortError(err)}`;
       console.warn('Failed to detect hardware via script:', err.message);
     }
   }
@@ -1103,13 +1121,18 @@ function queryHardwareBackends() {
           `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -Json`,
           { encoding: 'utf8', timeout: 6000 }
         );
-        const parsed = JSON.parse(out);
-        return {
-          ...parsed,
-          active_backend: currentSelectedBackend,
-        };
+        const result = parseHardwareJson(out);
+        if (result.ok) {
+          return {
+            ...result.data,
+            active_backend: currentSelectedBackend,
+          };
+        }
+        detectionError = result.error;
+        console.warn('Failed to parse Windows hardware detection output:', result.error);
       }
     } catch (err) {
+      detectionError = `falha ao executar detect-hardware-windows.ps1: ${shortError(err)}`;
       console.warn('Failed to detect Windows hardware via powershell:', err.message);
     }
   }
@@ -1273,6 +1296,7 @@ function queryHardwareBackends() {
       },
     ],
     active_backend: currentSelectedBackend,
+    ...(detectionError ? { detection_error: detectionError } : {}),
   };
 }
 
@@ -1281,7 +1305,12 @@ ipcMain.handle('get_hardware_backends', () => {
 });
 
 ipcMain.handle('set_hardware_backend', (_event, backendId) => {
-  currentSelectedBackend = String(backendId || 'auto');
-  return { success: true, active_backend: currentSelectedBackend };
+  // So 'auto' e 'cpu_tract' processam audio hoje (o motor e sempre o Tract na CPU);
+  // os demais voltam { success: false, reason: 'not_implemented' } sem mudar nada.
+  const result = resolveBackendSelection(backendId);
+  if (result.success) {
+    currentSelectedBackend = result.active_backend;
+  }
+  return result;
 });
 

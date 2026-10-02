@@ -17,3 +17,8 @@ crates/app-tauri/src-tauri/binaries/
 *.so
 *.a
 platform/linux/helper/lib/
+# Saída local do benchmark de CPU (específica da máquina; ver benchmarks/local/README.md)
+benchmarks/local/*
+!benchmarks/local/README.md
+# Amostras de voz e ruído baixadas por scripts/fetch-voice-samples.sh (licenças próprias; nunca commitar)
+fixtures/voice-samples/

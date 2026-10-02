@@ -49,6 +49,33 @@ jobs:
       - name: Package Linux Standalone Application
         run: ./package.sh
 
+      - name: Verify Linux Package Contents
+        run: |
+          set -euo pipefail
+          TARBALL="$(ls release/Clearcore-linux-x64.tar.gz 2>/dev/null | head -n1 || true)"
+          if [ -z "${TARBALL}" ]; then
+            echo "::error::release/Clearcore-linux-x64.tar.gz nao encontrado"
+            ls -lh release/ || true
+            exit 1
+          fi
+          tar -tzf "${TARBALL}" > "${RUNNER_TEMP}/linux-package-listing.txt"
+          for entry in \
+            "Clearcore-linux-x64/resources/bin/pipewire_helper" \
+            "Clearcore-linux-x64/resources/scripts/check-virtual-mic.sh"; do
+            if ! grep -qx "./${entry}\|${entry}" "${RUNNER_TEMP}/linux-package-listing.txt"; then
+              echo "::error::${entry} ausente em ${TARBALL}"
+              exit 1
+            fi
+          done
+          EXTRACT_DIR="$(mktemp -d "${RUNNER_TEMP}/linux-package-check.XXXXXX")"
+          tar -xzf "${TARBALL}" -C "${EXTRACT_DIR}"
+          if [ ! -x "${EXTRACT_DIR}/Clearcore-linux-x64/resources/bin/pipewire_helper" ]; then
+            echo "::error::resources/bin/pipewire_helper nao e executavel no pacote extraido"
+            ls -l "${EXTRACT_DIR}/Clearcore-linux-x64/resources/bin/" || true
+            exit 1
+          fi
+          echo "Pacote Linux OK: pipewire_helper e check-virtual-mic.sh presentes"
+
       - name: Upload Linux Package Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -146,6 +173,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Publishing is only supported for `v*` tags: the notes file is resolved from the tag name,
+      # so a workflow_dispatch run without a tag does not publish a release.
+      - name: Verify release notes exist
+        run: test -f "release/RELEASE-NOTES-${GITHUB_REF_NAME}.md" || { echo "missing release/RELEASE-NOTES-${GITHUB_REF_NAME}.md"; exit 1; }
+
       - name: Download all built artifacts
         uses: actions/download-artifact@v4
         with:
@@ -161,6 +193,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*
-          body_path: release/RELEASE-NOTES-v0.1.0-beta.1.md
+          body_path: release/RELEASE-NOTES-${{ github.ref_name }}.md
           draft: false
           prerelease: true

@@ -307,57 +307,8 @@ StartupWMClass=clearcore
   fs.writeFileSync(path.join(bundleDir, 'clearcore.desktop'), desktopEntry, 'utf8');
 
   // install.sh
-  const installSh = `#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-APP_NAME="clearcore"
-
-echo "=== Clearcore Desktop Application Installer ==="
-
-if [[ $EUID -eq 0 ]]; then
-    # System-wide installation
-    INSTALL_DIR="/opt/clearcore"
-    BIN_LINK="/usr/local/bin/clearcore"
-    DESKTOP_DIR="/usr/share/applications"
-    ICON_DIR="/usr/share/icons/hicolor/256x256/apps"
-else
-    # User-local installation (no root required)
-    INSTALL_DIR="\${HOME}/.local/share/clearcore"
-    BIN_LINK="\${HOME}/.local/bin/clearcore"
-    DESKTOP_DIR="\${HOME}/.local/share/applications"
-    ICON_DIR="\${HOME}/.local/share/icons/hicolor/256x256/apps"
-    mkdir -p "\${HOME}/.local/bin"
-fi
-
-echo "Installing Clearcore to \${INSTALL_DIR}..."
-mkdir -p "\${INSTALL_DIR}"
-cp -r "\${SCRIPT_DIR}"/* "\${INSTALL_DIR}/"
-chmod +x "\${INSTALL_DIR}/clearcore"
-find "\${INSTALL_DIR}/resources/bin" -type f -exec chmod +x {} + 2>/dev/null || true
-find "\${INSTALL_DIR}/resources/scripts" -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
-
-echo "Creating launcher symlink at \${BIN_LINK}..."
-mkdir -p "$(dirname "\${BIN_LINK}")"
-ln -sf "\${INSTALL_DIR}/clearcore" "\${BIN_LINK}"
-
-echo "Installing icon and desktop entry..."
-mkdir -p "\${ICON_DIR}" "\${DESKTOP_DIR}"
-if [[ -f "\${INSTALL_DIR}/resources/app/assets/icon.png" ]]; then
-    cp "\${INSTALL_DIR}/resources/app/assets/icon.png" "\${ICON_DIR}/clearcore.png"
-fi
-
-sed "s|^Exec=.*|Exec=\${INSTALL_DIR}/clearcore|" "\${INSTALL_DIR}/clearcore.desktop" > "\${DESKTOP_DIR}/clearcore.desktop"
-chmod +x "\${DESKTOP_DIR}/clearcore.desktop"
-
-if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database "\${DESKTOP_DIR}" 2>/dev/null || true
-fi
-
-echo ""
-echo "✅ Clearcore installed successfully!"
-echo "You can launch Clearcore directly from your application menu or run 'clearcore' in your terminal."
-`;
+  // Source of truth is a real, lintable file (also exercised by scripts/linux-install.test.sh)
+  const installSh = fs.readFileSync(path.join(__dirname, 'linux-install.sh'), 'utf8');
   const installPath = path.join(bundleDir, 'install.sh');
   fs.writeFileSync(installPath, installSh, 'utf8');
   fs.chmodSync(installPath, 0o755);
@@ -414,7 +365,7 @@ if [[ $EUID -eq 0 ]]; then
     rm -rf "/opt/clearcore" 2>/dev/null || true
     rm -f "/usr/local/bin/clearcore" 2>/dev/null || true
     rm -f "/usr/share/applications/clearcore.desktop" 2>/dev/null || true
-    rm -f "/usr/share/icons/hicolor/256x256/apps/clearcore.png" 2>/dev/null || true
+    find "/usr/share/icons/hicolor" -path '*/apps/clearcore.png' -delete 2>/dev/null || true
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "/usr/share/applications" 2>/dev/null || true
     fi
@@ -422,7 +373,7 @@ else
     rm -rf "\${HOME}/.local/share/clearcore" 2>/dev/null || true
     rm -f "\${HOME}/.local/bin/clearcore" 2>/dev/null || true
     rm -f "\${HOME}/.local/share/applications/clearcore.desktop" 2>/dev/null || true
-    rm -f "\${HOME}/.local/share/icons/hicolor/256x256/apps/clearcore.png" 2>/dev/null || true
+    find "\${HOME}/.local/share/icons/hicolor" -path '*/apps/clearcore.png' -delete 2>/dev/null || true
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "\${HOME}/.local/share/applications" 2>/dev/null || true
     fi

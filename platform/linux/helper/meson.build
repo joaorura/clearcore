@@ -48,3 +48,11 @@ test_callback_contract = executable(
 )
 
 test('realtime_callback_contract', test_callback_contract)
+
+test_target_resolver = executable(
+    'test_target_resolver',
+    files('tests/test_target_resolver.c'),
+    include_directories: inc_dir
+)
+
+test('target_resolver_contract', test_target_resolver)

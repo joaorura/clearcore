@@ -13,6 +13,7 @@
 #include <spa/utils/result.h>
 
 #include "noise_suppressor.h"
+#include "target_resolver.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -127,6 +128,7 @@ typedef struct pipewire_helper_context {
     int shared_state_fd;
     uint32_t target_device_id;
     char target_device_name[128];
+    known_source_table_t known_sources;        /* Audio/Source node id -> node.name (registry) */
     _Atomic bool running;
     _Atomic bool node_ready;
     _Atomic bool capture_ready;

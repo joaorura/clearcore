@@ -1,0 +1,13 @@
+[package]
+name = "studio-dsp"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+stats_alloc = { version = "=0.1.10", default-features = false }
