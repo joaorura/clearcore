@@ -4,7 +4,7 @@
 **Track:** `task12_macos_production_adapter`  
 **Created:** 2026-09-30  
 **Phase:** Wave 4 (Onda 4)  
-**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L581-L615)  
+**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](../superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L581-L615)  
 **Status:** `COMPLETED` / `BLOCKED_PHYSICAL_MACOS_HOST` (Code complete and verified; execution on physical Apple Silicon hardware requires Apple Developer ID Application signing identity and notarization)
 
 ---

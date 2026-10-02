@@ -4,7 +4,7 @@
 **Track:** `task9_macos_hal_spike`  
 **Created:** 2026-09-30  
 **Phase:** Wave 3 (Onda 3)  
-**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L465-L506)  
+**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](../superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L465-L506)  
 **Status:** `BLOCKED_PENDING_DEVELOPER_ID` / `BLOCKED_PHYSICAL_MACOS_HOST` (Code complete; awaiting physical Apple Silicon execution with Developer ID credentials)
 
 ---

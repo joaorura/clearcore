@@ -10,8 +10,11 @@ HELPER_BIN="${REPO_ROOT}/platform/linux/helper/build/pipewire_helper"
 NODE_NAME="realtime-noise-source"
 NODE_DESC="Realtime Noise Virtual Microphone"
 
-export PKG_CONFIG_PATH="/home/joaorura/.local/usr/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
-export PATH="/home/joaorura/miniconda3/bin:/home/joaorura/.local/bin:${PATH}"
+# Optional: point CLEARCORE_LOCAL_PREFIX at a user-local prefix that holds
+# pipewire headers/pkg-config files (e.g. "$HOME/.local/usr"). Unset by default.
+if [[ -n "${CLEARCORE_LOCAL_PREFIX:-}" ]]; then
+    export PKG_CONFIG_PATH="${CLEARCORE_LOCAL_PREFIX}/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
+fi
 
 echo "========================================================"
 echo "Project Hippocamp - PipeWire Stream Rebind & Contention Check"

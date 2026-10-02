@@ -1,6 +1,6 @@
 # Orca / Clearcore - Instructions for LLM Agents
 
-See [`AGENTS.md`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/AGENTS.md) for full runbook.
+See [`AGENTS.md`](AGENTS.md) for full runbook.
 
 ## Build & Packaging (Standalone Installers)
 - **Package Everything (Linux/macOS):** `./package.sh`

@@ -4,7 +4,7 @@
 - **Author:** Systems Performance & Hardware Acceleration Specialist
 - **Date:** September 30, 2026
 - **Status:** Architectural Draft & Feasibility Specification
-- **Workspace:** `/home/joaorura/orca/workspaces/clearcore/hippocamp`
+- **Workspace:** git worktree `hippocamp` (checkout local do repositório)
 - **Target Architecture:** NVIDIA Blackwell (`GB207GLM`, Compute Capability 12.0 / `sm_120`)
 - **Host CPU:** Intel Core Ultra 7 265H (x86_64, 16 physical cores, AVX2 / AVX-VNNI)
 - **Binding Roadmap Tracks:** Wave 6 / Task 15 (`realtime-noise-accelerators`), Wave 5 / Task 14 (`app-tauri` / diagnostics), Wave 1 / Tasks 3 & 4 (DSP and inference contracts)

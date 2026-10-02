@@ -32,7 +32,7 @@ Os testes foram executados na máquina local do desenvolvedor:
 
 ## 3. Inspeção Estrutural dos Grafos ONNX
 
-A ferramenta [`tools/feasibility/openvino/inspect_onnx.py`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/tools/feasibility/openvino/inspect_onnx.py) inspecionou as 3 redes que compõem o pipeline do DeepFilterNet3:
+A ferramenta [`tools/feasibility/openvino/inspect_onnx.py`](../../../tools/feasibility/openvino/inspect_onnx.py) inspecionou as 3 redes que compõem o pipeline do DeepFilterNet3:
 
 | Grafo | Entradas | Saídas | Nós GRU | Conv / Pad |
 |---|---|---|---|---|
@@ -52,7 +52,7 @@ A ferramenta [`tools/feasibility/openvino/inspect_onnx.py`](file:///home/joaorur
 
 ## 4. Prova Empírica de Divergência Temporal
 
-O script [`tools/feasibility/openvino/state_check.py`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/tools/feasibility/openvino/state_check.py) comparou a execução contínua de 8 frames em lote ($S=8$) contra 8 chamadas sucessivas isoladas de 1 frame ($S=1$) na CPU via OpenVINO:
+O script [`tools/feasibility/openvino/state_check.py`](../../../tools/feasibility/openvino/state_check.py) comparou a execução contínua de 8 frames em lote ($S=8$) contra 8 chamadas sucessivas isoladas de 1 frame ($S=1$) na CPU via OpenVINO:
 
 ```text
 emb:  max|S=1 por frame - S=8| = [0.0000, 0.9888, 1.1083, 1.0814, 1.4701, 1.5862, 0.9572, 0.9750]
@@ -68,7 +68,7 @@ lsnr: max|S=1 por frame - S=8| = [0.0000, 4.2953, 4.5297, 3.8794, 24.2626, 27.19
 
 ## 5. Medições de Latência nos Dispositivos Locais
 
-A ferramenta [`tools/feasibility/openvino/bench_ov.py`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/tools/feasibility/openvino/bench_ov.py) compilou e mediu os 3 grafos ($S=1$) em cada dispositivo disponível no host (20 aquecimentos, 200 repetições):
+A ferramenta [`tools/feasibility/openvino/bench_ov.py`](../../../tools/feasibility/openvino/bench_ov.py) compilou e mediu os 3 grafos ($S=1$) em cada dispositivo disponível no host (20 aquecimentos, 200 repetições):
 
 | Dispositivo | Grafo `enc` (p50 / p99) | Grafo `erb_dec` (p50 / p99) | Grafo `df_dec` (p50 / p99) | **Soma p50** | **Soma p99 (est.)** |
 |---|---|---|---|---|---|

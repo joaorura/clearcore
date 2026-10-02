@@ -3,7 +3,7 @@
 **Track ID:** `task7_ipc_supervisor_service`  
 **Created:** 2026-09-30  
 **Phase:** Wave 2 (Onda 2)  
-**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L375-L422)
+**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](../../../docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L375-L422)
 
 ---
 

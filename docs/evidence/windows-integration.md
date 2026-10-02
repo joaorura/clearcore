@@ -4,14 +4,14 @@
 **Track:** `task11_windows_production_adapter`  
 **Created:** 2026-09-30  
 **Phase:** Wave 4 (Onda 4)  
-**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L547-L580)  
+**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](../superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L547-L580)  
 **Status:** `COMPLETED` / `CODE_COMPLETE_AND_VERIFIED` (Cross-platform simulation & native contracts fully passing in Docker and WDK staging)
 
 ---
 
 ## 1. Executive Summary
 
-This report documents the architecture, implementation, and verification evidence for the production Windows audio adapter in Project Hippocamp (`Clearcore Realtime Noise Suppression`), located in [`platform/windows/host`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/windows/host).
+This report documents the architecture, implementation, and verification evidence for the production Windows audio adapter in Project Hippocamp (`Clearcore Realtime Noise Suppression`), located in [`platform/windows/host`](../../platform/windows/host).
 
 The Windows Host Adapter connects the `realtime-noise-service` background engine with Windows CoreAudio / WASAPI input capture and the custom PortCls WaveRT virtual microphone kernel driver (`platform/windows/driver/`). The adapter fulfills strict real-time audio constraints:
 - **WASAPI Capture Backend:** Low-latency event-driven audio capture with hot-plug resilience (`DeviceStatus::WaitingForDevice`).
@@ -103,7 +103,7 @@ All internal audio frames conform to the `realtime-noise-contracts` standard:
 - **Format:** Normalized IEEE-754 32-bit float in range `[-1.0, 1.0]`.
 
 ### 3.2 Format Conversion & Defensive Sanitization
-The module [`formats.rs`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/windows/host/src/formats.rs) provides bidirectional, zero-allocation conversion between canonical Float32 and Windows PCM16:
+The module [`formats.rs`](../../platform/windows/host/src/formats.rs) provides bidirectional, zero-allocation conversion between canonical Float32 and Windows PCM16:
 
 ```rust
 // PCM16 -> Float32
@@ -188,7 +188,7 @@ stateDiagram-v2
 ```
 
 ### 5.2 Implementation Verification
-In [`tests/hotplug.rs`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/windows/host/tests/hotplug.rs), the contract `selected_device_loss_enters_waiting_without_selecting_another_mic` validates:
+In [`tests/hotplug.rs`](../../platform/windows/host/tests/hotplug.rs), the contract `selected_device_loss_enters_waiting_without_selecting_another_mic` validates:
 1. When `mic-primary-usb` is disconnected while streaming:
    - Backend transitions to `DeviceStatus::WaitingForDevice`.
    - `active_device()` remains `Some("mic-primary-usb")`.

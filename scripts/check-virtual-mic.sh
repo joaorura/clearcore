@@ -267,7 +267,7 @@ recreate_node() {
                 "${SCRIPT_DIR}/platform/linux/helper/src/transport_bridge.c" \
                 "${SCRIPT_DIR}/platform/linux/helper/src/format_converter.c" \
                 "${SCRIPT_DIR}/platform/linux/helper/src/noise_suppressor.c" \
-                $(pkg-config --cflags --libs libpipewire-0.3 2>/dev/null || echo "-I/home/joaorura/.local/usr/include/pipewire-0.3 -I/home/joaorura/.local/usr/include/spa-0.2 -L/home/joaorura/.local/usr/lib64 -lpipewire-0.3") \
+                $(pkg-config --cflags --libs libpipewire-0.3 2>/dev/null || echo "-I${CLEARCORE_LOCAL_PREFIX:-/usr}/include/pipewire-0.3 -I${CLEARCORE_LOCAL_PREFIX:-/usr}/include/spa-0.2 -L${CLEARCORE_LOCAL_PREFIX:-/usr}/lib64 -lpipewire-0.3") \
                 -lm -ldl -o "${HELPER_BIN}" 2>/dev/null || true
         fi
     fi

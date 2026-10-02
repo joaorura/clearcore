@@ -3,7 +3,7 @@
 **Track ID:** `task11_windows_production_adapter`  
 **Created:** 2026-09-30  
 **Phase:** Wave 4 (Onda 4)  
-**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L547-L580)
+**Parent Plan:** [`docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md`](../../../docs/superpowers/plans/2026-09-23-realtime-noise-suppression-plan.md#L547-L580)
 
 ---
 

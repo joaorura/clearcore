@@ -22,3 +22,6 @@ benchmarks/local/*
 !benchmarks/local/README.md
 # Amostras de voz e ruído baixadas por scripts/fetch-voice-samples.sh (licenças próprias; nunca commitar)
 fixtures/voice-samples/
+
+# Rascunhos descartáveis (nunca commitar)
+scratch/

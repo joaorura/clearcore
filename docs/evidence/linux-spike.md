@@ -42,12 +42,12 @@ The implementation consists of modular C11 components built via Meson:
 
 | Component | Path | Responsibility |
 | :--- | :--- | :--- |
-| **Build Definition** | [`platform/linux/helper/meson.build`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/meson.build) | Compiles `pipewire_helper` and `test_callback_contract` with `libpipewire-0.3`. |
-| **Core Header** | [`platform/linux/helper/src/pipewire_helper.h`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/src/pipewire_helper.h) | Defines audio contracts, wire frame envelope layout (`wire_frame_envelope_v1_t`), bounded ring buffer, and helper context. |
-| **Format Converter** | [`platform/linux/helper/src/format_converter.c`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/src/format_converter.c) | Float32 LE mono conversion, IEEE 754 clipping clamping (`[-1.0f, +1.0f]`), NaN/Inf neutralization, and silence zeroing. |
-| **Transport Bridge** | [`platform/linux/helper/src/transport_bridge.c`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/src/transport_bridge.c) | Lock-free SPSC bounded ring buffer (24 hops capacity) with atomic generation checking, dropped frame counting, and underrun detection. |
-| **Native Helper** | [`platform/linux/helper/src/pipewire_helper.c`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/src/pipewire_helper.c) | Standalone PipeWire client using `pw_stream`, creates virtual capture node `media.class = Audio/Source`, runs realtime RT callback. |
-| **Callback Unit Test** | [`platform/linux/helper/tests/test_callback.c`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/tests/test_callback.c) | Verifies 0 heap allocations via `__wrap_malloc`/`__wrap_calloc`, bounded drop policy, and fail-closed silence. |
+| **Build Definition** | [`platform/linux/helper/meson.build`](../../platform/linux/helper/meson.build) | Compiles `pipewire_helper` and `test_callback_contract` with `libpipewire-0.3`. |
+| **Core Header** | [`platform/linux/helper/src/pipewire_helper.h`](../../platform/linux/helper/src/pipewire_helper.h) | Defines audio contracts, wire frame envelope layout (`wire_frame_envelope_v1_t`), bounded ring buffer, and helper context. |
+| **Format Converter** | [`platform/linux/helper/src/format_converter.c`](../../platform/linux/helper/src/format_converter.c) | Float32 LE mono conversion, IEEE 754 clipping clamping (`[-1.0f, +1.0f]`), NaN/Inf neutralization, and silence zeroing. |
+| **Transport Bridge** | [`platform/linux/helper/src/transport_bridge.c`](../../platform/linux/helper/src/transport_bridge.c) | Lock-free SPSC bounded ring buffer (24 hops capacity) with atomic generation checking, dropped frame counting, and underrun detection. |
+| **Native Helper** | [`platform/linux/helper/src/pipewire_helper.c`](../../platform/linux/helper/src/pipewire_helper.c) | Standalone PipeWire client using `pw_stream`, creates virtual capture node `media.class = Audio/Source`, runs realtime RT callback. |
+| **Callback Unit Test** | [`platform/linux/helper/tests/test_callback.c`](../../platform/linux/helper/tests/test_callback.c) | Verifies 0 heap allocations via `__wrap_malloc`/`__wrap_calloc`, bounded drop policy, and fail-closed silence. |
 
 ### Binary Wire Envelope Structure
 Aligned with `crates/contracts/src/wire.rs` (`WireFrameEnvelopeV1`):
@@ -69,7 +69,7 @@ typedef struct __attribute__((aligned(8))) wire_frame_envelope_v1 {
 ## 4. Test Execution & Verification Evidence
 
 ### 4.1. Phase RED: Endpoint Absence Assertion
-Script: [`platform/linux/tests/endpoint-spike.sh red`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/tests/endpoint-spike.sh)
+Script: [`platform/linux/tests/endpoint-spike.sh red`](../../platform/linux/tests/endpoint-spike.sh)
 
 ```text
 ========================================================
@@ -95,7 +95,7 @@ Target Node:     realtime-noise-source
 ---
 
 ### 4.2. Phase GREEN: Full Endpoint Validation & Silence Verification
-Script: [`platform/linux/tests/endpoint-spike.sh green`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/tests/endpoint-spike.sh)
+Script: [`platform/linux/tests/endpoint-spike.sh green`](../../platform/linux/tests/endpoint-spike.sh)
 
 ```text
 ========================================================
@@ -109,7 +109,7 @@ WirePlumber:     wireplumber Compiled with libwireplumber 0.5.17
 Target Node:     realtime-noise-source
 ========================================================
 [GREEN] Step 1: Building native PipeWire helper...
-ninja: Entering directory `/home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/helper/build'
+ninja: Entering directory `<repo>/platform/linux/helper/build'
 ninja: no work to do.
 [GREEN] Step 2: Running RT callback contract & unit tests...
 [TEST] Running test_format_converter...
@@ -150,7 +150,7 @@ ninja: no work to do.
 ---
 
 ### 4.3. Stream Recreation, Rebind & Contention Validation
-Script: [`platform/linux/tests/rebind-check.sh`](file:///home/joaorura/orca/workspaces/clearcore/hippocamp/platform/linux/tests/rebind-check.sh)
+Script: [`platform/linux/tests/rebind-check.sh`](../../platform/linux/tests/rebind-check.sh)
 
 ```text
 ========================================================

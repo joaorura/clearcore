@@ -19,7 +19,7 @@ cd crates/app-tauri && npm install --package-lock-only --offline --ignore-script
 ```text
 npm error code ENOTCACHED
 npm error request to https://registry.npmjs.org/@tauri-apps%2fapi failed: cache mode is 'only-if-cached' but no cached response is available.
-npm error A complete log of this run can be found in: /home/joaorura/.npm/_logs/2026-09-30T22_54_38_802Z-debug-0.log
+npm error A complete log of this run can be found in: ~/.npm/_logs/2026-09-30T22_54_38_802Z-debug-0.log
 ```
 
 ---

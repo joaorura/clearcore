@@ -15,9 +15,6 @@ def get_export_dir() -> str:
     default_tmp = "/tmp/clearcore-dfnet3-export/tmp/export"
     if os.path.exists(os.path.join(default_tmp, "enc.onnx")):
         return default_tmp
-    scratchpad_dir = "/tmp/claude-1000/-home-joaorura-orca-workspaces-clearcore-hippocamp/463e3f9e-5f34-4ae2-a2be-58d4067aa248/scratchpad/ov-feasibility/asset/tmp/export"
-    if os.path.exists(os.path.join(scratchpad_dir, "enc.onnx")):
-        return scratchpad_dir
     repo_asset = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../vendor/approved/df-compatible-release-asset-v1.bin"))
     if os.path.exists(repo_asset):
         target_dir = "/tmp/clearcore-dfnet3-export"
