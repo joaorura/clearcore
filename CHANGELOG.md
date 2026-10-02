@@ -9,6 +9,26 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-10-02
+
+### Fixed
+- Linux package: the app now finds `pipewire_helper` in `resources/bin`. In `v0.1.0-beta.1` it looked in a path that is not shipped, so "Recreate virtual mic" silently fell back to a loopback WITHOUT noise suppression while the UI showed Active. Users of `v0.1.0-beta.1` on Linux should reinstall.
+- The helper now selects the capture microphone by node name instead of numeric id (WirePlumber reads a numeric `target.object` as `object.serial`, which left the virtual mic with no input).
+- Mono microphones (e.g. Bluetooth headsets) are now linked.
+- The application icon is installed in the hicolor directory matching its real size.
+- The installer prints a hint when GNOME has no AppIndicator extension (no packages are installed automatically).
+
+### Changed
+- Hardware accelerator selector: only Auto and CPU (Tract) can be selected. Other accelerators are marked "Preview — does not process audio yet" and the false "backend changed" toast was removed. The OpenVINO/CUDA/NPU backends are not wired to the audio engine in this release; audio is always processed by Tract on CPU.
+- Hardware detection now finds OpenVINO installed under `/opt/intel/openvino` or via `INTEL_OPENVINO_DIR` and no longer relies on developer-specific paths.
+- Hardware JSON parsing is tolerant to extra output and surfaces detection errors.
+- `install-openvino.sh` lists the Fedora packages that exist.
+- CI: the nightly hardware-staging workflows are no longer scheduled (no self-hosted runners are registered).
+- CI: the release workflow now verifies the Linux package contents and requires per-tag release notes.
+
+### Added
+- `studio-dsp` crate: a pure-Rust studio DSP chain (high-pass, EQ, de-esser, compressor, loudness AGC, limiter) with its tests. It is not wired into the audio path yet and has no user-visible effect in this release.
+
 ## [0.1.0-beta.1] - 2026-10-01
 
 ### Added
@@ -28,5 +48,6 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 - Localhost TCP bridge on Windows (`127.0.0.1:49215`) for reliable IPC communication without external dependencies.
 - Exact process matching (`pkill -x`) in uninstaller scripts to avoid subshell interruption.
 
-[Unreleased]: https://github.com/joaorura/clearcore/compare/v0.1.0-beta.1...HEAD
+[Unreleased]: https://github.com/joaorura/clearcore/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/joaorura/clearcore/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/joaorura/clearcore/releases/tag/v0.1.0-beta.1
