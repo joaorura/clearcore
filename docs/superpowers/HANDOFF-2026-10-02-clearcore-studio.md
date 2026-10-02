@@ -2,9 +2,10 @@
 
 Para quem continuar em outro harness. Tudo está no **working tree** do worktree
 `<REPO>`, branch `docs-using-superpowers-skill`.
-Os commits foram feitos **só localmente**, em grupos lógicos, nessa branch (veja `git log --oneline -n 10`); **nada foi
-enviado** (sem push, PR nem merge), e o `schedule` removido dos workflows de hardware só vale no GitHub quando chegar à
-`master`. O app se chama **Clearcore**; "hippocamp" é só o nome do
+Os commits foram feitos em grupos lógicos nessa branch (veja `git log --oneline -n 10`) e **já foram enviados e
+mergeados**: PR #1 (https://github.com/joaorura/clearcore/pull/1) na `master`, merge commit `103b187`, e a **release
+`v0.1.0-beta.2` foi publicada** (prerelease): https://github.com/joaorura/clearcore/releases/tag/v0.1.0-beta.2
+(seção 5c). O `schedule` dos workflows de hardware já não existe na `master`. O app se chama **Clearcore**; "hippocamp" é só o nome do
 worktree (memória do projeto: `hippocamp-e-nome-de-worktree`; as notas antigas do vault ainda dizem `project: hippocamp`).
 
 Idioma: português do Brasil. Modelos: **Sonnet e Haiku** para quase tudo, Opus só em caso raro (decisão do usuário).
@@ -28,7 +29,7 @@ Spec: `docs/superpowers/specs/2026-10-01-clearcore-studio-pipeline-design.md` (d
 | 5 | assets reais (pDFNet3, enrollment, EQ) | **bloqueada**: depende de pesos do repo de treino, que não existe aqui |
 
 Fora desse roteiro, também foram feitos: 4 correções de áudio/instalação (seção 5) e o `schedule` removido dos
-3 workflows de hardware.
+3 workflows de hardware. As correções foram **publicadas na v0.1.0-beta.2** (seção 5c).
 
 ### Evidência final (rodada nesta sessão, do zero)
 
@@ -85,7 +86,7 @@ Fedora 41 / PipeWire 1.2, macOS e Windows, o PC dos colegas.
 `scripts/fetch-voice-samples.sh`, `scripts/run-cpu-baseline-local.sh`, `scripts/voice-samples.sha256`, `benchmarks/local/`,
 `docs/testing/`, `docs/superpowers/{specs,plans}/2026-10-01-*`.
 
-**Tudo está commitado localmente** (ver `git log`). Arquivos que passaram a existir **desde o handoff original**:
+**Tudo está commitado e já foi mergeado na `master`** (ver `git log` e a seção 5c). Arquivos que passaram a existir **desde o handoff original**:
 `crates/app-tauri/electron/{hardware-json,backend-selection}.cjs`,
 `crates/app-tauri/scripts/{hardware-json,backend-selection}.selftest.cjs`, `crates/app-tauri/src/hardwareBackend.ts`,
 `crates/app-tauri/src/__tests__/hardwareBackend.test.ts`, `platform/linux/tests/detect-hardware-fakes.test.sh`.
@@ -125,8 +126,7 @@ outro `--target`, `--set-default` pode ligar um mic diferente do que o helper us
    `CLEARCORE_HELPER_BIN`, `${SCRIPT_DIR}/bin/pipewire_helper` (layout do pacote) e o caminho de dev. Sem helper, emite
    AVISO no stderr ("usando loopback SEM supressao de ruido") **sem mudar o JSON**. A seção F do teste cobre pacote,
    override, dev, precedência e ausência. O `release.yml` (job `build-linux`) ganhou o passo "Verify Linux Package
-   Contents", que confere o tarball — **NÃO testado no CI** (assumiu `release/Clearcore-linux-x64.tar.gz`); olhe o
-   primeiro run.
+   Contents", que confere o tarball — **rodou pela primeira vez no CI e passou** (run da v0.1.0-beta.2, seção 5c).
 2. **Seletor de acelerador.** `set_hardware_backend` (`main.cjs` ~1303) usa `electron/backend-selection.cjs` e só aceita
    `auto` e `cpu_tract`; os demais devolvem `{success:false, reason:'not_implemented', active_backend:'cpu_tract'}`. O
    card mostra o selo "Prévia — ainda não processa áudio", não permite selecioná-los, perdeu o toast falso, mostra
@@ -143,6 +143,31 @@ outro `--target`, `--set-default` pode ligar um mic diferente do que o helper us
 
 **Ressalvas:** a NPU real, o app rodando e o PC do usuário nunca foram verificados; o backend OpenVINO continua stub
 passthrough (o áudio é sempre Tract na CPU).
+
+## 5c. Release v0.1.0-beta.2 (publicado)
+
+- **PR #1** (https://github.com/joaorura/clearcore/pull/1) **mergeada** na `master` em 2026-10-02T12:32:14Z, merge commit
+  `103b187` (= topo de `origin/master` e = alvo da tag anotada `v0.1.0-beta.2`). Antes do push a `master` foi trazida para
+  a branch e todos os gates passaram **no resultado mesclado** (fmt, clippy `-D warnings`, 265 testes, `check-offline`,
+  vitest 18, `tsc`, selftests, testes shell).
+- **Release** publicada (prerelease) em 2026-10-02T12:43:53Z:
+  https://github.com/joaorura/clearcore/releases/tag/v0.1.0-beta.2. Assets: `Clearcore-darwin-arm64.tar.gz`
+  (130214214 B), `Clearcore-linux-x64.tar.gz` (142223703 B), `Clearcore-win32-x64.zip` (158085987 B).
+- **Run do release** 37007293383 (https://github.com/joaorura/clearcore/actions/runs/37007293383): os 4 jobs `success`,
+  incluindo os passos novos "Verify Linux Package Contents" e "Verify release notes exist" (primeira vez no CI; passaram).
+  O tarball Linux publicado foi baixado e conferido: contém `resources/bin/pipewire_helper` e o `check-virtual-mic.sh`
+  com a correção (`CLEARCORE_HELPER_BIN`); o tamanho baixado é igual ao do asset.
+- O `release.yml` agora deriva `body_path` da tag (`release/RELEASE-NOTES-${{ github.ref_name }}.md`) e **exige o
+  arquivo**; publicar só é suportado por tag `v*`.
+- **Versão:** o bump foi só nos pontos do app (`package.json`, `package-lock.json` 2x, `tauri.conf.json`, `main.cjs`
+  `APP_VERSION`, `Clearcore-Setup.nsi`/`.iss`); os `Cargo.toml` continuam `0.1.0`.
+- **Ressalva — o `ci.yml` NÃO validou a PR:** usa runner self-hosted (0 registrados) e `push: branches: [main]` (a branch
+  padrão é `master`), então o job ficou QUEUED; nenhum check automatizado rodou na PR (os gates foram locais).
+- Os workflows `*-hardware.yml` já não têm `cron` na `master` (confirmado); as 3 execuções presas foram canceladas e o
+  cron **não volta** a enfileirar.
+- **Tag local `v0.1.0-beta.1` DESATUALIZADA** em relação ao remoto de propósito (a remota foi movida para `b34766c`):
+  não use `git push --tags` nem `git fetch --tags --force` sem decidir isso.
+- A branch remota `docs-using-superpowers-skill` **ainda existe** (não foi apagada).
 
 ## 6. `studio-dsp` — achados adiados da revisão
 
@@ -168,39 +193,44 @@ de assets). Licença do libDF: `MIT OR Apache-2.0` (manter LICENSE-MIT/APACHE e 
 
 ## 8. Próximos passos, em ordem
 
-1. **Fase 1b** (`...phase1b-integration.md`): **revalidar âncoras primeiro**. As correções de áudio mexeram em
+1. **Instalar a v0.1.0-beta.2 num Linux** (Fedora 41/44) e confirmar que a supressão de ruído funciona (o helper de
+   `resources/bin`) e que o seletor, o ícone e a bandeja se comportam.
+2. **Fase 1b** (`...phase1b-integration.md`): **revalidar âncoras primeiro**. As correções de áudio mexeram em
    `pipewire_helper.c`, `main.cjs` e `check-virtual-mic.sh`, então números de linha do plano podem ter deslocado.
-2. **Fase 2** (`...phase2-settings-ui.md`), depois da 1b (compartilham `Cargo.lock`, `engine`, `main.cjs`).
+3. **Fase 2** (`...phase2-settings-ui.md`), depois da 1b (compartilham `Cargo.lock`, `engine`, `main.cjs`).
    Ajustes decididos na revisão cruzada: no handler `set_preset` do Electron incluir `syncPresetToHelper` protegido por
    `typeof` (senão o preset só chega ao helper pelo poll de 2,5 s); corrigir textos desatualizados do plano (pendência do
    helper C já resolvida pela 1b); conferir gates de git/`Cargo.lock` por **caminho**; 1b não tem passo de revisão de
    código (usar um revisor separado); card de preset deve avisar fora do Linux e `docs/support-matrix.md` deve dizer que
    Windows/macOS ficam sem preset no áudio; a UI real é **Electron** e os golden de IPC são `ipc-v1-*.json`.
-3. **Plano da fase 4** (a escrever): registro de descritores de assets com a mesma verificação de assinatura (ler a regra
+4. **Plano da fase 4** (a escrever): registro de descritores de assets com a mesma verificação de assinatura (ler a regra
    `policy_object.len() != 1` do `trust-policy.json`), fork vendorizado do libDF, enrollment (ONNX áudio 16 kHz →
    `gamma_enc, beta_enc, gamma_df, beta_df`; só os vetores são salvos, arquivo 0600, fora dos diagnósticos).
    O agente **não produz assinaturas**: testes com chave e trust-policy de desenvolvimento.
-4. **Spec do repo de treino** (separado). Requisitos já fixados: modo "sem locutor" estável (embedding dropout);
+5. **Spec do repo de treino** (separado). Requisitos já fixados: modo "sem locutor" estável (embedding dropout);
    enrollment denoisado como aumentação (p≈0,5); ONNX de enrollment; EQ neural com saída em **ganhos dB por banda**
    limitados a [−6,+12] e suavizados, aplicados no domínio do tempo (sem overlap-add); contrato do modelo inalterado
    (960/480/32/96/5/2); script que exporta o DFNet3 com FiLM em identidade; ablações (enrollment cru vs denoisado por SNR;
    A/B de aplicação do EQ); licenças de dados compatíveis com pesos abertos.
-5. Medir a **latência fim a fim real** antes de gastar margem (hoje só há orçamento: 70 ms no pior caso, p95 ≤ 80 ms).
+6. Medir a **latência fim a fim real** antes de gastar margem (hoje só há orçamento: 70 ms no pior caso, p95 ≤ 80 ms).
 
 ## 9. Decisões em aberto (são do usuário)
 
-1. **Bug do `HELPER_BIN`**: **CORRIGIDO no código e commitado localmente; pendentes: um release novo (a
-   v0.1.0-beta.1 publicada continua sem helper no caminho esperado), tornar o fallback visível na UI (exige mudar o JSON
-   e o `main.cjs` — decisão do dono) e o primeiro run do passo novo do `release.yml`.** (Causa original: o script
+1. **Bug do `HELPER_BIN`**: **corrigido, commitado, mergeado e PUBLICADO na v0.1.0-beta.2 (verificado no tarball);
+   pendentes: tornar o fallback visível na UI (JSON + `main.cjs`, decisão do dono; vale para o próximo release) e
+   confirmar o comportamento real em um PC Linux (Fedora 41/44) instalando a v0.1.0-beta.2.** (Causa original: o script
    procurava `resources/platform/linux/helper/build/pipewire_helper`, mas o pacote põe o helper em
    `resources/bin/pipewire_helper`; ver 5b.)
 2. **Seletor de acelerador (OpenVINO)**: **CORRIGIDO (opção "prévia/desabilitar"); ligar a seleção de ponta a ponta
    continua fora de escopo (backend OpenVINO real com `unsafe`, comando IPC, gate de qualificação).** (Causa original:
    `set_hardware_backend` só guardava uma variável e devolvia `success:true`; o `filter-capi` constrói sempre
    `TractBackend`; `openvino.rs` é stub passthrough; ver 5b.)
-3. **Commit/PR/merge**: as 3 execuções presas (36980913239, 36981750310, 36982741766) foram **CANCELADAS**; o cron volta
-   a enfileirar 3 execuções às 02:00 UTC de cada noite até a remoção do `schedule` chegar à `master` (decisão/ação do
-   dono: push, PR e merge). Commits locais feitos, nada enviado. Causa da fila: **0 runners self-hosted** registrados.
+3. **Push/PR/merge/release**: **FEITOS** (PR #1, `103b187`, release v0.1.0-beta.2; seção 5c). As 3 execuções presas
+   (36980913239, 36981750310, 36982741766) foram **CANCELADAS** e o cron não volta a enfileirar (removido na `master`).
+   Causa original da fila: **0 runners self-hosted** registrados. **Pendentes (decisão do dono):** apagar a branch remota
+   `docs-using-superpowers-skill`, se quiser; alinhar a tag local `v0.1.0-beta.1` (ver 5c); e corrigir o `ci.yml`
+   (runner self-hosted inexistente e `branches: [main]` — hoje **nenhuma PR é validada automaticamente**): registrar um
+   runner, trocar para `ubuntu-latest` ou mudar o gatilho para `master`.
 4. Fork do libDF com `unsafe`: crate fora do workspace ou nova exceção à política.
 5. Common Voice pt: licença **não confirmada** na fonte oficial (MLS Portuguese é CC BY 4.0 mas 16 kHz).
    TAGARELA (CC BY-NC-SA) liberado só como dado de teste; fora do treino de pesos distribuídos até decisão registrada.
@@ -220,6 +250,9 @@ de assets). Licença do libDF: `MIT OR Apache-2.0` (manter LICENSE-MIT/APACHE e 
   "esperado"; era só a toolchain fora do PATH).
 - `scripts/check-offline.sh` retornando `BLOCKED_OFFLINE_DEPENDENCY` e listando `cargo`/`rustc` ausentes significa
   toolchain fora do PATH naquele shell, não falha real.
+- O relato de um agente em segundo plano pode ser **provisório** ("ainda sem saída"): consulte o estado real (`gh`,
+  `git ls-remote`) antes de concluir.
+- `grep -c` devolve código 1 quando a contagem é 0: não encadeie com `&&`.
 - O `/tmp` é tmpfs e some no reinício; os logs e artefatos de verificação do scratchpad são voláteis.
 - `unsafe_code = "forbid"` + `filter-capi` como única exceção; `ProcessedFrame::checked` rejeita saída não finita.
 - Os números de latência/CPU "oficiais" nos docs de evidência (`28,4 ms`, `4,8 ms`, "8h soak") estão **fixos no código**
