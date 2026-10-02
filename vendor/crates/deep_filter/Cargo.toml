@@ -1,0 +1,72 @@
+# Modified by Orca / Clearcore team for FiLM speaker conditioning and Spectral EQ hook.
+# Copyright (c) 2021 Hendrik Schröter
+# Licensed under MIT or Apache-2.0 at your option.
+
+[package]
+name = "deep_filter_fork"
+version = "0.5.6"
+authors = ["Hendrik Schröter"]
+edition = "2021"
+description = "Noise supression using deep filtering (Clearcore vendorized fork)"
+repository = "https://github.com/Rikorose/DeepFilterNet"
+license = "MIT/Apache-2.0"
+rust-version = "1.60"
+autobins = false
+
+[lib]
+name = "df"
+path = "src/lib.rs"
+
+[features]
+default = []
+transforms = ["dep:thiserror", "dep:ndarray", "dep:rubato"]
+logging = ["dep:log"]
+tract = [
+  "transforms",
+  "logging",
+  "dep:tract-core",
+  "dep:tract-onnx",
+  "dep:tract-pulse",
+  "dep:tract-hir",
+  "dep:rust-ini",
+  "dep:ndarray",
+  "dep:anyhow",
+  "dep:flate2",
+  "dep:tar",
+]
+default-model = []
+default-model-ll = []
+capi = []
+timings = []
+wav-utils = []
+dataset = []
+
+[dependencies]
+rustfft = "^6.1.0"
+realfft = "^3.1.0"
+itertools = "0.10"
+num-complex = { version = "^0.4", features = ["serde"] }
+log = { version = "0.4", features = ["std"], optional = true }
+rubato = { version = "0.14", optional = true }
+thiserror = { version = "1.0", optional = true }
+anyhow = { version = "1.0", optional = true, features = ["backtrace"] }
+ndarray = { version = "^0.15", optional = true, features = ["serde"] }
+rust-ini = { version = "^0.19", optional = true }
+tract-core = { version = "^0.19.4", optional = true }
+tract-onnx = { version = "^0.19.4", optional = true }
+tract-pulse = { version = "^0.19.4", optional = true }
+tract-hir = { version = "^0.19.4", optional = true }
+flate2 = { version = "1.0.24", optional = true }
+tar = { version = "0.4.38", optional = true }
+
+[dev-dependencies]
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
+
+# This is a vendored third-party fork — suppress all lints imposed by the workspace.
+[lints.rust]
+unsafe_code = "allow"
+unexpected_cfgs = "allow"
+[lints.clippy]
+all = "allow"
+pedantic = "allow"
+nursery = "allow"

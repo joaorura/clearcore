@@ -20,7 +20,7 @@ tract = [
 
 [dependencies]
 base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }
-deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet.git", rev = "978576aa8400552a4ce9730838c635aa30db5e61", package = "deep_filter", default-features = false, features = ["tract"], optional = true }
+deep_filter = { path = "../../vendor/crates/deep_filter", package = "deep_filter_fork", default-features = false, features = ["tract"], optional = true }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std"] }
 flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 ndarray = { version = "=0.15.6", default-features = false, features = ["std"], optional = true }
@@ -28,6 +28,7 @@ realtime-noise-contracts = { path = "../contracts" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
 sha2 = { version = "=0.10.9", default-features = false, features = ["std"] }
+studio-dsp = { path = "../studio-dsp" }
 tar = { version = "=0.4.46", default-features = false }
 tempfile = { version = "=3.23.0", default-features = false, optional = true }
 tract-core = { version = "=0.19.16", default-features = false, optional = true }

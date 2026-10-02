@@ -204,9 +204,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "deep_filter"
+name = "deep_filter_fork"
 version = "0.5.6"
-source = "git+https://github.com/Rikorose/DeepFilterNet.git?rev=978576aa8400552a4ce9730838c635aa30db5e61#978576aa8400552a4ce9730838c635aa30db5e61"
 dependencies = [
  "anyhow",
  "flate2",
@@ -214,6 +213,7 @@ dependencies = [
  "log",
  "ndarray",
  "num-complex",
+ "rand",
  "realfft",
  "rubato",
  "rust-ini",
@@ -874,10 +874,16 @@ dependencies = [
 name = "realtime-noise-accelerators"
 version = "0.1.0"
 dependencies = [
+ "deep_filter_fork",
  "realtime-noise-contracts",
  "realtime-noise-model",
+ "realtime-noise-runtime-coreml",
+ "realtime-noise-runtime-gpu-compute",
+ "realtime-noise-runtime-openvino",
+ "realtime-noise-runtime-tensorrt",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -899,8 +905,10 @@ version = "0.1.0"
 dependencies = [
  "realtime-noise-contracts",
  "realtime-noise-ipc",
+ "realtime-noise-model",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -909,6 +917,7 @@ version = "0.1.0"
 dependencies = [
  "realtime-noise-contracts",
  "realtime-noise-model",
+ "studio-dsp",
 ]
 
 [[package]]
@@ -917,6 +926,7 @@ version = "0.1.0"
 dependencies = [
  "realtime-noise-contracts",
  "realtime-noise-model",
+ "studio-dsp",
 ]
 
 [[package]]
@@ -950,7 +960,7 @@ name = "realtime-noise-model"
 version = "0.1.0"
 dependencies = [
  "base64",
- "deep_filter",
+ "deep_filter_fork",
  "ed25519-dalek",
  "flate2",
  "ndarray",
@@ -958,6 +968,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "studio-dsp",
  "tar",
  "tempfile",
  "tract-core",
@@ -971,15 +982,61 @@ name = "realtime-noise-qualification"
 version = "0.1.0"
 
 [[package]]
+name = "realtime-noise-runtime-coreml"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "realtime-noise-contracts",
+ "realtime-noise-model",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "realtime-noise-runtime-gpu-compute"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "realtime-noise-contracts",
+ "realtime-noise-model",
+ "serde",
+ "serde_json",
+ "windows-sys",
+]
+
+[[package]]
+name = "realtime-noise-runtime-openvino"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "realtime-noise-contracts",
+ "realtime-noise-model",
+ "windows-sys",
+]
+
+[[package]]
+name = "realtime-noise-runtime-tensorrt"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "realtime-noise-contracts",
+ "realtime-noise-model",
+ "serde",
+ "windows-sys",
+]
+
+[[package]]
 name = "realtime-noise-service"
 version = "0.1.0"
 dependencies = [
  "realtime-noise-contracts",
  "realtime-noise-engine",
  "realtime-noise-ipc",
+ "realtime-noise-model",
  "realtime-noise-supervisor",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
