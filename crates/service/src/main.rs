@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use realtime_noise_model::ProfileStore;
 use realtime_noise_service::bootstrap::ServiceBootstrap;
 use realtime_noise_service::install::{install_user_service, uninstall_user_service};
 use std::env;
@@ -30,6 +31,14 @@ fn main() -> ExitCode {
     match args[1].as_str() {
         "--run" => {
             let mut bootstrap = ServiceBootstrap::default();
+            match ProfileStore::default_dir() {
+                Some(dir) => bootstrap
+                    .daemon_mut()
+                    .attach_profile_store(ProfileStore::new(dir)),
+                None => eprintln!(
+                    "No data directory available: voice profiles cannot be stored or restored"
+                ),
+            }
             if let Err(err) = bootstrap.run() {
                 eprintln!("Daemon execution error: {err}");
                 return ExitCode::from(1);

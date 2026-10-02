@@ -23,7 +23,7 @@ pub enum IpcStatus {
     InternalError,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum IpcCommand {
     GetStatus,
@@ -31,6 +31,31 @@ pub enum IpcCommand {
     RestartGeneration,
     GetDiagnostics,
     Shutdown,
+    /// Activates a voice profile. `profile_json` carries the serialized `VoiceProfile`
+    /// (biometric data: it must never be logged or echoed back in responses).
+    SetVoiceProfile {
+        profile_json: String,
+    },
+    ClearVoiceProfile,
+}
+
+/// Manual `Debug`: `SetVoiceProfile` carries biometric data, so its payload is redacted and can
+/// never reach a log through `{:?}` (also reached via `IpcRequest`'s derived `Debug`).
+impl std::fmt::Debug for IpcCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GetStatus => f.write_str("GetStatus"),
+            Self::SetMode(mode) => f.debug_tuple("SetMode").field(mode).finish(),
+            Self::RestartGeneration => f.write_str("RestartGeneration"),
+            Self::GetDiagnostics => f.write_str("GetDiagnostics"),
+            Self::Shutdown => f.write_str("Shutdown"),
+            Self::SetVoiceProfile { .. } => f
+                .debug_struct("SetVoiceProfile")
+                .field("profile_json", &format_args!("<redacted>"))
+                .finish(),
+            Self::ClearVoiceProfile => f.write_str("ClearVoiceProfile"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

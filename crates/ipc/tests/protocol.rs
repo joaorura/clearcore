@@ -96,3 +96,85 @@ fn malformed_json_returns_invalid_command() {
     let err = resp.error.expect("error detail");
     assert_eq!(err.code, "JSON_PARSE_ERROR");
 }
+
+#[test]
+fn set_voice_profile_roundtrips_through_json() {
+    let command = IpcCommand::SetVoiceProfile {
+        profile_json: r#"{"id":"spk-1"}"#.to_string(),
+    };
+    let request = IpcRequest::new(command.clone(), json!({}));
+
+    let wire = request.to_json().expect("serialize");
+    let parsed = IpcRequest::from_json(&wire).expect("deserialize");
+
+    assert_eq!(parsed.command, command);
+    assert_eq!(parsed.version, PROTOCOL_VERSION);
+    let wire_value: serde_json::Value = serde_json::from_str(&wire).expect("json");
+    assert_eq!(
+        wire_value["command"],
+        json!({"SetVoiceProfile": {"profile_json": r#"{"id":"spk-1"}"#}})
+    );
+}
+
+#[test]
+fn clear_voice_profile_roundtrips_through_json() {
+    let request = IpcRequest::new(IpcCommand::ClearVoiceProfile, json!({}));
+
+    let wire = request.to_json().expect("serialize");
+    let parsed = IpcRequest::from_json(&wire).expect("deserialize");
+
+    assert_eq!(parsed.command, IpcCommand::ClearVoiceProfile);
+    let wire_value: serde_json::Value = serde_json::from_str(&wire).expect("json");
+    assert_eq!(wire_value["command"], json!("ClearVoiceProfile"));
+}
+
+#[test]
+fn existing_commands_keep_their_wire_format() {
+    assert_eq!(
+        serde_json::to_value(IpcCommand::GetStatus).expect("serialize"),
+        json!("GetStatus")
+    );
+    assert_eq!(
+        serde_json::to_value(IpcCommand::SetMode(DenoiseMode::Bypass)).expect("serialize"),
+        json!({"SetMode": "Bypass"})
+    );
+    assert_eq!(
+        serde_json::to_value(IpcCommand::RestartGeneration).expect("serialize"),
+        json!("RestartGeneration")
+    );
+    assert_eq!(
+        serde_json::to_value(IpcCommand::GetDiagnostics).expect("serialize"),
+        json!("GetDiagnostics")
+    );
+    assert_eq!(
+        serde_json::to_value(IpcCommand::Shutdown).expect("serialize"),
+        json!("Shutdown")
+    );
+}
+
+#[test]
+fn debug_of_set_voice_profile_never_prints_the_biometric_payload() {
+    let secret = r#"{"gamma_enc":[0.123456789],"embedding":"SECRET-BIOMETRIC"}"#;
+    let command = IpcCommand::SetVoiceProfile {
+        profile_json: secret.to_owned(),
+    };
+    let request = IpcRequest::new(command.clone(), json!({}));
+
+    for rendered in [
+        format!("{command:?}"),
+        format!("{command:#?}"),
+        format!("{request:?}"),
+        format!("{request:#?}"),
+    ] {
+        assert!(!rendered.contains("SECRET-BIOMETRIC"), "{rendered}");
+        assert!(!rendered.contains("0.123456789"), "{rendered}");
+        assert!(rendered.contains("SetVoiceProfile"), "{rendered}");
+        assert!(rendered.contains("redacted"), "{rendered}");
+    }
+    // Other variants keep their ordinary Debug output.
+    assert_eq!(format!("{:?}", IpcCommand::GetStatus), "GetStatus");
+    assert_eq!(
+        format!("{:?}", IpcCommand::SetMode(DenoiseMode::Mute)),
+        "SetMode(Mute)"
+    );
+}

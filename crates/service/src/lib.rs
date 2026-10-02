@@ -5,6 +5,7 @@ pub mod bootstrap;
 pub mod install;
 
 use realtime_noise_ipc::{IpcCommand, IpcResponse, IpcServer, IpcStatus};
+use realtime_noise_model::{ProfileStore, VoiceProfile};
 use realtime_noise_supervisor::{
     EngineSupervisor, convert_engine_mode_to_ipc, convert_ipc_mode_to_engine,
 };
@@ -16,7 +17,15 @@ pub struct ServiceDaemon {
     server: IpcServer,
     shutdown: bool,
     served_client_count: usize,
+    profile_store: Option<ProfileStore>,
+    active_voice_profile_id: Option<String>,
 }
+
+/// Generic messages only: voice profiles are biometric data and neither their content nor the
+/// received JSON may appear in a response, not even in an error.
+const INVALID_PROFILE_MESSAGE: &str = "Invalid voice profile";
+const PERSIST_FAILED_MESSAGE: &str = "Failed to persist voice profile";
+const NO_PROFILE_STORE_MESSAGE: &str = "Voice profile storage is not configured";
 
 impl Default for ServiceDaemon {
     fn default() -> Self {
@@ -32,7 +41,36 @@ impl ServiceDaemon {
             server: IpcServer::new(),
             shutdown: false,
             served_client_count: 0,
+            profile_store: None,
+            active_voice_profile_id: None,
         }
+    }
+
+    /// Builds a daemon backed by `store` and activates the stored profile, if any.
+    #[must_use]
+    pub fn with_profile_store(store: ProfileStore) -> Self {
+        let mut daemon = Self::new();
+        daemon.attach_profile_store(store);
+        daemon
+    }
+
+    /// Attaches `store` and loads its active profile. Fail-closed: a stored profile with insecure
+    /// permissions, a broken integrity hash or an invalid payload activates nothing.
+    pub fn attach_profile_store(&mut self, store: ProfileStore) {
+        self.active_voice_profile_id = None;
+        if let Ok(profile) = store.load_active() {
+            self.active_voice_profile_id = profile.map(|profile| profile.id);
+        } else {
+            eprintln!(
+                "Stored voice profile was not loaded: it failed validation or has insecure permissions"
+            );
+        }
+        self.profile_store = Some(store);
+    }
+
+    #[must_use]
+    pub fn active_voice_profile_id(&self) -> Option<&str> {
+        self.active_voice_profile_id.as_deref()
     }
 
     #[must_use]
@@ -80,6 +118,12 @@ impl ServiceDaemon {
                                 "mode": mode_ipc,
                                 "crash_count_15m": status.crash_count_15m,
                                 "total_crashes": status.total_crashes,
+                                "active_voice_profile_id": self.active_voice_profile_id,
+                                // A profile is stored and selected, but the engine does not apply it to
+                                // the audio yet (no `set_voice_profile` on `InferenceBackend`), so
+                                // `is_voice_profile_active` stays false until that wiring exists.
+                                "voice_profile_selected": self.active_voice_profile_id.is_some(),
+                                "is_voice_profile_active": false,
                             }),
                         )
                     }
@@ -116,6 +160,15 @@ impl ServiceDaemon {
                             }),
                         )
                     }
+                    IpcCommand::SetVoiceProfile { profile_json } => set_voice_profile(
+                        self.profile_store.as_ref(),
+                        &mut self.active_voice_profile_id,
+                        profile_json,
+                    ),
+                    IpcCommand::ClearVoiceProfile => clear_voice_profile(
+                        self.profile_store.as_ref(),
+                        &mut self.active_voice_profile_id,
+                    ),
                     IpcCommand::Shutdown => {
                         self.shutdown = true;
                         IpcResponse::success("shutdown-resp", json!({"shutdown": true}))
@@ -129,4 +182,42 @@ impl ServiceDaemon {
         }
         Ok(())
     }
+}
+
+fn set_voice_profile(
+    store: Option<&ProfileStore>,
+    active_id: &mut Option<String>,
+    profile_json: &str,
+) -> IpcResponse {
+    const REQUEST_ID: &str = "set-voice-profile-resp";
+    let Some(store) = store else {
+        return IpcResponse::error(
+            REQUEST_ID,
+            IpcStatus::InternalError,
+            "NO_PROFILE_STORE",
+            NO_PROFILE_STORE_MESSAGE,
+        );
+    };
+    let Ok(profile) = VoiceProfile::from_json(profile_json) else {
+        return IpcResponse::invalid_command(REQUEST_ID, INVALID_PROFILE_MESSAGE);
+    };
+    if store.save_active(&profile).is_err() {
+        return IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE);
+    }
+    *active_id = Some(profile.id);
+    IpcResponse::success(REQUEST_ID, json!({"active_voice_profile_id": active_id}))
+}
+
+fn clear_voice_profile(
+    store: Option<&ProfileStore>,
+    active_id: &mut Option<String>,
+) -> IpcResponse {
+    const REQUEST_ID: &str = "clear-voice-profile-resp";
+    if let Some(store) = store
+        && store.clear_active().is_err()
+    {
+        return IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE);
+    }
+    *active_id = None;
+    IpcResponse::success(REQUEST_ID, json!({"active_voice_profile_id": null}))
 }

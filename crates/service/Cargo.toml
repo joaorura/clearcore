@@ -10,12 +10,16 @@ publish = false
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-engine = { path = "../engine" }
 realtime-noise-ipc = { path = "../ipc" }
+realtime-noise-model = { path = "../model" }
 realtime-noise-supervisor = { path = "../supervisor" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
 
 [features]
 tract = ["realtime-noise-engine/tract", "realtime-noise-supervisor/tract"]
+
+[dev-dependencies]
+tempfile = { version = "=3.23.0", default-features = false }
 
 [lints]
 workspace = true
