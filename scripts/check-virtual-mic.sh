@@ -38,7 +38,22 @@ fi
 # ==============================================================================
 # Implementação Nativa Linux (PipeWire / WirePlumber)
 # ==============================================================================
+# Localizacao do helper, primeiro EXECUTAVEL vence:
+#   1. CLEARCORE_HELPER_BIN        (override explicito)
+#   2. <raiz>/bin/pipewire_helper  (layout do pacote: resources/scripts/ + resources/bin/)
+#   3. <raiz>/platform/linux/helper/build/pipewire_helper (desenvolvimento)
+# Nenhum existe: fica o caminho de desenvolvimento (mantem mensagens e o ramo de compilacao).
 HELPER_BIN="${SCRIPT_DIR}/platform/linux/helper/build/pipewire_helper"
+for _helper_candidate in \
+    "${CLEARCORE_HELPER_BIN:-}" \
+    "${SCRIPT_DIR}/bin/pipewire_helper" \
+    "${SCRIPT_DIR}/platform/linux/helper/build/pipewire_helper"; do
+    if [[ -n "${_helper_candidate}" && -x "${_helper_candidate}" && ! -d "${_helper_candidate}" ]]; then
+        HELPER_BIN="${_helper_candidate}"
+        break
+    fi
+done
+unset _helper_candidate
 NODE_NAME="realtime-noise-source"
 NODE_DESC="Realtime Noise Virtual Microphone"
 
@@ -75,19 +90,108 @@ is_default_mic() {
     return 1
 }
 
+# Liga TODAS as portas de um nó fonte (por node.name) às entradas do stream de captura.
+# Estéreo: FL(_1) -> entrada esquerda (input_FL, senão input_MONO) e FR(_2) -> input_FR.
+# Mono (ex.: headset Bluetooth, única porta capture_MONO): a porta alimenta TODAS as entradas.
+link_source_node_to_capture() {
+    local node="$1" p ch
+    local -a src_ports=() in_ports=()
+    while IFS= read -r p; do
+        [[ "${p}" == "${node}:"* ]] && src_ports+=("${p}")
+    done < <(pw-link -o 2>/dev/null | sed 's/^[[:space:]]*//')
+    while IFS= read -r p; do
+        [[ "${p}" == realtime-noise-capture:input_* ]] && in_ports+=("${p}")
+    done < <(pw-link -i 2>/dev/null | sed 's/^[[:space:]]*//')
+    [[ ${#src_ports[@]} -gt 0 && ${#in_ports[@]} -gt 0 ]] || return 0
+
+    if [[ ${#src_ports[@]} -eq 1 ]]; then
+        for p in "${in_ports[@]}"; do
+            pw-link "${src_ports[0]}" "${p}" >/dev/null 2>&1 || true
+        done
+        return 0
+    fi
+
+    local in_left="${in_ports[0]}" in_right=""
+    for p in "${in_ports[@]}"; do
+        [[ "${p}" == "realtime-noise-capture:input_FR" ]] && in_right="${p}"
+        [[ "${p}" == "realtime-noise-capture:input_FL" ]] && in_left="${p}"
+    done
+    for p in "${src_ports[@]}"; do
+        ch="${p##*_}"
+        if [[ "${ch}" == "FL" || "${ch}" == "1" ]]; then
+            pw-link "${p}" "${in_left}" >/dev/null 2>&1 || true
+        elif [[ ( "${ch}" == "FR" || "${ch}" == "2" ) && -n "${in_right}" ]]; then
+            pw-link "${p}" "${in_right}" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+# Garante a ligação microfone físico -> stream de captura.
+# $1 = node.name do microfone ESCOLHIDO (o mesmo que o helper recebeu em --target).
+# Só esse nó é ligado: nunca "o primeiro nó cuja porta casa" (webcam v4l2 capture_1,
+# Bluetooth capture_MONO etc. também casam e seriam somados ao mic escolhido). Sem nome
+# conhecido não se liga nada às cegas; o AUTOCONNECT do WirePlumber decide.
 ensure_capture_link() {
+    local phys_name="${1:-}"
     if command -v pw-link >/dev/null 2>&1; then
+        local p
+        # As portas de entrada seguem o formato negociado (input_FL/input_FR ou input_MONO)
         # Sever self-loop if present
-        pw-link -d "${NODE_NAME}:capture_MONO" "realtime-noise-capture:input_MONO" >/dev/null 2>&1 || true
+        while IFS= read -r p; do
+            [[ "${p}" == realtime-noise-capture:input_* ]] || continue
+            pw-link -d "${NODE_NAME}:capture_MONO" "${p}" >/dev/null 2>&1 || true
+        done < <(pw-link -i 2>/dev/null | sed 's/^[[:space:]]*//')
         # Garantir link saudável entre microfone físico e stream de captura
-        if ! pw-link -l 2>/dev/null | grep -A1 "realtime-noise-capture:input_MONO" | grep -q "|<-"; then
-            local phys_source_port
-            phys_source_port=$(pw-link -o 2>/dev/null | grep -v "${NODE_NAME}" | grep -E 'alsa_input.*capture_F[L|R]|capture_1' | head -n1)
-            if [[ -n "${phys_source_port}" ]]; then
-                pw-link "${phys_source_port}" "realtime-noise-capture:input_MONO" >/dev/null 2>&1 || true
+        if ! pw-link -l 2>/dev/null | awk -v n="${NODE_NAME}:" '
+                /^[^ \t]/ { cur = $0 }
+                /\|<-/ && cur ~ /^realtime-noise-capture:input_/ && index($0, n) == 0 { found = 1 }
+                END { exit !found }'; then
+            if [[ -n "${phys_name}" && "${phys_name}" != "${NODE_NAME}" ]]; then
+                link_source_node_to_capture "${phys_name}"
+            else
+                echo "[check-virtual-mic] microfone escolhido desconhecido: nao ligo nenhuma fonte as cegas (WirePlumber decide)" >&2
             fi
         fi
     fi
+}
+
+# node.name de um nó a partir do id (aceita também um nome, devolvido como está).
+node_name_from_id() {
+    local ref="$1" name=""
+    [[ -n "${ref}" ]] || return 0
+    if [[ ! "${ref}" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "${ref}"
+        return 0
+    fi
+    if command -v wpctl >/dev/null 2>&1; then
+        name=$(wpctl inspect "${ref}" 2>/dev/null | sed -n 's/^[[:space:]*]*node\.name = "\(.*\)"$/\1/p' | head -n1)
+    fi
+    if [[ -z "${name}" ]] && command -v pw-cli >/dev/null 2>&1; then
+        name=$(pw-cli info "${ref}" 2>/dev/null | sed -n 's/^[[:space:]*]*node\.name = "\(.*\)"$/\1/p' | head -n1)
+    fi
+    printf '%s\n' "${name}"
+}
+
+# node.name do primeiro microfone físico (Audio/Source que não seja o virtual).
+physical_source_name() {
+    local phys_id="" name=""
+    if command -v wpctl >/dev/null 2>&1; then
+        phys_id=$(wpctl status 2>/dev/null | awk '/Sources:/,/Filters:|Streams:/' | grep -v 'Realtime Noise' | grep -E '[0-9]+\.' | head -n1 | grep -o -E '[0-9]+' | head -n1)
+        name=$(node_name_from_id "${phys_id}")
+    fi
+    if [[ -z "${name}" ]] && command -v pw-cli >/dev/null 2>&1; then
+        name=$(pw-cli list-objects Node 2>/dev/null | awk '
+            function flush() {
+                if (is_source && name != "" && name !~ /realtime-noise/ && !done) { print name; done = 1 }
+                is_source = 0; name = ""
+            }
+            $1 == "id" { flush() }
+            $0 ~ "media.class = \"Audio/Source\"" { is_source = 1 }
+            $1 == "node.name" { name = $3; gsub(/"/, "", name) }
+            END { flush() }
+        ')
+    fi
+    printf '%s\n' "${name}"
 }
 
 set_default_mic() {
@@ -100,7 +204,7 @@ set_default_mic() {
     if command -v wpctl >/dev/null 2>&1; then
         wpctl set-default "${node_id}"
         sleep 0.2
-        ensure_capture_link
+        ensure_capture_link "$(physical_source_name)"
         return 0
     fi
     return 1
@@ -169,56 +273,40 @@ recreate_node() {
     fi
 
     # Detectar microfone físico para passar como alvo explícito
-    local target_arg=""
-    local phys_id=""
-    if command -v wpctl >/dev/null 2>&1; then
-        phys_id=$(wpctl status 2>/dev/null | awk '/Sources:/,/Filters:|Streams:/' | grep -v 'Realtime Noise' | grep -E '[0-9]+\.' | head -n1 | grep -o -E '[0-9]+' | head -n1)
-    fi
-    if [[ -z "${phys_id}" ]] && command -v pw-cli >/dev/null 2>&1; then
-        phys_id=$(pw-cli list-objects Node 2>/dev/null | awk '
-            $1 == "id" { id = $2; sub(/,/, "", id) }
-            $0 ~ "media.class = \"Audio/Source\"" { is_source = 1 }
-            $0 ~ "node.name = " { name = $3 }
-            is_source && name != "" {
-                if (name !~ /realtime-noise/) { print id; exit }
-                is_source = 0; name = ""
-            }
-        ')
-    fi
-    if [[ -n "${phys_id}" ]]; then
-        target_arg="--target ${phys_id}"
+    # O alvo vai por node.name: o PipeWire/WirePlumber lê um target.object numérico como
+    # object.serial, não como id de nó, então um id nunca casa (e só sai silêncio).
+    local -a target_args=()
+    local phys_name=""
+    phys_name=$(physical_source_name)
+    if [[ -n "${phys_name}" ]]; then
+        target_args=(--target "${phys_name}")
     fi
 
     # Iniciar pipewire_helper via systemd user unit ou nohup
     if command -v systemd-run >/dev/null 2>&1; then
         systemctl --user reset-failed realtime-noise-helper >/dev/null 2>&1 || true
         systemd-run --user --unit=realtime-noise-helper \
-            "${HELPER_BIN}" ${target_arg} >/dev/null 2>&1 || true
+            "${HELPER_BIN}" ${target_args[@]+"${target_args[@]}"} >/dev/null 2>&1 || true
     else
-        nohup "${HELPER_BIN}" ${target_arg} > /tmp/realtime-noise-helper.log 2>&1 & disown $!
+        nohup "${HELPER_BIN}" ${target_args[@]+"${target_args[@]}"} > /tmp/realtime-noise-helper.log 2>&1 & disown $!
     fi
 
     # Polling até 3 segundos
     for _ in {1..15}; do
         sleep 0.2
         if is_node_present; then
-            # Garantir link saudável sem autoconexão circular
-            if command -v pw-link >/dev/null 2>&1; then
-                pw-link -d "${NODE_NAME}:capture_MONO" "realtime-noise-capture:input_MONO" >/dev/null 2>&1 || true
-                if ! pw-link -l 2>/dev/null | grep -A1 "realtime-noise-capture:input_MONO" | grep -q "|<-"; then
-                    local phys_source_port
-                    phys_source_port=$(pw-link -o 2>/dev/null | grep -v "${NODE_NAME}" | grep -E 'alsa_input.*capture_F[L|R]|capture_1' | head -n1)
-                    if [[ -n "${phys_source_port}" ]]; then
-                        pw-link "${phys_source_port}" "realtime-noise-capture:input_MONO" >/dev/null 2>&1 || true
-                    fi
-                fi
-            fi
+            # Garantir link saudável sem autoconexão circular (estéreo e mono),
+            # só com o mesmo mic que o helper recebeu em --target
+            ensure_capture_link "${phys_name}"
             return 0
         fi
     done
 
     # Fallback via pw-loopback se o helper demorou
     if command -v pw-loopback >/dev/null 2>&1; then
+        if [[ ! -x "${HELPER_BIN}" ]]; then
+            echo "[check-virtual-mic] AVISO: pipewire_helper nao encontrado; usando loopback SEM supressao de ruido" >&2
+        fi
         nohup pw-loopback \
             --capture-props="media.class=Audio/Sink node.name=realtime-noise-sink node.description=\"Realtime Noise Monitor Sink\"" \
             --playback-props="media.class=Audio/Source node.name=${NODE_NAME} node.description=\"${NODE_DESC}\"" \

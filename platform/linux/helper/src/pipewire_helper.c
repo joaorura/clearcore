@@ -121,6 +121,7 @@ static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
 
         if (media_class && strcmp(media_class, "Audio/Source") == 0) {
             if (node_name && strcmp(node_name, NODE_NAME_DEFAULT) != 0 && strstr(node_name, "realtime-noise") == NULL) {
+                known_sources_add(&ctx->known_sources, id, node_name);
                 if (ctx->target_device_id == 0 || ctx->target_device_id == id) {
                     ctx->target_device_id = id;
                     snprintf(ctx->target_device_name, sizeof(ctx->target_device_name), "%s", node_name);
@@ -681,14 +682,26 @@ int pipewire_helper_start(pipewire_helper_context_t *ctx) {
         }
     }
 
-    if (target_id > 0) {
-        char target_str[32];
-        snprintf(target_str, sizeof(target_str), "%u", target_id);
-        pw_properties_set(cap_props, PW_KEY_TARGET_OBJECT, target_str);
-        fprintf(stderr, "[pipewire_helper] Capture stream targeting physical microphone ID: %u\n", target_id);
-    } else if (strlen(ctx->target_device_name) > 0) {
-        pw_properties_set(cap_props, PW_KEY_TARGET_OBJECT, ctx->target_device_name);
-        fprintf(stderr, "[pipewire_helper] Capture stream targeting physical microphone: %s\n", ctx->target_device_name);
+    /*
+     * target.object must carry the stable node.name: WirePlumber reads a numeric
+     * value as object.serial, which never equals a node id, so the stream would
+     * fall back to the default source (this virtual mic) and only silence came out.
+     */
+    char target_name[TARGET_NAME_MAX];
+    bool have_target = target_resolve(&ctx->known_sources, target_id,
+                                      target_id == 0 ? ctx->target_device_name : NULL,
+                                      target_name, sizeof(target_name));
+    if (!have_target && target_id > 0) {
+        fprintf(stderr, "[pipewire_helper] Warning: node id %u is not a known Audio/Source; "
+                        "falling back to the auto-detected microphone\n", target_id);
+        if (ctx->target_device_name[0] != '\0') {
+            snprintf(target_name, sizeof(target_name), "%s", ctx->target_device_name);
+            have_target = true;
+        }
+    }
+    if (have_target) {
+        pw_properties_set(cap_props, PW_KEY_TARGET_OBJECT, target_name);
+        fprintf(stderr, "[pipewire_helper] Capture stream targeting physical microphone: %s\n", target_name);
     }
 
     ctx->capture_stream = pw_stream_new(ctx->core, "Realtime Noise Physical Capture", cap_props);
@@ -787,7 +800,14 @@ int main(int argc, char *argv[]) {
     /* Parse command line arguments */
     for (int i = 1; i < argc; ++i) {
         if ((strcmp(argv[i], "--target") == 0 || strcmp(argv[i], "-t") == 0) && i + 1 < argc) {
-            ctx.target_device_id = (uint32_t)strtoul(argv[++i], NULL, 10);
+            /* --target accepts a node.name (preferred) or, for compatibility, a node id */
+            const char *spec = argv[++i];
+            if (target_spec_is_numeric(spec)) {
+                ctx.target_device_id = (uint32_t)strtoul(spec, NULL, 10);
+            } else {
+                ctx.target_device_id = 0;
+                snprintf(ctx.target_device_name, sizeof(ctx.target_device_name), "%s", spec);
+            }
         } else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
             const char *m = argv[++i];
             uint32_t mode_val = CLEARCORE_MODE_ACTIVE;
@@ -801,9 +821,7 @@ int main(int argc, char *argv[]) {
 
     /* Environment variable fallback for physical microphone */
     const char *env_mic = getenv("CLEARCORE_PHYSICAL_MIC");
-    if (env_mic && ctx.target_device_id == 0) {
-        ctx.target_device_id = (uint32_t)strtoul(env_mic, NULL, 10);
-    }
+    ctx.target_device_id = target_env_mic_id(ctx.target_device_id, ctx.target_device_name, env_mic);
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);

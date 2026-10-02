@@ -49,6 +49,33 @@ jobs:
       - name: Package Linux Standalone Application
         run: ./package.sh
 
+      - name: Verify Linux Package Contents
+        run: |
+          set -euo pipefail
+          TARBALL="$(ls release/Clearcore-linux-x64.tar.gz 2>/dev/null | head -n1 || true)"
+          if [ -z "${TARBALL}" ]; then
+            echo "::error::release/Clearcore-linux-x64.tar.gz nao encontrado"
+            ls -lh release/ || true
+            exit 1
+          fi
+          tar -tzf "${TARBALL}" > "${RUNNER_TEMP}/linux-package-listing.txt"
+          for entry in \
+            "Clearcore-linux-x64/resources/bin/pipewire_helper" \
+            "Clearcore-linux-x64/resources/scripts/check-virtual-mic.sh"; do
+            if ! grep -qx "./${entry}\|${entry}" "${RUNNER_TEMP}/linux-package-listing.txt"; then
+              echo "::error::${entry} ausente em ${TARBALL}"
+              exit 1
+            fi
+          done
+          EXTRACT_DIR="$(mktemp -d "${RUNNER_TEMP}/linux-package-check.XXXXXX")"
+          tar -xzf "${TARBALL}" -C "${EXTRACT_DIR}"
+          if [ ! -x "${EXTRACT_DIR}/Clearcore-linux-x64/resources/bin/pipewire_helper" ]; then
+            echo "::error::resources/bin/pipewire_helper nao e executavel no pacote extraido"
+            ls -l "${EXTRACT_DIR}/Clearcore-linux-x64/resources/bin/" || true
+            exit 1
+          fi
+          echo "Pacote Linux OK: pipewire_helper e check-virtual-mic.sh presentes"
+
       - name: Upload Linux Package Artifact
         uses: actions/upload-artifact@v4
         with:

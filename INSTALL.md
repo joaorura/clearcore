@@ -75,13 +75,30 @@ sudo ./install.sh
 **What the installer performs:**
 1. Copies runtime binaries (`clearcore`, `realtime-noise-service`, `pipewire_helper`, `libclearcore_filter.so`).
 2. Symlinks launcher to `~/.local/bin/clearcore` (or `/usr/local/bin/clearcore`).
-3. Installs high-resolution icons to the desktop environment icon cache.
+3. Installs the application icon under `hicolor/<W>x<H>/apps/`, using the PNG's real pixel size, refreshes the icon cache when `gtk-update-icon-cache` is available, and points `Icon=` in the desktop entry at the installed file.
 4. Registers `clearcore.desktop` into your desktop application launcher menu.
+5. On GNOME, checks for the AppIndicator extension and prints a warning (it never installs packages) if the tray icon would be invisible.
 
 Launch ClearCore anytime from your application launcher or by running:
 ```bash
 clearcore
 ```
+
+#### Tray icon on GNOME (AppIndicator extension)
+
+GNOME Shell does not display tray icons by default. Without the AppIndicator extension the ClearCore tray icon is simply not shown, but the app keeps working: open ClearCore from the application menu (launching it again brings the existing window back to the front), and switch modes from the app window. Closing the window only hides it; without a tray, fully quit with `pkill -x clearcore`. To get the tray icon:
+
+```bash
+# Fedora
+sudo dnf install gnome-shell-extension-appindicator
+# Other distributions: install your distribution's AppIndicator extension package
+# (usually named gnome-shell-extension-appindicator) or use
+# https://extensions.gnome.org/extension/615/appindicator-support/
+
+gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
+```
+
+Then **log out and back in** so GNOME Shell loads the extension. (The UUID above is the one documented upstream at https://github.com/ubuntu/gnome-shell-extension-appindicator; Ubuntu ships the same feature as `ubuntu-appindicators@ubuntu.com`, already enabled.) KDE Plasma, XFCE and other desktops with a native tray need nothing.
 
 ---
 

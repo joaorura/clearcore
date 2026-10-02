@@ -70,7 +70,7 @@ if [[ $EUID -eq 0 ]]; then
     rm -rf "/opt/clearcore" 2>/dev/null || true
     rm -f "/usr/local/bin/clearcore" 2>/dev/null || true
     rm -f "/usr/share/applications/clearcore.desktop" 2>/dev/null || true
-    rm -f "/usr/share/icons/hicolor/256x256/apps/clearcore.png" 2>/dev/null || true
+    find "/usr/share/icons/hicolor" -path '*/apps/clearcore.png' -delete 2>/dev/null || true
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "/usr/share/applications" 2>/dev/null || true
     fi
@@ -79,7 +79,7 @@ else
     rm -rf "${HOME}/.local/share/clearcore" 2>/dev/null || true
     rm -f "${HOME}/.local/bin/clearcore" 2>/dev/null || true
     rm -f "${HOME}/.local/share/applications/clearcore.desktop" 2>/dev/null || true
-    rm -f "${HOME}/.local/share/icons/hicolor/256x256/apps/clearcore.png" 2>/dev/null || true
+    find "${HOME}/.local/share/icons/hicolor" -path '*/apps/clearcore.png' -delete 2>/dev/null || true
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
     fi
