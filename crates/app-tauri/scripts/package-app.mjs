@@ -23,13 +23,8 @@ console.log(`📦 Packaging Clearcore Desktop Application for ${platform}-${arch
 console.log('=====================================================');
 
 // 1. Ensure Frontend is built
-const distHtml = path.join(appDir, 'dist', 'index.html');
-if (!fs.existsSync(distHtml)) {
-  console.log('🔨 Compiling frontend React bundle (npm run build)...');
-  execSync('npm run build', { cwd: appDir, stdio: 'inherit' });
-} else {
-  console.log('✓ Frontend React bundle already compiled in dist/');
-}
+console.log('🔨 Compiling frontend React bundle (npm run build)...');
+execSync('npm run build', { cwd: appDir, stdio: 'inherit' });
 
 // 2. Ensure release directory exists and is clean
 if (fs.existsSync(bundleDir)) {
