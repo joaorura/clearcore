@@ -150,6 +150,11 @@ export interface Translations {
     badge: string;
     description: string;
     activeLabel: string;
+    activeEngineName: string;
+    detectedUnusedLabel: string;
+    previewBadge: string;
+    previewNotSelectable: string;
+    detectionError: string;
     detectedBadge: string;
     notDetectedBadge: string;
     runtimeReadyBadge: string;
@@ -163,11 +168,8 @@ export interface Translations {
     copyCommandBtn: string;
     copiedBtn: string;
     closeModalBtn: string;
-    switchSuccess: string;
-    cannotSelectMissing: string;
     autoRecommend: string;
     autoResolvedCurrent: string;
-    autoResolvedActive: string;
     refreshBtn: string;
     refreshingBtn: string;
   };

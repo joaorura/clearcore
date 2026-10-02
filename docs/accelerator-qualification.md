@@ -54,7 +54,9 @@ For the current General Availability (GA) release:
 
 ## 2. User Control & Explicit Selection Matrix
 
-The user is never locked into an arbitrary choice. The engine exposes both **Category Requests** and **Specific Runtime Requests** through IPC (`realtime-noise.v1`) and the Tauri UI:
+The user is never locked into an arbitrary choice. The design below describes **Category Requests** and **Specific Runtime Requests**.
+
+> **Status: explicit selection is NOT yet wired to the engine.** The IPC protocol (`realtime-noise.v1`) has no backend-selection command, `filter-capi` always builds the Tract backend, and the OpenVINO plugin in `crates/accelerators` is a passthrough stub. The desktop app only accepts `auto` and `cpu_tract` in `set_hardware_backend` (both run Tract on the CPU); every other accelerator is shown as a preview and is rejected with `not_implemented`. The matrix below is the target design, not current behavior:
 
 | Request Mode | Category / Runtime | Behavior / Routing | Fallback if Unpromoted |
 |---|---|---|---|

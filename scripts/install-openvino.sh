@@ -49,7 +49,9 @@ for loc in \
     "/usr/lib64/libopenvino.so" \
     "/lib64/libopenvino.so" \
     "/usr/lib/x86_64-linux-gnu/libopenvino.so" \
-    "/opt/intel/openvino/runtime/lib/intel64/libopenvino.so"; do
+    "/opt/intel/openvino/runtime/lib/intel64/libopenvino.so" \
+    "${INTEL_OPENVINO_DIR:-/nonexistent}/runtime/lib/intel64/libopenvino.so" \
+    /opt/intel/openvino*/runtime/lib/intel64/libopenvino.so; do
     if [[ -e "${loc}" ]]; then
         OPENVINO_LIB="${loc}"
         break
@@ -67,7 +69,7 @@ if [[ -n "${OPENVINO_LIB}" ]]; then
         echo "    -> Dispositivo /dev/accel/accel0 pronto para inferencia NPU!"
     else
         echo "    -> [AVISO] /dev/accel/accel0 nao encontrado. Para NPU, certifique-se"
-        echo "       de que o driver 'intel-driver-compiler-npu' ou modulo 'intel_vpu' esta carregado."
+        echo "       de que o driver NPU (Fedora: 'intel-npu-driver') e o modulo 'intel_vpu' estao carregados."
     fi
     exit 0
 fi
@@ -89,10 +91,13 @@ case "${OS_ID}" in
     fedora|rhel|centos)
         echo "Instrucoes para Fedora / RHEL / CentOS:"
         echo ""
-        echo "  1. Instalar bibliotecas OpenVINO e Level Zero NPU via dnf:"
-        echo "     sudo dnf install -y openvino oneapi-level-zero"
-        echo "     # Se disponivel no repositorio da distro:"
-        echo "     sudo dnf install -y intel-driver-compiler-npu intel-level-zero-npu intel-compute-runtime"
+        echo "  1. Instalar o runtime OpenVINO, os plugins (inclui o plugin NPU) e o driver NPU via dnf:"
+        echo "     sudo dnf install -y openvino openvino-plugins intel-npu-driver intel-npu-compiler oneapi-level-zero"
+        echo "     # O plugin libopenvino_intel_npu_plugin.so vem no pacote 'openvino-plugins'."
+        echo "     # Os nomes dos pacotes podem variar entre versoes do Fedora; confira com:"
+        echo "     #   dnf search openvino    e    dnf search intel-npu"
+        echo "     # (intel-driver-compiler-npu e intel-level-zero-npu NAO existem no Fedora)"
+        echo "     # Para a iGPU Intel, instale tambem: sudo dnf install -y intel-compute-runtime"
         echo ""
         echo "  2. Repositorio Oficial Intel OpenVINO (opcional, para versao mais recente):"
         echo "     sudo tee /etc/yum.repos.d/intel-openvino.repo << 'EOF'"
@@ -104,6 +109,11 @@ case "${OS_ID}" in
         echo "gpgkey=https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB"
         echo "EOF"
         echo "     sudo dnf install -y openvino"
+        echo ""
+        echo "  3. Instalacao manual (pacote/arquivo da Intel, sem RPM) tambem e reconhecida:"
+        echo "     /opt/intel/openvino*/runtime/lib/intel64, a pasta indicada em INTEL_OPENVINO_DIR,"
+        echo "     diretorios de LD_LIBRARY_PATH ou um Python com o modulo 'openvino' importavel"
+        echo "     (informe interpretadores extras em CLEARCORE_PYTHON, separados por ':')."
         ;;
     ubuntu|debian|pop)
         echo "Instrucoes para Ubuntu / Debian / Pop!_OS:"

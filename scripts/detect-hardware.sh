@@ -15,10 +15,45 @@
 
 set -euo pipefail
 
+# Variaveis de ambiente opcionais (todas genericas, nenhum caminho fixo de usuario):
+#   CLEARCORE_DETECT_ROOT   prefixo dos caminhos do sistema (/dev, /sys, /proc, /lib64,
+#                           /usr, /opt, /home). Vazio = sistema real. Usado pelos testes.
+#   CLEARCORE_PYTHON        interpretadores Python extras para as sondas "import openvino"
+#                           e "import tensorrt", separados por ':' (alem do python3 do PATH).
+#   CLEARCORE_PROBE_TIMEOUT segundos maximos de cada sonda Python (padrao 4).
+#   INTEL_OPENVINO_DIR      raiz de uma instalacao manual do OpenVINO (ex.: /opt/intel/openvino).
+#   LD_LIBRARY_PATH         diretorios adicionais onde libopenvino e os plugins podem estar.
+ROOT="${CLEARCORE_DETECT_ROOT:-}"
+PROBE_TIMEOUT="${CLEARCORE_PROBE_TIMEOUT:-4}"
 OUTPUT_JSON=false
 if [[ "${1:-}" == "--json" ]]; then
     OUTPUT_JSON=true
 fi
+
+# probe_python "<codigo>": executa o codigo no python3 do PATH e, depois, em cada
+# interpretador de CLEARCORE_PYTHON. Imprime a saida do primeiro que tiver sucesso e
+# retorna 0; retorna 1 se nenhum conseguir. Nada vaza para stdout/stderr alem dessa
+# saida (o JSON final precisa continuar valido) e cada sonda tem tempo limite curto.
+probe_python() {
+    local code="$1" py out
+    local -a pys=(python3) extra=() runner=()
+    if [[ -n "${CLEARCORE_PYTHON:-}" ]]; then
+        IFS=':' read -r -a extra <<<"${CLEARCORE_PYTHON}"
+        pys+=("${extra[@]}")
+    fi
+    if command -v timeout >/dev/null 2>&1; then
+        runner=(timeout "${PROBE_TIMEOUT}")
+    fi
+    for py in "${pys[@]}"; do
+        [[ -n "${py}" ]] || continue
+        command -v "${py}" >/dev/null 2>&1 || continue
+        if out="$("${runner[@]}" "${py}" -c "${code}" 2>/dev/null </dev/null)"; then
+            printf '%s' "${out}"
+            return 0
+        fi
+    done
+    return 1
+}
 
 if [[ "${OUTPUT_JSON}" == "false" ]]; then
     echo "=========================================================="
@@ -43,12 +78,12 @@ HAS_AMD_GPU=false
 if echo "${PCI_INFO}" | grep -qi "10de:"; then
     HAS_NVIDIA=true
 fi
-if [[ -e /dev/nvidia0 || -e /proc/driver/nvidia/version ]]; then
+if [[ -e "${ROOT}/dev/nvidia0" || -e "${ROOT}/proc/driver/nvidia/version" ]]; then
     HAS_NVIDIA=true
 fi
 
 # 2. Intel NPU
-if echo "${PCI_INFO}" | grep -qi "8086:7d1d\|8086:7d1e" || [[ -e /dev/accel/accel0 && $(cat /sys/class/accel/accel0/device/vendor 2>/dev/null || true) == "0x8086" ]]; then
+if echo "${PCI_INFO}" | grep -qi "8086:7d1d\|8086:7d1e" || [[ -e "${ROOT}/dev/accel/accel0" && $(cat "${ROOT}/sys/class/accel/accel0/device/vendor" 2>/dev/null || true) == "0x8086" ]]; then
     HAS_INTEL_NPU=true
 fi
 
@@ -59,8 +94,8 @@ fi
 
 # 4. CPU Detection (Dynamic Model Name and Vendor)
 CPU_MODEL=""
-if [[ -f /proc/cpuinfo ]]; then
-    CPU_MODEL="$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | sed 's/^[ \t]*//' || true)"
+if [[ -f "${ROOT}/proc/cpuinfo" ]]; then
+    CPU_MODEL="$(grep -m1 "model name" "${ROOT}/proc/cpuinfo" | cut -d: -f2 | sed 's/^[ \t]*//' || true)"
 fi
 if [[ -z "${CPU_MODEL}" ]] && command -v lscpu >/dev/null 2>&1; then
     CPU_MODEL="$(lscpu | grep -i "Model name:" | cut -d: -f2 | sed 's/^[ \t]*//' || true)"
@@ -79,7 +114,7 @@ elif echo "${CPU_MODEL}" | grep -qi "intel"; then
 fi
 
 # 5. AMD Ryzen AI NPU (XDNA / XDNA 2)
-if echo "${PCI_INFO}" | grep -qi "1022:1502\|1022:17f0" || [[ -e /dev/amdxdna || -d /sys/class/accel/amdxdna0 ]]; then
+if echo "${PCI_INFO}" | grep -qi "1022:1502\|1022:17f0" || [[ -e "${ROOT}/dev/amdxdna" || -d "${ROOT}/sys/class/accel/amdxdna0" ]]; then
     HAS_AMD_NPU=true
 fi
 
@@ -108,15 +143,15 @@ fi
 
 if [[ "${HAS_TRT_RUNTIME}" == "false" ]]; then
     for candidate in \
-        /usr/lib64/libnvinfer.so* \
-        /usr/lib/x86_64-linux-gnu/libnvinfer.so* \
-        /usr/local/cuda/lib64/libnvinfer.so* \
-        /opt/cuda/lib64/libnvinfer.so* \
-        /usr/local/tensorrt/lib/libnvinfer.so* \
-        /home/*/.local/lib/python*/site-packages/tensorrt_libs/libnvinfer.so* \
-        /home/*/miniconda3/lib*/python*/site-packages/tensorrt_libs/libnvinfer.so* \
-        /home/*/*/.venv/lib*/python*/site-packages/tensorrt_libs/libnvinfer.so* \
-        /home/*/*/.venv/lib64/python*/site-packages/tensorrt_libs/libnvinfer.so*; do
+        "${ROOT}"/usr/lib64/libnvinfer.so* \
+        "${ROOT}"/usr/lib/x86_64-linux-gnu/libnvinfer.so* \
+        "${ROOT}"/usr/local/cuda/lib64/libnvinfer.so* \
+        "${ROOT}"/opt/cuda/lib64/libnvinfer.so* \
+        "${ROOT}"/usr/local/tensorrt/lib/libnvinfer.so* \
+        "${ROOT}"/home/*/.local/lib/python*/site-packages/tensorrt_libs/libnvinfer.so* \
+        "${ROOT}"/home/*/miniconda3/lib*/python*/site-packages/tensorrt_libs/libnvinfer.so* \
+        "${ROOT}"/home/*/*/.venv/lib*/python*/site-packages/tensorrt_libs/libnvinfer.so* \
+        "${ROOT}"/home/*/*/.venv/lib64/python*/site-packages/tensorrt_libs/libnvinfer.so*; do
         if [[ -e "${candidate}" ]]; then
             HAS_TRT_RUNTIME=true
             TRT_PATH="${candidate}"
@@ -126,9 +161,7 @@ if [[ "${HAS_TRT_RUNTIME}" == "false" ]]; then
 fi
 
 if [[ "${HAS_TRT_RUNTIME}" == "false" ]]; then
-    if python3 -c "import tensorrt" 2>/dev/null || \
-       /home/joaorura/miniconda3/bin/python3 -c "import tensorrt" 2>/dev/null || \
-       /home/joaorura/nvidia-broadcast-linux/.venv/bin/python3 -c "import tensorrt" 2>/dev/null; then
+    if probe_python "import tensorrt" >/dev/null; then
         HAS_TRT_RUNTIME=true
         TRT_PATH="python:tensorrt"
     fi
@@ -142,53 +175,74 @@ HAS_OPENVINO_NPU=false
 HAS_OPENVINO_GPU=false
 HAS_OPENVINO_CPU=false
 
-if ldconfig -p 2>/dev/null | grep -q "libopenvino\.so" || [[ -e /lib64/libopenvino.so || -e /usr/lib64/libopenvino.so || -e /lib64/libopenvino.so.2510 ]]; then
+# Diretorios onde libopenvino.so e os plugins libopenvino_intel_*_plugin.so podem estar:
+# pacote da distro (Fedora: /usr/lib64/openvino-X), instalacao manual da Intel
+# (/opt/intel/openvino*/runtime/lib/intel64), ${INTEL_OPENVINO_DIR} e LD_LIBRARY_PATH.
+OV_DIRS=()
+add_ov_dir() { [[ -d "$1" ]] && OV_DIRS+=("$1"); return 0; }
+for d in "${ROOT}"/usr/lib64 "${ROOT}"/lib64 "${ROOT}"/usr/lib/x86_64-linux-gnu \
+         "${ROOT}"/usr/lib64/openvino* "${ROOT}"/lib64/openvino* "${ROOT}"/usr/lib/x86_64-linux-gnu/openvino* \
+         "${ROOT}"/opt/intel/openvino*/runtime/lib/intel64; do
+    add_ov_dir "${d}"
+done
+if [[ -n "${INTEL_OPENVINO_DIR:-}" ]]; then
+    for d in "${INTEL_OPENVINO_DIR}"/runtime/lib/intel64 "${INTEL_OPENVINO_DIR}"/runtime/lib \
+             "${INTEL_OPENVINO_DIR}"/lib/intel64 "${INTEL_OPENVINO_DIR}"/lib "${INTEL_OPENVINO_DIR}"; do
+        add_ov_dir "${d}"
+    done
+fi
+if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+    IFS=':' read -r -a LD_DIRS <<<"${LD_LIBRARY_PATH}"
+    for d in "${LD_DIRS[@]}"; do
+        [[ -n "${d}" ]] && add_ov_dir "${d}"
+    done
+fi
+
+# has_ov_file "<padrao>": algum diretorio de OV_DIRS contem um arquivo que casa com o padrao
+has_ov_file() {
+    local d f
+    for d in "${OV_DIRS[@]}"; do
+        for f in "${d}"/$1; do
+            [[ -e "${f}" ]] && return 0
+        done
+    done
+    return 1
+}
+
+if ldconfig -p 2>/dev/null | grep -q "libopenvino\.so" || has_ov_file 'libopenvino.so*'; then
     HAS_OPENVINO_BASE=true
 fi
 
 # Plugin NPU (Only if Intel NPU hardware is present)
-if [[ "${HAS_INTEL_NPU}" == "true" ]]; then
-    for p in /usr/lib64/openvino*/libopenvino_intel_npu_plugin.so /lib64/openvino*/libopenvino_intel_npu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_npu_plugin.so; do
-        if [[ -e "${p}" ]]; then
-            HAS_OPENVINO_NPU=true
-            break
-        fi
-    done
+if [[ "${HAS_INTEL_NPU}" == "true" ]] && has_ov_file 'libopenvino_intel_npu_plugin.so'; then
+    HAS_OPENVINO_NPU=true
 fi
 
 # Plugin GPU (Only if Intel iGPU/dGPU is present)
-if [[ "${HAS_INTEL_GPU}" == "true" ]]; then
-    for p in /usr/lib64/openvino*/libopenvino_intel_gpu_plugin.so /lib64/openvino*/libopenvino_intel_gpu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_gpu_plugin.so; do
-        if [[ -e "${p}" ]]; then
-            HAS_OPENVINO_GPU=true
-            break
-        fi
-    done
+if [[ "${HAS_INTEL_GPU}" == "true" ]] && has_ov_file 'libopenvino_intel_gpu_plugin.so'; then
+    HAS_OPENVINO_GPU=true
 fi
 
 # Plugin CPU (Only if Intel CPU is present - never on AMD)
-if [[ "${HAS_INTEL_CPU}" == "true" ]]; then
-    for p in /usr/lib64/openvino*/libopenvino_intel_cpu_plugin.so /lib64/openvino*/libopenvino_intel_cpu_plugin.so /usr/lib/x86_64-linux-gnu/openvino*/libopenvino_intel_cpu_plugin.so; do
-        if [[ -e "${p}" ]]; then
-            HAS_OPENVINO_CPU=true
-            break
-        fi
-    done
+if [[ "${HAS_INTEL_CPU}" == "true" ]] && has_ov_file 'libopenvino_intel_cpu_plugin.so'; then
+    HAS_OPENVINO_CPU=true
 fi
 
-# Inspecao de dispositivos via OpenVINO Core (apenas para hardware Intel relevante)
-if [[ "${HAS_OPENVINO_BASE}" == "true" ]]; then
-    OV_DEVICES=$(python3 -c "import openvino as ov; print(','.join(ov.Core().available_devices))" 2>/dev/null || \
-                 /home/joaorura/miniconda3/bin/python3 -c "import openvino as ov; print(','.join(ov.Core().available_devices))" 2>/dev/null || \
-                 /home/joaorura/.local/share/whisper-ov/.venv/bin/python3 -c "import openvino as ov; print(','.join(ov.Core().available_devices))" 2>/dev/null || true)
-    if [[ "${OV_DEVICES}" == *"NPU"* && "${HAS_INTEL_NPU}" == "true" ]]; then
-        HAS_OPENVINO_NPU=true
-    fi
-    if [[ "${OV_DEVICES}" == *"GPU"* && "${HAS_INTEL_GPU}" == "true" ]]; then
-        HAS_OPENVINO_GPU=true
-    fi
-    if [[ "${OV_DEVICES}" == *"CPU"* && "${HAS_INTEL_CPU}" == "true" ]]; then
-        HAS_OPENVINO_CPU=true
+# Inspecao de dispositivos via OpenVINO Core (apenas para hardware Intel relevante).
+# Roda mesmo quando a base NAO foi achada por arquivo: um `import openvino` bem-sucedido
+# ja prova que o runtime existe (pip, venv, instalacao manual com setupvars, etc.).
+if [[ "${HAS_INTEL_NPU}" == "true" || "${HAS_INTEL_GPU}" == "true" || "${HAS_INTEL_CPU}" == "true" ]]; then
+    if OV_DEVICES="$(probe_python "import openvino as ov; print(','.join(ov.Core().available_devices))")"; then
+        HAS_OPENVINO_BASE=true
+        if [[ "${OV_DEVICES}" == *"NPU"* && "${HAS_INTEL_NPU}" == "true" ]]; then
+            HAS_OPENVINO_NPU=true
+        fi
+        if [[ "${OV_DEVICES}" == *"GPU"* && "${HAS_INTEL_GPU}" == "true" ]]; then
+            HAS_OPENVINO_GPU=true
+        fi
+        if [[ "${OV_DEVICES}" == *"CPU"* && "${HAS_INTEL_CPU}" == "true" ]]; then
+            HAS_OPENVINO_CPU=true
+        fi
     fi
 fi
 
@@ -207,12 +261,12 @@ fi
 # Inspecao de Runtimes: AMD Ryzen AI NPU (XDNA) & AMD Radeon iGPU
 # ------------------------------------------------------------------------------
 HAS_AMD_NPU_RUNTIME=false
-if ldconfig -p 2>/dev/null | grep -qi "libxrt_core\.so" || [[ -d /opt/xilinx/xrt || -e /usr/lib64/libxrt_core.so ]]; then
+if ldconfig -p 2>/dev/null | grep -qi "libxrt_core\.so" || [[ -d "${ROOT}/opt/xilinx/xrt" || -e "${ROOT}/usr/lib64/libxrt_core.so" ]]; then
     HAS_AMD_NPU_RUNTIME=true
 fi
 
 HAS_AMD_GPU_RUNTIME=false
-if ldconfig -p 2>/dev/null | grep -qiE "libvulkan_radeon\.so|amdvlk|libMesaOpenCL\.so" || [[ -d /opt/rocm || -e /usr/lib64/libvulkan_radeon.so ]]; then
+if ldconfig -p 2>/dev/null | grep -qiE "libvulkan_radeon\.so|amdvlk|libMesaOpenCL\.so" || [[ -d "${ROOT}/opt/rocm" || -e "${ROOT}/usr/lib64/libvulkan_radeon.so" ]]; then
     HAS_AMD_GPU_RUNTIME=true
 fi
 

@@ -23,6 +23,8 @@ export interface HardwareBackendsResponse {
     id: string;
     name: string;
   };
+  /** Motivo curto quando o detector de hardware falhou (a lista vem do fallback do app). */
+  detection_error?: string;
 }
 
 export interface ClearcoreApi {
@@ -40,7 +42,7 @@ export interface ClearcoreApi {
   getInputDevices: () => Promise<InputDeviceInfo[]>;
   setInputDevice: (deviceId: string) => Promise<{ success: boolean; selectedId: string }>;
   getHardwareBackends: () => Promise<HardwareBackendsResponse>;
-  setHardwareBackend: (backendId: string) => Promise<{ success: boolean; active_backend: string }>;
+  setHardwareBackend: (backendId: string) => Promise<{ success: boolean; reason?: string; active_backend: string }>;
   onStatusUpdate: (cb: (data: { mode?: DenoiseMode }) => void) => () => void;
   onVirtualMicUpdate: (cb: (data: VirtualMicStatus) => void) => () => void;
   onInputDevicesUpdate: (cb: (data: { devices: InputDeviceInfo[]; selectedId: string | null }) => void) => () => void;
