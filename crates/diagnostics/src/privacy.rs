@@ -206,6 +206,12 @@ pub fn hash_device_id(raw_device_id: &str, install_salt: &str) -> String {
 /// - Common conversational or meeting keywords
 #[must_use]
 pub fn sanitize_text(text: &str) -> String {
+    // Voice profiles are biometric data: if a text carries any of their material, none of it is
+    // worth keeping, so it is dropped whole (quote redaction alone leaves the vector values).
+    if contains_voice_profile_material(text) {
+        return VOICE_PROFILE_REDACTION.to_string();
+    }
+
     let mut result = text.to_string();
 
     // 1. Redact quoted strings (potential speech transcripts, document names, meeting names)
@@ -236,6 +242,43 @@ pub fn sanitize_text(text: &str) -> String {
     }
 
     result
+}
+
+const VOICE_PROFILE_REDACTION: &str = "[REDACTED_VOICE_PROFILE]";
+
+/// Field names of a serialized `VoiceProfile` that never belong in a diagnostic.
+const VOICE_PROFILE_MARKERS: [&str; 5] = [
+    "gamma_enc",
+    "beta_enc",
+    "gamma_df",
+    "beta_df",
+    "integrity_hash",
+];
+
+/// A run of this many consecutive numbers looks like a vector (`FiLM`, EQ gains, embedding).
+const NUMERIC_VECTOR_RUN: usize = 8;
+
+fn contains_voice_profile_material(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    if VOICE_PROFILE_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+    {
+        return true;
+    }
+
+    let mut run = 0_usize;
+    for token in text.split([',', '[', ']', '{', '}']) {
+        if token.trim().parse::<f64>().is_ok() {
+            run += 1;
+            if run >= NUMERIC_VECTOR_RUN {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
 }
 
 fn redact_quotes(input: &str) -> String {
@@ -321,6 +364,33 @@ mod tests {
         assert_eq!(h1, h2);
         assert_ne!(h1, h3);
         assert_eq!(h1.len(), 64);
+    }
+
+    #[test]
+    fn sanitize_text_redacts_voice_profile_dumps_entirely() {
+        let numbers = (0..16)
+            .map(|i| format!("0.{}", 7000 + i))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let dumps = [
+            format!("apply failed {{\"gamma_enc\": [{numbers}]}}"),
+            "dump: integrity_hash=ab12".to_string(),
+            "film.beta_df was rejected".to_string(),
+            format!("vector [{numbers}] rejected"),
+        ];
+        for dump in &dumps {
+            let cleaned = sanitize_text(dump);
+            assert_eq!(cleaned, "[REDACTED_VOICE_PROFILE]", "input: {dump}");
+        }
+    }
+
+    #[test]
+    fn sanitize_text_keeps_ordinary_numeric_messages() {
+        let cleaned = sanitize_text("latency p99 4500, 2800, 1200 over budget by 3 frames");
+        assert_eq!(
+            cleaned,
+            "latency p99 4500, 2800, 1200 over budget by 3 frames"
+        );
     }
 
     #[test]

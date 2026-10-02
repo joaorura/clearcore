@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-model = { path = "../model" }
+studio-dsp = { path = "../studio-dsp" }
 
 [features]
 tract = ["realtime-noise-model/tract"]

@@ -11,6 +11,7 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-model = { path = "../model", features = ["tract"] }
+studio-dsp = { path = "../studio-dsp" }
 
 [lints.rust]
 unsafe_code = "allow"

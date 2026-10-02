@@ -12,7 +12,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES, RealtimeTransport};
-use realtime_noise_model::{InferenceBackend, InferenceError};
+use realtime_noise_model::{InferenceBackend, InferenceError, StudioBackend, StudioResetHandle};
+use studio_dsp::StudioControl;
 
 use crate::generation::{Generation, GenerationId};
 use crate::queue::BoundedQueueTransport;
@@ -124,6 +125,45 @@ pub(crate) struct EngineSharedState {
     pub(crate) generation: Generation,
     pub(crate) deadline_miss_count: u64,
     pub(crate) is_running: bool,
+    pub(crate) studio: Option<StudioAttachment>,
+}
+
+/// Studio finishing chain attached to the engine by [`DenoiseEngine::with_studio`].
+///
+/// Every backend the engine holds is wrapped in a [`StudioBackend`] sharing the same control and
+/// the same reset handle, so a backend swap keeps both.
+pub(crate) struct StudioAttachment {
+    control: Arc<StudioControl>,
+    reset: StudioResetHandle,
+}
+
+impl StudioAttachment {
+    pub(crate) fn new(control: Arc<StudioControl>, reset: StudioResetHandle) -> Self {
+        Self { control, reset }
+    }
+
+    fn wrap(&self, inner: Box<dyn InferenceBackend>) -> Box<dyn InferenceBackend> {
+        Box::new(StudioBackend::with_reset_handle(
+            inner,
+            Arc::clone(&self.control),
+            self.reset.clone(),
+        ))
+    }
+}
+
+impl EngineSharedState {
+    /// Closes the active generation, opens the next one and asks the studio chain (if attached)
+    /// to reset its state before the next frame. Returns `(closed_id, next_id)`.
+    pub(crate) fn advance_generation(&mut self, reason: ResetReason) -> (u64, GenerationId) {
+        let old_id = self.generation.id().get();
+        self.generation.close(reason);
+        let next_id = self.generation.id().next();
+        self.generation = Generation::active(next_id);
+        if let Some(studio) = &self.studio {
+            studio.reset.request();
+        }
+        (old_id, next_id)
+    }
 }
 
 /// Real-time noise suppression engine coordinator.
@@ -162,6 +202,7 @@ impl DenoiseEngine {
             generation: initial_generation,
             deadline_miss_count: 0,
             is_running: false,
+            studio: None,
         }));
 
         Self {
@@ -178,6 +219,29 @@ impl DenoiseEngine {
         let input = Arc::new(BoundedQueueTransport::new());
         let output = Arc::new(BoundedQueueTransport::new());
         Self::with_mode(input, output, backend, mode)
+    }
+
+    /// Attaches the studio finishing chain: the current backend (and a pending one, if any) is
+    /// wrapped in a [`StudioBackend`] driven by `control`, and so is every backend set later.
+    ///
+    /// Call it once, before [`DenoiseEngine::start`]; a second call is ignored because wrapping
+    /// twice would run the chain twice. `Bypass` and `Mute` never reach the backend, so they never
+    /// reach the chain either.
+    #[must_use]
+    pub fn with_studio(self, control: Arc<StudioControl>) -> Self {
+        {
+            let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+            if shared.studio.is_none() {
+                let attachment = StudioAttachment::new(control, StudioResetHandle::new());
+                shared.backend = shared.backend.take().map(|inner| attachment.wrap(inner));
+                shared.pending_backend = shared
+                    .pending_backend
+                    .take()
+                    .map(|inner| attachment.wrap(inner));
+                shared.studio = Some(attachment);
+            }
+        }
+        self
     }
 
     /// Starts the engine and background worker thread.
@@ -234,6 +298,10 @@ impl DenoiseEngine {
     /// Safely replaces the inference backend on the next hop boundary.
     pub fn set_backend(&mut self, backend: Box<dyn InferenceBackend>) -> Result<(), EngineError> {
         let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        let backend = match &shared.studio {
+            Some(studio) => studio.wrap(backend),
+            None => backend,
+        };
         if shared.is_running {
             shared.pending_backend = Some(backend);
         } else {
@@ -246,10 +314,7 @@ impl DenoiseEngine {
     /// Closes the current generation, increments generation ID, and records restart reason.
     pub fn begin_generation_restart(&mut self, reason: ResetReason) -> Result<u64, EngineError> {
         let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
-        let old_id = shared.generation.id().get();
-        shared.generation.close(reason);
-        let next_id = shared.generation.id().next();
-        shared.generation = Generation::active(next_id);
+        let (old_id, next_id) = shared.advance_generation(reason);
         drop(shared);
 
         self.output.close_generation(old_id);
@@ -299,9 +364,7 @@ impl DenoiseEngine {
 
                 if elapsed > INFERENCE_HARD_DEADLINE || process_result.is_err() {
                     shared.deadline_miss_count = shared.deadline_miss_count.saturating_add(1);
-                    shared.generation.close(ResetReason::InferenceDeadlineMiss);
-                    let next_id = shared.generation.id().next();
-                    shared.generation = Generation::active(next_id);
+                    shared.advance_generation(ResetReason::InferenceDeadlineMiss);
                     drop(shared);
                     Ok([0.0; HOP_SAMPLES])
                 } else if let Ok(processed) = process_result {
@@ -403,5 +466,37 @@ mod tests {
         let new_gen = engine.begin_generation_restart(ResetReason::UserRequested);
         assert_eq!(new_gen, Ok(2));
         assert_eq!(engine.status().generation(), 2);
+    }
+
+    #[test]
+    fn restart_requests_a_studio_reset_only_when_a_studio_is_attached() {
+        use studio_dsp::Preset;
+
+        let control = Arc::new(StudioControl::new(Preset::Off));
+        let mut engine =
+            DenoiseEngine::new_standalone(Box::new(PassthroughBackend::new()), DenoiseMode::Active)
+                .with_studio(control);
+        let handle = {
+            let shared = engine.shared.lock().unwrap_or_else(PoisonError::into_inner);
+            shared.studio.as_ref().map(|studio| studio.reset.clone())
+        };
+        assert!(handle.is_some());
+        let handle = handle.unwrap_or_default();
+        assert!(!handle.is_requested());
+
+        assert_eq!(
+            engine.begin_generation_restart(ResetReason::UserRequested),
+            Ok(2)
+        );
+        assert!(handle.is_requested());
+
+        let mut plain =
+            DenoiseEngine::new_standalone(Box::new(PassthroughBackend::new()), DenoiseMode::Active);
+        assert_eq!(
+            plain.begin_generation_restart(ResetReason::UserRequested),
+            Ok(2)
+        );
+        let shared = plain.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        assert!(shared.studio.is_none());
     }
 }
