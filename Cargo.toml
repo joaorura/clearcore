@@ -12,6 +12,7 @@ members = [
     "crates/service",
     "crates/diagnostics",
     "crates/accelerators",
+    "crates/studio-dsp",
     "crates/app-tauri/src-tauri",
     "crates/filter-capi",
     "platform/windows/host",
