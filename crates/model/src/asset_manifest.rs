@@ -29,6 +29,7 @@ pub struct ApprovedAssetManifest {
     candidate_record_sha256: String,
     legal_review_record_sha256: String,
     key_id: String,
+    #[allow(dead_code)]
     repository_root: PathBuf,
     archive_path: PathBuf,
     #[cfg(feature = "tract")]
@@ -61,6 +62,7 @@ impl ApprovedAssetManifest {
     pub fn archive_path(&self) -> &Path {
         &self.archive_path
     }
+    #[allow(dead_code)]
     pub(crate) fn revalidate(&self) -> Result<Self, InferenceError> {
         let fresh = Self::verify(&self.repository_root)?;
         if fresh.asset_id != self.asset_id

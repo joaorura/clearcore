@@ -4,20 +4,42 @@ mod archive;
 #[cfg(test)]
 mod archive_adversarial_tests;
 mod asset_manifest;
+#[cfg(feature = "tract")]
+pub mod dsp_pipeline;
+pub mod enrollment;
 mod error;
 mod golden;
 mod json;
 mod m0_records;
+pub mod model_registry;
+pub mod profile_store;
+pub mod spectral_eq;
+mod studio_backend;
 #[cfg(feature = "tract")]
 mod tract_backend;
+pub mod voice_profile;
 
 use realtime_noise_contracts::AudioFrame;
 
 pub use asset_manifest::{APPROVED_ASSET_SHA256, ApprovedAssetManifest};
+#[cfg(feature = "tract")]
+pub use dsp_pipeline::{
+    AgnosticDspBackend, DspPipeline, DspPipelineConfig, ExtractedFeatures, ModelFrameOutput,
+    SpectralModelBackend,
+};
 pub use error::InferenceError;
 pub use golden::{GoldenCase, GoldenFixture, GoldenProvenance, NumericalTolerance, frames_sha256};
+pub use model_registry::{
+    AssetDescriptor, DEV_KEY_ID, ModelAssetRegistry, ModelRole, VerifiedAsset,
+};
+pub use profile_store::{ACTIVE_PROFILE_FILE_NAME, ProfileStore};
+pub use studio_backend::{StudioBackend, StudioResetHandle};
 #[cfg(feature = "tract")]
 pub use tract_backend::TractBackend;
+pub use voice_profile::{
+    BandGains, FILM_HIDDEN_DIM, FiLMVectors, MAX_EQ_GAIN_DB, MIN_EQ_GAIN_DB, NUM_ERB_BANDS,
+    VoiceProfile, VoiceProfileError,
+};
 
 pub const ALGORITHM_LATENCY_SAMPLES: u32 = 1_440;
 
@@ -97,6 +119,20 @@ pub trait InferenceBackend: Send {
     fn descriptor(&self) -> BackendDescriptor;
     fn process(&mut self, input: &AudioFrame) -> Result<ProcessedFrame, InferenceError>;
     fn algorithmic_latency_samples(&self) -> u32;
+}
+
+impl<T: InferenceBackend + ?Sized> InferenceBackend for Box<T> {
+    fn descriptor(&self) -> BackendDescriptor {
+        (**self).descriptor()
+    }
+
+    fn process(&mut self, input: &AudioFrame) -> Result<ProcessedFrame, InferenceError> {
+        (**self).process(input)
+    }
+
+    fn algorithmic_latency_samples(&self) -> u32 {
+        (**self).algorithmic_latency_samples()
+    }
 }
 
 #[cfg(test)]
