@@ -1,7 +1,7 @@
 # Product Definition: Hippocamp
 
 ## Overview
-**Hippocamp** is an open-source, local-first cross-platform desktop application (Windows 11, macOS 13+, Ubuntu/Fedora Linux) designed for real-time microphone noise suppression inspired by tools like NVIDIA Broadcast, without sending audio data to external servers.
+**Hippocamp** is a source-available (non-commercial), local-first cross-platform desktop application (Windows 11, macOS 13+, Ubuntu/Fedora Linux) designed for real-time microphone noise suppression inspired by tools like NVIDIA Broadcast, without sending audio data to external servers.
 
 ## Core Vision & Philosophy
 1. **100% Local & Privacy-Preserving:** Zero network transmission for audio processing. Full offline capability.

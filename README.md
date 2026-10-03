@@ -2,7 +2,8 @@
 
 <div align="center">
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](LICENSE)
+[![Models and docs](https://img.shields.io/badge/Models_%26_Docs-CC_BY--NC_4.0-lightgrey.svg)](LICENSE-MODELS)
 [![Rust](https://img.shields.io/badge/Rust-1.90.0%20(%23![forbid(unsafe__code)])-orange.svg)](Cargo.toml)
 [![Neural Engine](https://img.shields.io/badge/Neural_Engine-DeepFilterNet3_ONNX-purple.svg)](governance/model-assets/df-compatible-release-asset-v1/)
 [![Processing Latency](https://img.shields.io/badge/Inference_Latency-0.276ms_%2F_10ms_Budget-brightgreen.svg)](docs/evidence/linux-integration.md)
@@ -180,14 +181,29 @@ For complete uninstallation details, see [docs/uninstall.md](docs/uninstall.md).
 
 ---
 
-## Model Licenses
+## License
 
-The ClearCore code, the pDFNet3 model and the neural EQ are licensed as described in [LICENSE](LICENSE) (Apache-2.0 /
-MIT OR Apache-2.0). The only exception is the voice-enrollment model (`enrollment.onnx`, `voice-enrollment-asset-v1`),
-which is licensed under **CC BY-NC 4.0**: it is built on the pre-trained SpeechBrain ECAPA weights
-(`speechbrain/spkrec-ecapa-voxceleb`, Apache-2.0), trained on VoxCeleb ("research purposes"; audio copyright remains
-with the video owners). As a result, the **voice profile / enrollment feature is for non-commercial use only**.
-Already-published releases are unchanged.
+ClearCore is **non-commercial** (source-available, not OSI open source) from the release after `v0.1.0-beta.2` onward.
+
+| What | License |
+| --- | --- |
+| Source code | [PolyForm Noncommercial License 1.0.0](LICENSE) (SPDX: `PolyForm-Noncommercial-1.0.0`) |
+| Model weights authored by ClearCore (pDFNet3, neural EQ, voice enrollment) | [CC BY-NC 4.0](LICENSE-MODELS) ([legal code](https://creativecommons.org/licenses/by-nc/4.0/legalcode)) |
+| Documentation and media authored by ClearCore | [CC BY-NC 4.0](LICENSE-DOCS) ([legal code](https://creativecommons.org/licenses/by-nc/4.0/legalcode)) |
+
+- **Previous releases are unchanged.** Releases already published, up to and including `v0.1.0-beta.2`, remain under the
+  licenses they were published with (Apache-2.0 for ClearCore's own code; MIT OR Apache-2.0 for the DeepFilterNet-derived
+  components). The license files in those tags (`git show v0.1.0-beta.2:LICENSE`) are the ones that apply to them.
+- **Third-party components keep their own licenses and notices.** This includes the vendored DeepFilterNet/libDF fork
+  (`vendor/crates/deep_filter`, MIT OR Apache-2.0, with its `LICENSE-MIT`/`LICENSE-APACHE`), the Rust crates ClearCore
+  depends on, and the DeepFilterNet3 weights. The ClearCore licenses above do not relicense them. See
+  [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES).
+- **Voice enrollment (`enrollment.onnx`, `voice-enrollment-asset-v1`)** is built on the pre-trained SpeechBrain ECAPA
+  weights (`speechbrain/spkrec-ecapa-voxceleb`, Apache-2.0), trained on VoxCeleb ("research purposes"; audio copyright
+  remains with the video owners). The provenance notice (SpeechBrain ECAPA and VoxCeleb, repeated in [LICENSE-MODELS](LICENSE-MODELS)) must accompany the
+  model wherever it is distributed. The whole project is now non-commercial, so this restriction no longer sets enrollment
+  apart from the rest.
+- **Commercial use** needs a separate license from the owner.
 
 ## Community & Contributing
 
@@ -196,4 +212,4 @@ We welcome contributions from audio engineers, systems programmers, and document
 - **Code of Conduct:** We adhere to the Contributor Covenant.
 - **Contributing Guide:** Read [CONTRIBUTING.md](CONTRIBUTING.md) for architectural guidelines, `#![forbid(unsafe_code)]` rules, and PR checklists.
 - **Security Policy:** To report vulnerabilities confidentially, read [SECURITY.md](SECURITY.md).
-- **License:** Licensed under the [Apache License, Version 2.0](LICENSE).
+- **License:** Source code under the [PolyForm Noncommercial License 1.0.0](LICENSE); models and docs under CC BY-NC 4.0. See [License](#license).

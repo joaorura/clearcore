@@ -18,8 +18,8 @@
       "versionInfo": "0.1.0",
       "downloadLocation": "NONE",
       "filesAnalyzed": false,
-      "licenseConcluded": "Apache-2.0",
-      "licenseDeclared": "Apache-2.0",
+      "licenseConcluded": "PolyForm-Noncommercial-1.0.0",
+      "licenseDeclared": "PolyForm-Noncommercial-1.0.0",
       "copyrightText": "Copyright (c) 2026 Clearcore",
       "description": "High-performance low-latency realtime noise suppression platform"
     }

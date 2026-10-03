@@ -16,7 +16,7 @@ When assisting a developer with ClearCore, act as a **Principal Audio Systems & 
 
 ## 1. Codebase Architecture & Repository Map
 
-ClearCore is an open-source, ultra-low-latency realtime noise-suppression virtual microphone powered by **DeepFilterNet3 ONNX** and an asynchronous Rust supervisor daemon.
+ClearCore is a source-available (PolyForm Noncommercial 1.0.0), ultra-low-latency realtime noise-suppression virtual microphone powered by **DeepFilterNet3 ONNX** and an asynchronous Rust supervisor daemon.
 
 ```
 hippocamp/

@@ -51,7 +51,7 @@ esclarecidos), a 16 kHz, já passado por vocoder-denoiser e sem speaker id garan
 - **nunca commitar** o arquivo nem qualquer áudio derivado dele;
 - o script não extrai áudio: o `.parquet` fica como baixado;
 - **fora do treino de pesos que serão distribuídos**, até o dono do projeto registrar decisão
-  explícita (o NC-SA pode exigir que os pesos herdem CC BY-NC-SA, em conflito com `MIT OR Apache-2.0`).
+  explícita (o NC-SA pode exigir que os pesos herdem CC BY-NC-SA, em conflito com a licença dos pesos próprios; a partir de 2026-10-03 os pesos próprios são CC BY-NC 4.0, mas isso não dispensa a decisão do dono).
 
 ## Derivados e versão do ffmpeg
 

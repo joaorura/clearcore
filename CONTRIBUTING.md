@@ -1,6 +1,6 @@
 # Contributing to ClearCore
 
-Thank you for your interest in contributing to **ClearCore** (formerly project Hippocamp)! ClearCore is an open-source, first-party, realtime noise-suppression virtual microphone engineered for mission-critical voice communications. It is powered by DeepFilterNet3 ONNX/tract, a Linux PipeWire C bridge, a Windows WaveRT PortCls driver, a macOS CoreAudio HAL AudioServerPlugIn, and an asynchronous Rust supervisor daemon.
+Thank you for your interest in contributing to **ClearCore** (formerly project Hippocamp)! ClearCore is a source-available (non-commercial), first-party, realtime noise-suppression virtual microphone engineered for mission-critical voice communications. It is powered by DeepFilterNet3 ONNX/tract, a Linux PipeWire C bridge, a Windows WaveRT PortCls driver, a macOS CoreAudio HAL AudioServerPlugIn, and an asynchronous Rust supervisor daemon.
 
 We welcome contributions from developers, audio engineers, systems programmers, and documentation specialists. This document outlines our architectural contracts, coding standards, development setup, and pull request procedures.
 
@@ -227,3 +227,7 @@ We follow the [Conventional Commits v1.0.0](https://www.conventionalcommits.org/
    - PRs must be squash-merged or rebased with clean Conventional Commit history.
 
 Thank you for helping build high-performance, privacy-respecting audio software!
+
+## Licensing of Contributions
+
+ClearCore source code is licensed under the PolyForm Noncommercial License 1.0.0 (`LICENSE`); model weights and documentation are licensed under CC BY-NC 4.0 (`LICENSE-MODELS`, `LICENSE-DOCS`). By submitting a contribution you agree that it is provided under those same terms. Do not modify the licenses or notices of third-party components (`vendor/`, `THIRD_PARTY_LICENSES`).

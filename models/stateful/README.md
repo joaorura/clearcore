@@ -70,7 +70,7 @@ está instalado neste ambiente).
 Pesos e código de origem: `MIT OR Apache-2.0`, copyright (c) 2021 Hendrik Schröter, por decisão do dono do
 projeto registrada em `governance/model-assets/df-compatible-release-asset-v1/` (decisão do dono, não
 parecer jurídico externo). A cirurgia de grafo (`tools/accelerators/make_stateful_onnx.py`) é código
-original deste repositório, sob a licença do repositório (Apache-2.0). Os grafos stateful são obra
+original deste repositório, sob a licença de código do repositório (PolyForm Noncommercial 1.0.0; até `v0.1.0-beta.2` era Apache-2.0). Os grafos stateful são obra
 derivada dos pesos e herdam os termos dos pesos; a atribuição ao DeepFilterNet continua obrigatória.
 
 ## Governança: o que falta para virar asset de produto

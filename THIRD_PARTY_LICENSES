@@ -2,7 +2,7 @@ THIRD-PARTY LICENSE REGISTER
 
 The exact approved M0 release asset is `vendor/approved/df-compatible-release-asset-v1.bin`. It is the byte-for-byte upstream `DeepFilterNet3_onnx.tar.gz` from `Rikorose/DeepFilterNet` tag `v0.5.6`, SHA-256 `c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616`.
 
-The repository's Apache-2.0 license applies only to original repository work. It does not grant rights to DeepFilterNet code or weights, libDF, tract, platform SDKs, drivers, samples, corpora, or any other third-party material.
+The repository's own licenses (PolyForm Noncommercial 1.0.0 for code, see `LICENSE`; CC BY-NC 4.0 for models and documentation, see `LICENSE-MODELS` and `LICENSE-DOCS`) apply only to original repository work. Releases up to `v0.1.0-beta.2` were published under Apache-2.0 for that work and stay as published. It does not grant rights to DeepFilterNet code or weights, libDF, tract, platform SDKs, drivers, samples, corpora, or any other third-party material.
 
 Before a third-party component or asset may be distributed, this register must identify its exact version or immutable source, copyright holder, license, redistribution terms, conversion or derivative-work terms where applicable, and corresponding legal approval evidence.
 

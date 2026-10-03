@@ -9,6 +9,9 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 
 ## [Unreleased]
 
+### Changed
+- Licensing: the whole project becomes non-commercial. Source code is now under the PolyForm Noncommercial License 1.0.0; model weights and documentation authored by ClearCore are under CC BY-NC 4.0. Releases up to `v0.1.0-beta.2` stay under the licenses they were published with (Apache-2.0 / MIT OR Apache-2.0). Third-party components keep their own licenses.
+
 ## [0.1.0-beta.2] - 2026-10-02
 
 ### Fixed

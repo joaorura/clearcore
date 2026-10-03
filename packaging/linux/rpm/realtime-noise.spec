@@ -3,7 +3,7 @@ Version:        0.1.0
 Release:        1%{?dist}
 Summary:        High-performance low-latency realtime noise suppression platform
 
-License:        Apache-2.0
+License:        PolyForm-Noncommercial-1.0.0
 URL:            https://clearcore.com/realtime-noise
 Source0:        realtime-noise-%{version}.tar.gz
 

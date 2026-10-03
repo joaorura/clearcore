@@ -1,0 +1,20 @@
+Clearcore documentation and media
+=================================
+
+Copyright (c) 2026 Clearcore
+
+The documentation, diagrams, screenshots and other media that Clearcore authors itself
+(README, CHANGELOG, `docs/`, `conductor/`, release notes and similar material) are
+licensed under the Creative Commons Attribution-NonCommercial 4.0 International license
+(CC BY-NC 4.0, SPDX: CC-BY-NC-4.0).
+
+  Summary:   https://creativecommons.org/licenses/by-nc/4.0/
+  Legal code: https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+This license does NOT cover third-party material (quoted upstream license texts,
+vendored crates under `vendor/`, test corpora under `fixtures/corpus/` and the like),
+which keeps its own license and notices. See `THIRD_PARTY_LICENSES`.
+
+Clearcore source code is licensed separately under the PolyForm Noncommercial License
+1.0.0 (see `LICENSE`). Model weights are licensed under CC BY-NC 4.0 (see
+`LICENSE-MODELS`).
