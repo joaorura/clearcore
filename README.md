@@ -180,6 +180,15 @@ For complete uninstallation details, see [docs/uninstall.md](docs/uninstall.md).
 
 ---
 
+## Model Licenses
+
+The ClearCore code, the pDFNet3 model and the neural EQ are licensed as described in [LICENSE](LICENSE) (Apache-2.0 /
+MIT OR Apache-2.0). The only exception is the voice-enrollment model (`enrollment.onnx`, `voice-enrollment-asset-v1`),
+which is licensed under **CC BY-NC 4.0**: it is built on the pre-trained SpeechBrain ECAPA weights
+(`speechbrain/spkrec-ecapa-voxceleb`, Apache-2.0), trained on VoxCeleb ("research purposes"; audio copyright remains
+with the video owners). As a result, the **voice profile / enrollment feature is for non-commercial use only**.
+Already-published releases are unchanged.
+
 ## Community & Contributing
 
 We welcome contributions from audio engineers, systems programmers, and documentation specialists!

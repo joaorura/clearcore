@@ -5,6 +5,18 @@
 **Repositório:** `~/orca/projects/clearcore-train` (separado do Clearcore; ainda não existe).
 **Escopo:** subprojeto A (pDFNet3 e `enrollment.onnx`). O subprojeto B (EQ neural) terá spec própria (seção 10).
 
+> **Emenda 2026-10-03 (tarde, decisões do dono).**
+> **D1 (encoder):** o encoder de falante do enrollment é o SpeechBrain ECAPA pré-treinado
+> (`speechbrain/spkrec-ecapa-voxceleb`, pesos Apache-2.0, treinado em VoxCeleb), portado para o grafo tract-safe do
+> projeto; substitui o ECAPA próprio treinado em dados CC BY/CC0 (§3 e a justificativa de §3.1 não valem para o
+> enrollment). O avaliador independente dos gates passa a ser só o WeSpeaker ResNet34; `gates-v2.yaml` troca apenas a
+> lista de avaliadores, com os mesmos níveis (aprovado pelo orquestrador).
+> **D2 (licença):** somente o asset de enrollment (`enrollment.onnx`, `voice-enrollment-asset-v1`) é licenciado como
+> **CC BY-NC 4.0**, com NOTICE declarando os pesos SpeechBrain (Apache-2.0) e a proveniência VoxCeleb ("research
+> purposes"; copyright do áudio com os donos dos vídeos). Código do Clearcore, pDFNet3 e EQ neural continuam
+> `MIT OR Apache-2.0`. O perfil de voz do Clearcore é, portanto, de uso não comercial; releases já publicadas não mudam.
+> A decisão 5 de §11 foi atualizada de acordo; o restante do texto abaixo não foi reescrito.
+
 Convenção: **[F: arquivo]** é fato com fonte (pesquisas em `docs/superpowers/research/2026-10-03-clearcore-train/`,
 abreviadas `R01`..`R08`, ou código do Clearcore, conferido nesta data). **Decisão** é a recomendação deste spec.
 **[est.]** marca número de custo estimado, que só vale depois de medido no M0 (seção 9). Para não confundir com os
@@ -597,7 +609,7 @@ Respostas do dono em 2026-10-03 registradas abaixo de cada item (o texto origina
    G2/G4 abaixo dos de `gates-v1.yaml` exige uma `gates-v2.yaml` aprovada explicitamente pelo dono.
    **Resposta (2026-10-03): DECIDIDO (APROVADO F como caminho planejado, sonda C primeiro).** O modo sem perfil passa a valer a tolerância de G1.
 5. **Governança dos pesos retreinados**: `weight_license` e `code_license` dos dois assets (proposta
-   `MIT OR Apache-2.0`), texto final de `conversion_terms`, `legal-review.json` e `approval-manifest.json`; a decisão
+   original `MIT OR Apache-2.0`; **emenda 2026-10-03: enrollment = CC BY-NC 4.0 + NOTICE, demais `MIT OR Apache-2.0`**), texto final de `conversion_terms`, `legal-review.json` e `approval-manifest.json`; a decisão
    de 2026-09-24 cobre o DFNet3 oficial, não pesos derivados nem o encoder próprio.
    **Resposta (2026-10-03): PENDENTE.** Necessária só no M5.
 6. **Assinatura Ed25519** dos manifests (chave atual
