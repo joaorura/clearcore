@@ -9,12 +9,18 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
     pub endpoint_path: PathBuf,
+    pub model_dir: Option<PathBuf>,
+    pub repo_root: Option<PathBuf>,
+    pub initial_backend: Option<String>,
 }
 
 impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             endpoint_path: PathBuf::from(default_endpoint_path()),
+            model_dir: None,
+            repo_root: None,
+            initial_backend: None,
         }
     }
 }
@@ -33,10 +39,17 @@ impl Default for ServiceBootstrap {
 impl ServiceBootstrap {
     #[must_use]
     pub fn new(config: ServiceConfig) -> Self {
-        Self {
-            config,
-            daemon: ServiceDaemon::new(),
+        let mut daemon = ServiceDaemon::new();
+        if let Some(ref model_dir) = config.model_dir {
+            daemon.set_model_dir(model_dir.clone());
         }
+        if let Some(ref repo_root) = config.repo_root {
+            daemon.set_repo_root(repo_root.clone());
+        }
+        if let Some(ref backend) = config.initial_backend {
+            let _ = daemon.select_backend(backend);
+        }
+        Self { config, daemon }
     }
 
     #[must_use]
@@ -67,6 +80,12 @@ impl ServiceBootstrap {
             "Service listening on unix domain socket: {}",
             socket_path.display()
         );
+        println!(
+            "ClearCore daemon active backend: {} (accelerated: {})",
+            self.daemon.supervisor().active_backend_name(),
+            self.daemon.supervisor().is_hardware_accelerated()
+        );
+
 
         for stream_res in listener.incoming() {
             if self.daemon.is_shutdown() {
@@ -98,6 +117,12 @@ impl ServiceBootstrap {
         let bind_addr = "127.0.0.1:49215";
         let listener = std::net::TcpListener::bind(bind_addr)?;
         println!("Service listening on TCP localhost: {bind_addr}");
+        println!(
+            "ClearCore daemon active backend: {} (accelerated: {})",
+            self.daemon.supervisor().active_backend_name(),
+            self.daemon.supervisor().is_hardware_accelerated()
+        );
+
 
         for stream_res in listener.incoming() {
             if self.daemon.is_shutdown() {

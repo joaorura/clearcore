@@ -1,5 +1,9 @@
 #![forbid(unsafe_code)]
-#![allow(clippy::missing_errors_doc, clippy::missing_const_for_fn)]
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::missing_const_for_fn,
+    clippy::too_many_lines
+)]
 
 pub mod bootstrap;
 pub mod install;
@@ -7,10 +11,12 @@ pub mod install;
 use realtime_noise_ipc::{IpcCommand, IpcResponse, IpcServer, IpcStatus};
 use realtime_noise_model::{ProfileStore, VoiceProfile};
 use realtime_noise_supervisor::{
-    EngineSupervisor, convert_engine_mode_to_ipc, convert_ipc_mode_to_engine,
+    BackendResolutionInfo, EngineSupervisor, convert_engine_mode_to_ipc,
+    convert_ipc_mode_to_engine, find_repo_root, find_stateful_model_dir,
 };
 use serde_json::json;
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 
 pub struct ServiceDaemon {
     supervisor: EngineSupervisor,
@@ -19,6 +25,8 @@ pub struct ServiceDaemon {
     served_client_count: usize,
     profile_store: Option<ProfileStore>,
     active_voice_profile_id: Option<String>,
+    model_dir: Option<PathBuf>,
+    repo_root: Option<PathBuf>,
 }
 
 /// Generic messages only: voice profiles are biometric data and neither their content nor the
@@ -36,15 +44,36 @@ impl Default for ServiceDaemon {
 impl ServiceDaemon {
     #[must_use]
     pub fn new() -> Self {
+        let model_dir = find_stateful_model_dir();
+        let repo_root = find_repo_root();
+        let mut supervisor = EngineSupervisor::default();
+        let _ = supervisor.select_backend("auto", model_dir.as_deref(), repo_root.as_deref());
         Self {
-            supervisor: EngineSupervisor::default(),
+            supervisor,
             server: IpcServer::new(),
             shutdown: false,
             served_client_count: 0,
             profile_store: None,
             active_voice_profile_id: None,
+            model_dir,
+            repo_root,
         }
     }
+
+    #[must_use]
+    pub fn with_supervisor(supervisor: EngineSupervisor) -> Self {
+        Self {
+            supervisor,
+            server: IpcServer::new(),
+            shutdown: false,
+            served_client_count: 0,
+            profile_store: None,
+            active_voice_profile_id: None,
+            model_dir: None,
+            repo_root: None,
+        }
+    }
+
 
     /// Builds a daemon backed by `store` and activates the stored profile, if any.
     #[must_use]
@@ -92,6 +121,28 @@ impl ServiceDaemon {
         self.served_client_count
     }
 
+    pub fn select_backend(&mut self, request: &str) -> BackendResolutionInfo {
+        self.supervisor.select_backend(request, self.model_dir.as_deref(), self.repo_root.as_deref())
+    }
+
+    pub fn set_model_dir(&mut self, path: PathBuf) {
+        self.model_dir = Some(path);
+    }
+
+    pub fn set_repo_root(&mut self, path: PathBuf) {
+        self.repo_root = Some(path);
+    }
+
+    #[must_use]
+    pub fn model_dir(&self) -> Option<&Path> {
+        self.model_dir.as_deref()
+    }
+
+    #[must_use]
+    pub fn repo_root(&self) -> Option<&Path> {
+        self.repo_root.as_deref()
+    }
+
     /// Serves a control client connection stream until the client disconnects (EOF).
     /// Safe client disconnect: Daemon outlives UI disconnects and accepts subsequent client connections.
     pub fn serve_client<R: BufRead, W: Write>(
@@ -109,6 +160,7 @@ impl ServiceDaemon {
                     IpcCommand::GetStatus => {
                         let status = self.supervisor.status();
                         let mode_ipc = convert_engine_mode_to_ipc(status.active_mode);
+                        let desc = self.supervisor.active_backend_descriptor();
                         IpcResponse::success(
                             "status-resp",
                             json!({
@@ -124,6 +176,11 @@ impl ServiceDaemon {
                                 // `is_voice_profile_active` stays false until that wiring exists.
                                 "voice_profile_selected": self.active_voice_profile_id.is_some(),
                                 "is_voice_profile_active": false,
+                                "active_backend": self.supervisor.active_backend_name(),
+                                "requested_backend": self.supervisor.requested_backend_name(),
+                                "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
+                                "backend_runtime": desc.as_ref().map(|d| d.runtime),
+                                "backend_device": self.supervisor.active_backend_device(),
                             }),
                         )
                     }
@@ -135,6 +192,40 @@ impl ServiceDaemon {
                             json!({
                                 "mode": ipc_mode,
                                 "success": true,
+                            }),
+                        )
+                    }
+                    IpcCommand::SetBackend(payload) => {
+                        let req_name = payload.as_str();
+                        let info = self.supervisor.select_backend(
+                            req_name,
+                            self.model_dir.as_deref(),
+                            self.repo_root.as_deref(),
+                        );
+                        IpcResponse::success(
+                            "set-backend-resp",
+                            json!({
+                                "success": true,
+                                "requested_backend": req_name,
+                                "active_backend": info.name,
+                                "is_hardware_accelerated": info.is_hardware_accelerated,
+                                "device": info.device,
+                                "runtime": info.runtime,
+                                "fallback": info.is_fallback,
+                                "fallback_reason": info.fallback_reason,
+                            }),
+                        )
+                    }
+                    IpcCommand::GetBackend => {
+                        let desc = self.supervisor.active_backend_descriptor();
+                        IpcResponse::success(
+                            "get-backend-resp",
+                            json!({
+                                "active_backend": self.supervisor.active_backend_name(),
+                                "requested_backend": self.supervisor.requested_backend_name(),
+                                "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
+                                "backend_runtime": desc.as_ref().map(|d| d.runtime),
+                                "backend_device": self.supervisor.active_backend_device(),
                             }),
                         )
                     }
@@ -182,6 +273,7 @@ impl ServiceDaemon {
         }
         Ok(())
     }
+
 }
 
 fn set_voice_profile(

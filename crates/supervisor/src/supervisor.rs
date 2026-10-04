@@ -1,8 +1,12 @@
 #![forbid(unsafe_code)]
 
+use crate::backend::{BackendResolutionInfo, instantiate_backend_with_fallback};
 use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
+use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
+use realtime_noise_model::{BackendDescriptor, InferenceBackend, InferenceError};
 use std::fmt;
+use std::path::Path;
 use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +29,7 @@ pub struct SupervisorStatus {
     pub crash_count_15m: usize,
     pub total_crashes: u64,
     pub active_mode: DenoiseMode,
+    pub active_backend: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +57,9 @@ pub struct EngineSupervisor {
     backoff: BackoffTracker,
     total_crashes: u64,
     diagnostics_log: Vec<String>,
+    backend: Option<Box<dyn InferenceBackend>>,
+    active_backend_name: String,
+    requested_backend_name: String,
 }
 
 impl Default for EngineSupervisor {
@@ -69,6 +77,118 @@ impl EngineSupervisor {
             backoff: BackoffTracker::new(),
             total_crashes: 0,
             diagnostics_log: Vec::new(),
+            backend: None,
+            active_backend_name: String::new(),
+            requested_backend_name: String::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_auto_backend(model_dir: Option<&Path>, repo_root: Option<&Path>) -> Self {
+        let mut supervisor = Self::default();
+        let _ = supervisor.select_backend("auto", model_dir, repo_root);
+        supervisor
+    }
+
+    #[must_use]
+    pub fn backend(&self) -> Option<&dyn InferenceBackend> {
+        self.backend.as_deref()
+    }
+
+    pub fn backend_mut(&mut self) -> Option<&mut (dyn InferenceBackend + 'static)> {
+        self.backend.as_deref_mut()
+    }
+
+    #[must_use]
+    pub fn active_backend_name(&self) -> &str {
+        if self.active_backend_name.is_empty() {
+            "none"
+        } else {
+            &self.active_backend_name
+        }
+    }
+
+    #[must_use]
+    pub fn requested_backend_name(&self) -> &str {
+        if self.requested_backend_name.is_empty() {
+            "none"
+        } else {
+            &self.requested_backend_name
+        }
+    }
+
+    #[must_use]
+    pub fn is_hardware_accelerated(&self) -> bool {
+        self.backend.as_ref().is_some_and(|b| {
+            let desc = b.descriptor();
+            desc.backend == "openvino" && desc.runtime != "openvino-cpu"
+        })
+    }
+
+    #[must_use]
+    pub fn active_backend_descriptor(&self) -> Option<BackendDescriptor> {
+        self.backend.as_deref().map(InferenceBackend::descriptor)
+    }
+
+    #[must_use]
+    pub fn active_backend_device(&self) -> Option<String> {
+        self.backend.as_ref().map(|b| {
+            let desc = b.descriptor();
+            if desc.backend == "openvino" {
+                match desc.runtime {
+                    "openvino-npu" => "NPU".to_string(),
+                    "openvino-gpu" => "GPU".to_string(),
+                    "openvino-cpu" => "CPU".to_string(),
+                    _ => "Accelerator".to_string(),
+                }
+            } else {
+                "CPU".to_string()
+            }
+        })
+    }
+
+    pub fn set_backend(
+        &mut self,
+        backend: Box<dyn InferenceBackend>,
+        active_name: impl Into<String>,
+    ) {
+        self.active_backend_name = active_name.into();
+        self.backend = Some(backend);
+    }
+
+    pub fn select_backend(
+        &mut self,
+        request: &str,
+        model_dir: Option<&Path>,
+        repo_root: Option<&Path>,
+    ) -> BackendResolutionInfo {
+        self.requested_backend_name = request.to_string();
+        let (backend, info) = instantiate_backend_with_fallback(request, model_dir, repo_root);
+        self.set_backend(backend, &info.name);
+        info
+    }
+
+    /// Process a frame according to supervisor state, denoise mode, and active backend.
+    pub fn process_frame(
+        &mut self,
+        input: &AudioFrame,
+    ) -> Result<AudioFrame, InferenceError> {
+        if !self.is_running() || self.is_terminal() || self.mode == DenoiseMode::Mute {
+            return Ok([0.0; HOP_SAMPLES]);
+        }
+        if self.mode == DenoiseMode::Bypass {
+            return Ok(*input);
+        }
+        if let Some(backend) = &mut self.backend {
+            match backend.process(input) {
+                Ok(processed) => Ok(processed.samples),
+                Err(err) => {
+                    self.record_crash(&err.to_string(), Instant::now());
+                    Err(err)
+                }
+            }
+        } else {
+            Ok(*input)
         }
     }
 
@@ -89,8 +209,14 @@ impl EngineSupervisor {
             crash_count_15m: self.backoff.crashes_in_window(Instant::now()),
             total_crashes: self.total_crashes,
             active_mode: self.mode,
+            active_backend: if self.active_backend_name.is_empty() {
+                None
+            } else {
+                Some(self.active_backend_name.clone())
+            },
         }
     }
+
 
     #[must_use]
     pub const fn is_terminal(&self) -> bool {

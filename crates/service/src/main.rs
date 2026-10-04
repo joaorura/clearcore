@@ -1,17 +1,21 @@
 #![forbid(unsafe_code)]
 
 use realtime_noise_model::ProfileStore;
-use realtime_noise_service::bootstrap::ServiceBootstrap;
+use realtime_noise_service::bootstrap::{ServiceBootstrap, ServiceConfig};
 use realtime_noise_service::install::{install_user_service, uninstall_user_service};
 use std::env;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn print_usage() {
     println!("realtime-noise-service - Standalone User Daemon");
     println!("Usage:");
     println!(
-        "  realtime-noise-service --run                    Run daemon supervisor and IPC loop"
+        "  realtime-noise-service --run [options]          Run daemon supervisor and IPC loop"
     );
+    println!("    Options:");
+    println!("      --backend <name>       Initial inference backend (auto, openvino-npu, tract, etc.)");
+    println!("      --models-dir <path>    Explicit path to models/stateful directory");
     println!(
         "  realtime-noise-service --install-user-service   Install per-user autostart service"
     );
@@ -30,7 +34,27 @@ fn main() -> ExitCode {
 
     match args[1].as_str() {
         "--run" => {
-            let mut bootstrap = ServiceBootstrap::default();
+            let mut initial_backend = None;
+            let mut model_dir = None;
+            let mut i = 2;
+            while i < args.len() {
+                if args[i] == "--backend" && i + 1 < args.len() {
+                    initial_backend = Some(args[i + 1].clone());
+                    i += 2;
+                } else if args[i] == "--models-dir" && i + 1 < args.len() {
+                    model_dir = Some(PathBuf::from(args[i + 1].clone()));
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+
+            let config = ServiceConfig {
+                initial_backend,
+                model_dir,
+                ..Default::default()
+            };
+            let mut bootstrap = ServiceBootstrap::new(config);
             match ProfileStore::default_dir() {
                 Some(dir) => bootstrap
                     .daemon_mut()

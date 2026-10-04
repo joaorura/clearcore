@@ -24,6 +24,23 @@ pub enum IpcStatus {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BackendPayload {
+    Named { backend: String },
+    Direct(String),
+}
+
+impl BackendPayload {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Named { backend } => backend.as_str(),
+            Self::Direct(s) => s.as_str(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum IpcCommand {
     GetStatus,
@@ -37,6 +54,15 @@ pub enum IpcCommand {
         profile_json: String,
     },
     ClearVoiceProfile,
+    SetBackend(BackendPayload),
+    GetBackend,
+}
+
+impl IpcCommand {
+    #[must_use]
+    pub fn set_backend(backend: impl Into<String>) -> Self {
+        Self::SetBackend(BackendPayload::Direct(backend.into()))
+    }
 }
 
 /// Manual `Debug`: `SetVoiceProfile` carries biometric data, so its payload is redacted and can
@@ -54,9 +80,15 @@ impl std::fmt::Debug for IpcCommand {
                 .field("profile_json", &format_args!("<redacted>"))
                 .finish(),
             Self::ClearVoiceProfile => f.write_str("ClearVoiceProfile"),
+            Self::SetBackend(payload) => f
+                .debug_tuple("SetBackend")
+                .field(&payload.as_str())
+                .finish(),
+            Self::GetBackend => f.write_str("GetBackend"),
         }
     }
 }
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcErrorDetail {

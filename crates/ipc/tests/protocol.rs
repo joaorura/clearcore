@@ -153,6 +153,39 @@ fn existing_commands_keep_their_wire_format() {
 }
 
 #[test]
+fn set_backend_roundtrips_through_both_json_formats() {
+    // 1. Direct string format: {"SetBackend": "openvino"}
+    let cmd1 = IpcCommand::set_backend("openvino");
+    let req1 = IpcRequest::new(cmd1, json!({}));
+    let wire1 = req1.to_json().expect("serialize req1");
+    let parsed1 = IpcRequest::from_json(&wire1).expect("deserialize req1");
+    match parsed1.command {
+        IpcCommand::SetBackend(payload) => assert_eq!(payload.as_str(), "openvino"),
+        _ => panic!("Expected SetBackend"),
+    }
+
+    // 2. Named struct format: {"SetBackend": {"backend": "tract"}}
+    let raw_named = json!({
+        "version": PROTOCOL_VERSION,
+        "request_id": "req-b-1",
+        "command": {"SetBackend": {"backend": "tract"}},
+        "payload": {}
+    })
+    .to_string();
+    let parsed2 = IpcRequest::from_json(&raw_named).expect("deserialize named");
+    match parsed2.command {
+        IpcCommand::SetBackend(payload) => assert_eq!(payload.as_str(), "tract"),
+        _ => panic!("Expected SetBackend"),
+    }
+
+    // 3. GetBackend command
+    let get_req = IpcRequest::new(IpcCommand::GetBackend, json!({}));
+    let get_wire = get_req.to_json().expect("serialize get_req");
+    let parsed_get = IpcRequest::from_json(&get_wire).expect("deserialize get_req");
+    assert_eq!(parsed_get.command, IpcCommand::GetBackend);
+}
+
+#[test]
 fn debug_of_set_voice_profile_never_prints_the_biometric_payload() {
     let secret = r#"{"gamma_enc":[0.123456789],"embedding":"SECRET-BIOMETRIC"}"#;
     let command = IpcCommand::SetVoiceProfile {
@@ -177,4 +210,10 @@ fn debug_of_set_voice_profile_never_prints_the_biometric_payload() {
         format!("{:?}", IpcCommand::SetMode(DenoiseMode::Mute)),
         "SetMode(Mute)"
     );
+    assert_eq!(
+        format!("{:?}", IpcCommand::set_backend("auto")),
+        "SetBackend(\"auto\")"
+    );
+    assert_eq!(format!("{:?}", IpcCommand::GetBackend), "GetBackend");
 }
+

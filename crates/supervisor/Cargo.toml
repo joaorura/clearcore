@@ -7,14 +7,17 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+realtime-noise-accelerators = { path = "../accelerators" }
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-engine = { path = "../engine" }
 realtime-noise-ipc = { path = "../ipc" }
+realtime-noise-model = { path = "../model", features = ["tract"] }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
 
 [features]
-tract = ["realtime-noise-engine/tract"]
+tract = ["realtime-noise-engine/tract", "realtime-noise-model/tract", "realtime-noise-accelerators/tract"]
+
 
 [lints]
 workspace = true
