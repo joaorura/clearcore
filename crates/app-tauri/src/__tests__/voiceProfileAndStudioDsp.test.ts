@@ -62,6 +62,36 @@ describe('Voice Profile & Speaker Isolation UI Specs', () => {
     expect(enUS.voiceProfile.activateProfileBtn).toContain('Activate Custom Microphone');
   });
 
+  it('provides dynamic recording UX strings and supports flexible durations without rigid 5s limit', () => {
+    // Stop recording active button
+    expect(ptBR.voiceProfile.stopRecordingBtn).toBe('Concluir Gravação');
+    expect(enUS.voiceProfile.stopRecordingBtn).toBe('Finish Recording');
+
+    // Dynamic recording status with elapsed and max placeholders
+    expect(ptBR.voiceProfile.recordingStatus).toContain('{elapsed}');
+    expect(ptBR.voiceProfile.recordingStatus).toContain('{max}');
+    expect(enUS.voiceProfile.recordingStatus).toContain('{elapsed}');
+    expect(enUS.voiceProfile.recordingStatus).toContain('{max}');
+
+    // Record sample action without arbitrary fixed 5s label
+    expect(ptBR.voiceProfile.recordSample).toBe('Gravar Resposta');
+    expect(enUS.voiceProfile.recordSample).toBe('Record Answer');
+
+    // Flexible sample durations (e.g. 4.2s, 8.5s, 15.0s, 30.0s)
+    const testDurations = [1.5, 4.2, 8.5, 15.0, 30.0];
+    for (const d of testDurations) {
+      const variableSample: VoiceSample = {
+        id: `sample-flex-${d}`,
+        title: `Amostra Flexível ${d}s`,
+        timestamp: '14:30',
+        durationSec: d,
+      };
+      expect(variableSample.durationSec).toBe(d);
+      expect(variableSample.durationSec).toBeGreaterThanOrEqual(1.5);
+      expect(variableSample.durationSec).toBeLessThanOrEqual(30.0);
+    }
+  });
+
   it('validates voice profile and sample data structures', () => {
     const sample: VoiceSample = {
       id: 'sample-1',

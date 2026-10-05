@@ -208,7 +208,9 @@ export interface Translations {
     question5Text: string;
     question5Fallback: string;
     recordSample: string;
+    stopRecordingBtn: string;
     recordingSample: string;
+    recordingStatus: string;
     recordingCountdown: string;
     recordingHint: string;
     voiceLevel: string;

@@ -11,7 +11,7 @@ const { resolveBackendSelection } = require('./backend-selection.cjs');
 const updater = require('./updater.cjs');
 
 // ClearCore Runtime Application Version
-const APP_VERSION = '0.1.0-beta.3';
+const APP_VERSION = '0.1.0-beta.1';
 app.setVersion(APP_VERSION);
 
 // Enforce single instance lock (in production)

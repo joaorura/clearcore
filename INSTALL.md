@@ -70,10 +70,10 @@ sudo dnf install -y clearcore
 Download and install the official native `.deb` with full desktop and PipeWire integration:
 ```bash
 # For x86_64 (Intel / AMD 64-bit):
-curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
+curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-0.1.0-beta.1_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
 
 # For ARM64 (Raspberry Pi 5 / ARM64 SBCs):
-curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_arm64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
+curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-0.1.0-beta.1_arm64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
 ```
 
 ##### Method 2: Modular APT Repository via GitHub Pages (Solution A)

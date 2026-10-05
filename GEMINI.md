@@ -9,7 +9,7 @@ See [`AGENTS.md`](AGENTS.md) for full runbook.
   `winget install joaorura.Clearcore`
 - **Ubuntu / Debian (APT):**
   - *Method 1 (Official One-Liner - Recommended):*  
-    `curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb`
+    `curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-0.1.0-beta.1_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb`
   - *Method 2 (Modular GitHub Pages APT - Solution A):*  
     `echo "deb [trusted=yes] https://joaorura.github.io/clearcore/apt stable main" | sudo tee /etc/apt/sources.list.d/clearcore.list && sudo apt update && sudo apt install -y clearcore`
 

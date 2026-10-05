@@ -99,7 +99,7 @@ cd "${REPO_ROOT}"
 # 3. WINGET MANIFEST (MICROSOFT WINGET)
 # ----------------------------------------------------
 echo "📦 Generating WinGet manifest template..."
-VERSION="0.1.0-beta.3"
+VERSION="0.1.0-beta.1"
 if [ -f "${REPO_ROOT}/crates/app-tauri/package.json" ]; then
     VERSION="$(node -p "require('${REPO_ROOT}/crates/app-tauri/package.json').version")"
 fi

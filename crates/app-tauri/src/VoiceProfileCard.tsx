@@ -8,6 +8,9 @@ interface VoiceProfileCardProps {
   virtualMicPresent?: boolean;
 }
 
+const MIN_RECORDING_SECONDS = 1.5;
+const MAX_RECORDING_SECONDS = 30;
+
 const STORAGE_ENROLLED_KEY = 'clearcore_voice_profile_enrolled';
 const STORAGE_SAMPLES_KEY = 'clearcore_voice_profile_samples';
 const STORAGE_CALL_TAKES_KEY = 'clearcore_voice_intake_takes';
@@ -59,14 +62,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
   // Recording State (both for guided steps and modal voluntary sample)
   const [isRecording, setIsRecording] = useState<boolean>(false);
-  const [recordingSecondsRemaining, setRecordingSecondsRemaining] = useState<number>(5);
+  const [recordingElapsedSeconds, setRecordingElapsedSeconds] = useState<number>(0);
   const [liveVoiceLevel, setLiveVoiceLevel] = useState<number>(0);
 
   // Modal for "+ Adicionar Nova Amostra"
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [modalSampleName, setModalSampleName] = useState<string>('');
   const [modalRecordedUrl, setModalRecordedUrl] = useState<string | null>(null);
-  const [modalDuration, setModalDuration] = useState<number>(5.0);
+  const [modalDuration, setModalDuration] = useState<number>(0);
 
   // Audio Playback State
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
@@ -79,6 +82,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const vuIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingStartTimeRef = useRef<number>(0);
   const recordedChunksRef = useRef<Blob[]>([]);
 
   // Step Question metadata definition
@@ -171,6 +176,10 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    if (vuIntervalRef.current) {
+      clearInterval(vuIntervalRef.current);
+      vuIntervalRef.current = null;
+    }
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
@@ -193,14 +202,15 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   }, [cleanupRecording]);
 
   // Create synthetic preview beep/tone if no native audio recorded
-  const createSyntheticAudioUrl = useCallback((): string => {
+  const createSyntheticAudioUrl = useCallback((durationSec: number = 5.0): string => {
     try {
       const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       const sampleRate = ctx.sampleRate;
-      const duration = 5.0;
-      const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+      const duration = Math.max(MIN_RECORDING_SECONDS, durationSec);
+      const totalFrames = Math.floor(sampleRate * duration);
+      const buffer = ctx.createBuffer(1, totalFrames, sampleRate);
       const data = buffer.getChannelData(0);
-      for (let i = 0; i < sampleRate * duration; i++) {
+      for (let i = 0; i < totalFrames; i++) {
         // Harmonic voice-like simulation (fundamental ~150Hz with harmonics)
         const tSec = i / sampleRate;
         const envelope = Math.sin((Math.PI * tSec) / duration);
@@ -251,12 +261,13 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     return new Uint8Array(buffer);
   }
 
-  // Start Guided Step Recording (5 seconds)
+  // Start Guided Step Recording (up to MAX_RECORDING_SECONDS with manual stop)
   const handleStartStepRecording = async (stepNum: number) => {
     cleanupRecording();
     recordedChunksRef.current = [];
     setIsRecording(true);
-    setRecordingSecondsRemaining(5);
+    setRecordingElapsedSeconds(0);
+    recordingStartTimeRef.current = Date.now();
 
     let stream: MediaStream | null = null;
     let audioCtx: AudioContext | null = null;
@@ -307,22 +318,29 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
         simLevel = Math.max(15, Math.min(95, simLevel + (Math.random() * 30 - 15)));
         setLiveVoiceLevel(Math.round(simLevel));
       }, 100);
-      timerRef.current = simInterval;
+      vuIntervalRef.current = simInterval;
     }
 
-    // 5 seconds countdown
-    let remaining = 5;
-    const countdown = setInterval(() => {
-      remaining -= 1;
-      setRecordingSecondsRemaining(remaining);
-      if (remaining <= 0) {
-        clearInterval(countdown);
+    // Elapsed timer up to MAX_RECORDING_SECONDS
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
+      const rounded = Math.round(elapsed * 10) / 10;
+      setRecordingElapsedSeconds(rounded);
+      if (elapsed >= MAX_RECORDING_SECONDS) {
+        clearInterval(timer);
         finishStepRecording(stepNum);
       }
-    }, 1000);
+    }, 100);
+    timerRef.current = timer;
   };
 
   const finishStepRecording = (stepNum: number) => {
+    const rawElapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
+    const exactDuration = Math.min(
+      MAX_RECORDING_SECONDS,
+      Math.max(MIN_RECORDING_SECONDS, Math.round(rawElapsed * 10) / 10)
+    );
+
     let finalUrl = '';
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -332,14 +350,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       }
     }
     if (!finalUrl) {
-      finalUrl = createSyntheticAudioUrl();
+      finalUrl = createSyntheticAudioUrl(exactDuration);
     }
 
     cleanupRecording();
 
     setCompletedSteps((prev) => ({
       ...prev,
-      [stepNum]: { audioUrl: finalUrl, duration: 5.0 },
+      [stepNum]: { audioUrl: finalUrl, duration: exactDuration },
     }));
 
     setFeedbackMessage(t('voiceProfile.sampleCompleted'));
@@ -507,12 +525,33 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     setTimeout(() => setFeedbackMessage(null), 3000);
   };
 
+  const finishModalRecording = () => {
+    const rawElapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
+    const exactDuration = Math.min(
+      MAX_RECORDING_SECONDS,
+      Math.max(MIN_RECORDING_SECONDS, Math.round(rawElapsed * 10) / 10)
+    );
+
+    let finalUrl = '';
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+      const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+      if (blob.size > 0) finalUrl = URL.createObjectURL(blob);
+    }
+    if (!finalUrl) finalUrl = createSyntheticAudioUrl(exactDuration);
+
+    cleanupRecording();
+    setModalRecordedUrl(finalUrl);
+    setModalDuration(exactDuration);
+  };
+
   // Modal: Start Recording voluntary sample
   const handleStartModalRecording = async () => {
     cleanupRecording();
     recordedChunksRef.current = [];
     setIsRecording(true);
-    setRecordingSecondsRemaining(5);
+    setRecordingElapsedSeconds(0);
+    recordingStartTimeRef.current = Date.now();
 
     try {
       if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
@@ -550,30 +589,23 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       }
     } catch {
       let simLevel = 35;
-      timerRef.current = setInterval(() => {
+      const simInterval = setInterval(() => {
         simLevel = Math.max(15, Math.min(95, simLevel + (Math.random() * 30 - 15)));
         setLiveVoiceLevel(Math.round(simLevel));
       }, 100);
+      vuIntervalRef.current = simInterval;
     }
 
-    let remaining = 5;
-    const countdown = setInterval(() => {
-      remaining -= 1;
-      setRecordingSecondsRemaining(remaining);
-      if (remaining <= 0) {
-        clearInterval(countdown);
-        let finalUrl = '';
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop();
-          const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-          if (blob.size > 0) finalUrl = URL.createObjectURL(blob);
-        }
-        if (!finalUrl) finalUrl = createSyntheticAudioUrl();
-        cleanupRecording();
-        setModalRecordedUrl(finalUrl);
-        setModalDuration(5.0);
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
+      const rounded = Math.round(elapsed * 10) / 10;
+      setRecordingElapsedSeconds(rounded);
+      if (elapsed >= MAX_RECORDING_SECONDS) {
+        clearInterval(timer);
+        finishModalRecording();
       }
-    }, 1000);
+    }, 100);
+    timerRef.current = timer;
   };
 
   // Modal: Save Voluntary Sample to Gallery
@@ -784,18 +816,36 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                   className="record-btn-trigger"
                   onClick={() => handleStartStepRecording(currentStep)}
                 >
-                  🎙️ {t('voiceProfile.recordSample', { duration: '5' })}
+                  🎙️ {t('voiceProfile.recordSample')}
                 </button>
               )
             ) : (
               <div className="recording-active-container">
-                <span className="recording-pulsing-dot" />
-                <span style={{ fontWeight: 600, color: '#f87171' }}>
-                  {t('voiceProfile.recordingCountdown', { remaining: String(recordingSecondsRemaining) })}
-                </span>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  ({t('voiceProfile.recordingHint')})
-                </span>
+                <div className="recording-status-group">
+                  <span className="recording-pulsing-dot" />
+                  <span style={{ fontWeight: 600, color: '#f87171' }}>
+                    {t('voiceProfile.recordingStatus', {
+                      elapsed: recordingElapsedSeconds.toFixed(1),
+                      max: String(MAX_RECORDING_SECONDS),
+                    })}
+                  </span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    ({t('voiceProfile.recordingHint')})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="stop-record-btn"
+                  disabled={recordingElapsedSeconds < MIN_RECORDING_SECONDS}
+                  onClick={() => finishStepRecording(currentStep)}
+                  title={
+                    recordingElapsedSeconds < MIN_RECORDING_SECONDS
+                      ? `Mínimo de ${MIN_RECORDING_SECONDS}s`
+                      : t('voiceProfile.stopRecordingBtn')
+                  }
+                >
+                  ⏹️ {t('voiceProfile.stopRecordingBtn')}
+                </button>
               </div>
             )}
 
@@ -985,26 +1035,47 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                   className="record-btn-trigger"
                   onClick={handleStartModalRecording}
                 >
-                  🎙️ {modalRecordedUrl ? 'Regravar Amostra (5s)' : t('voiceProfile.recordSample', { duration: '5' })}
+                  🎙️ {modalRecordedUrl ? t('voiceProfile.redoSample') : t('voiceProfile.recordSample')}
                 </button>
               ) : (
                 <div className="recording-active-container">
-                  <span className="recording-pulsing-dot" />
-                  <span style={{ fontWeight: 600, color: '#f87171' }}>
-                    {t('voiceProfile.recordingCountdown', { remaining: String(recordingSecondsRemaining) })}
-                  </span>
+                  <div className="recording-status-group">
+                    <span className="recording-pulsing-dot" />
+                    <span style={{ fontWeight: 600, color: '#f87171' }}>
+                      {t('voiceProfile.recordingStatus', {
+                        elapsed: recordingElapsedSeconds.toFixed(1),
+                        max: String(MAX_RECORDING_SECONDS),
+                      })}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="stop-record-btn"
+                    disabled={recordingElapsedSeconds < MIN_RECORDING_SECONDS}
+                    onClick={finishModalRecording}
+                    title={
+                      recordingElapsedSeconds < MIN_RECORDING_SECONDS
+                        ? `Mínimo de ${MIN_RECORDING_SECONDS}s`
+                        : t('voiceProfile.stopRecordingBtn')
+                    }
+                  >
+                    ⏹️ {t('voiceProfile.stopRecordingBtn')}
+                  </button>
                 </div>
               )}
             </div>
 
             {modalRecordedUrl && !isRecording && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <button
                   className="action-btn"
                   onClick={() => handlePlayAudio('modal-preview', modalRecordedUrl)}
                 >
                   {playingAudioId === 'modal-preview' ? t('voiceProfile.stopSample') : t('voiceProfile.playSample')}
                 </button>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  ({modalDuration.toFixed(1)}s)
+                </span>
               </div>
             )}
 

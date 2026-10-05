@@ -78,7 +78,7 @@ def build_deb(out_deb, control_dict, data_root, scripts_dict=None):
             if len(content) % 2 != 0:
                 f.write(b"\n")
 
-def make_modular_debs(src_dir, out_dir, version="0.1.0-beta.3", arch="amd64"):
+def make_modular_debs(src_dir, out_dir, version="0.1.0-beta.1", arch="amd64"):
     os.makedirs(out_dir, exist_ok=True)
     temp_work = os.path.join(out_dir, f"_temp_modular_{arch}")
     shutil.rmtree(temp_work, ignore_errors=True)
@@ -249,7 +249,7 @@ if __name__ == "__main__":
     src = sys.argv[1] if len(sys.argv) > 1 else "release/Clearcore-linux-x64"
     out = sys.argv[2] if len(sys.argv) > 2 else "release-modular"
     arch = sys.argv[3] if len(sys.argv) > 3 else "amd64"
-    ver = sys.argv[4] if len(sys.argv) > 4 else "0.1.0-beta.3"
+    ver = sys.argv[4] if len(sys.argv) > 4 else "0.1.0-beta.1"
     print(f"Building modular DEBs for {arch} v{ver} from {src}...")
     d_deb, g_deb = make_modular_debs(src, out, version=ver, arch=arch)
     for p in [d_deb, g_deb]:

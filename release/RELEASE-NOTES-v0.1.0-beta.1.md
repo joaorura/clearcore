@@ -62,15 +62,16 @@ IPC Supervision:
 
 ---
 
-## 📦 Download Artifacts
+## 📦 Included Packages & Installers
 
-Download the release packages directly from the release assets:
-
-| Artifact | Platform | Package Type | Contents & Installation |
-|---|---|---|---|
-| **`Clearcore-linux-x64.tar.gz`** | Linux (x86_64) | Standalone Archive | Portable binary + `./install.sh` for system desktop integration |
-| **`Clearcore-win32-x64.zip`** | Windows (x64) | Portable Application | Self-contained app with embedded daemon, autostart, and WaveRT driver specs |
-| **`Clearcore-darwin-arm64.tar.gz`** | macOS (Apple Silicon) | Application Bundle | `Clearcore.app` bundled with CoreAudio HAL driver and installer |
+| Platform / Distro | Architecture | Package Format | Direct Command / Installation |
+| :--- | :--- | :--- | :--- |
+| **Fedora / RHEL / openSUSE** | x86_64 / AArch64 | Native `.rpm` | `sudo dnf copr enable joaorura/clearcore && sudo dnf install -y clearcore` |
+| **Debian / Ubuntu / Mint** | amd64 / arm64 | Native `.deb` | `curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-0.1.0-beta.1_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb` |
+| **Linux (Universal)** | x86_64 / ARM64 | `.AppImage` / `.tar.gz` | `chmod +x Clearcore-*.AppImage && ./Clearcore-*.AppImage` |
+| **Windows** | x64 | `.exe` (NSIS / Inno) & `.zip` | `winget install joaorura.Clearcore` (or run `Clearcore-Setup.exe`) |
+| **Windows ARM64** | ARM64 (Snapdragon X) | `.zip` | Extract and run `Clearcore.exe` |
+| **macOS** | Intel x64 & Apple Silicon | `.dmg` & `.tar.gz` | Open `Clearcore.dmg` or run `./install.sh` |
 
 ---
 

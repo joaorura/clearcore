@@ -126,10 +126,10 @@ winget install joaorura.Clearcore
 Direct native `.deb` install with automatic dependency resolution:
 ```bash
 # x86_64 / amd64:
-curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
+curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-0.1.0-beta.1_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
 
 # ARM64:
-curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_arm64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
+curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-0.1.0-beta.1_arm64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
 ```
 
 #### Method 2: Modular APT Repository via GitHub Pages (Solution A)
@@ -148,7 +148,7 @@ ClearCore offers three installation pathways on each platform:
 | Platform | Turnkey Package Installer | Portable Zero-Install | Build from Source |
 |---|---|---|---|
 | **Fedora / RHEL** (DNF) | `sudo dnf copr enable joaorura/clearcore && sudo dnf install clearcore` | `./release/Clearcore-linux-x64/clearcore` | `./package.sh` |
-| **Ubuntu / Debian** (APT) | `curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb` | `./release/Clearcore-linux-x64/clearcore` | `./package.sh` |
+| **Ubuntu / Debian** (APT) | `curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-0.1.0-beta.1_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb` | `./release/Clearcore-linux-x64/clearcore` | `./package.sh` |
 | **Windows** (WinGet / WaveRT) | `winget install joaorura.Clearcore` (or run `Clearcore-Setup.exe`) | `.\release\Clearcore-win32-x64\Clearcore.exe` | `.\package.ps1` |
 | **macOS** (CoreAudio) | `cd release/Clearcore-darwin-x64 && ./install.sh` | `open ./release/Clearcore-darwin-x64/Clearcore.app` | `./package.sh` |
 

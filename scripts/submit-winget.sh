@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VERSION="${1:-0.1.0-beta.3}"
+VERSION="${1:-0.1.0-beta.1}"
 MANIFEST_SRC="${REPO_ROOT}/packaging/winget/manifests/j/joaorura/Clearcore/${VERSION}"
 
 echo "=========================================================="
