@@ -1029,6 +1029,7 @@ dependencies = [
 name = "realtime-noise-service"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "realtime-noise-accelerators",
  "realtime-noise-contracts",
  "realtime-noise-engine",

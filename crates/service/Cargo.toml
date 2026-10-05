@@ -12,6 +12,7 @@ realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-engine = { path = "../engine" }
 realtime-noise-ipc = { path = "../ipc" }
 realtime-noise-model = { path = "../model" }
+base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }
 realtime-noise-supervisor = { path = "../supervisor" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }

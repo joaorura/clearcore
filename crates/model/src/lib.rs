@@ -7,6 +7,7 @@ mod asset_manifest;
 #[cfg(feature = "tract")]
 pub mod dsp_pipeline;
 pub mod enrollment;
+pub mod enrollment_builder;
 mod error;
 mod golden;
 mod json;
@@ -14,11 +15,14 @@ mod m0_records;
 pub mod microphone_eq;
 pub mod model_registry;
 pub mod profile_store;
+pub mod resample;
 pub mod spectral_eq;
+pub mod speech_trim;
 mod studio_backend;
 #[cfg(feature = "tract")]
 mod tract_backend;
 pub mod voice_profile;
+pub mod wav;
 
 use realtime_noise_contracts::AudioFrame;
 

@@ -71,18 +71,12 @@ fn test_voice_samples_and_intake_ipc_lifecycle() {
         make_unit_vector(0),
     )
     .expect("sample1");
-    let sample1_json = serde_json::to_string(&sample1).expect("ser");
-
-    let add_resp = send(
-        &mut daemon,
-        IpcCommand::AddVoiceSample {
-            sample_json: sample1_json,
-        },
-    );
-    assert_eq!(add_resp.status, IpcStatus::Ok);
-    assert_eq!(add_resp.payload["success"], true);
-    assert_eq!(add_resp.payload["sample_id"], "sample-1");
-    assert_eq!(add_resp.payload["has_profile"], true);
+    // `AddVoiceSample` now ingests raw PCM through a background job (task S6); until then this
+    // test seeds the stored sample directly through the manager.
+    daemon
+        .voice_samples_mut()
+        .add_sample(sample1)
+        .expect("add sample1");
 
     // Status after adding sample 1
     let status2 = send(&mut daemon, IpcCommand::GetStatus);
@@ -216,13 +210,19 @@ fn test_invalid_json_payloads_rejected_safely() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut daemon = daemon_with_store(&temp.path().join("profiles"));
 
+    // Until task S6 wires the ingest job, the new AddVoiceSample answers a fixed error and stores nothing.
     let bad_sample = send(
         &mut daemon,
         IpcCommand::AddVoiceSample {
-            sample_json: "not-json".to_string(),
+            name: "n".to_string(),
+            pcm_f32_le_b64: "not-base64!".to_string(),
+            sample_rate: 48_000,
+            device_label: "Mic".to_string(),
+            device_id_hash: "h".to_string(),
         },
     );
-    assert_eq!(bad_sample.status, IpcStatus::InvalidCommand);
+    assert_ne!(bad_sample.status, IpcStatus::Ok);
+    assert_eq!(daemon.voice_samples().list_samples().len(), 0);
 
     let bad_take = send(
         &mut daemon,

@@ -91,7 +91,17 @@ pub enum IpcCommand {
     GetPreset,
     ListVoiceSamples,
     AddVoiceSample {
-        sample_json: String,
+        name: String,
+        pcm_f32_le_b64: String,
+        sample_rate: u32,
+        device_label: String,
+        device_id_hash: String,
+    },
+    BuildVoiceProfile {
+        name: String,
+    },
+    GetEnrollmentJob {
+        job_id: String,
     },
     DeleteVoiceSample {
         id: String,
@@ -162,7 +172,15 @@ impl std::fmt::Debug for IpcCommand {
             Self::ListVoiceSamples => f.write_str("ListVoiceSamples"),
             Self::AddVoiceSample { .. } => f
                 .debug_struct("AddVoiceSample")
-                .field("sample_json", &format_args!("<redacted>"))
+                .field("payload", &format_args!("<redacted>"))
+                .finish(),
+            Self::BuildVoiceProfile { .. } => f
+                .debug_struct("BuildVoiceProfile")
+                .field("name", &format_args!("<redacted>"))
+                .finish(),
+            Self::GetEnrollmentJob { job_id } => f
+                .debug_struct("GetEnrollmentJob")
+                .field("job_id", job_id)
                 .finish(),
             Self::DeleteVoiceSample { id } => {
                 f.debug_struct("DeleteVoiceSample").field("id", id).finish()

@@ -83,9 +83,18 @@ pub struct VoiceSample {
     pub timestamp: String,
     pub name: String,
     pub audio_path: Option<String>,
+    #[serde(default)]
     pub embedding: Vec<f32>,
     #[serde(default = "default_active")]
     pub is_active: bool,
+    #[serde(default)]
+    pub device_label: String,
+    #[serde(default)]
+    pub device_id_hash: String,
+    #[serde(default)]
+    pub capture_sample_rate: u32,
+    #[serde(default)]
+    pub speech_seconds: f32,
 }
 
 impl VoiceSample {
@@ -103,6 +112,10 @@ impl VoiceSample {
             audio_path,
             embedding,
             is_active: true,
+            device_label: String::new(),
+            device_id_hash: String::new(),
+            capture_sample_rate: 0,
+            speech_seconds: 0.0,
         };
         sample.validate()?;
         Ok(sample)
@@ -115,7 +128,8 @@ impl VoiceSample {
         if self.name.trim().is_empty() {
             return Err(VoiceSampleError::EmptyName);
         }
-        if self.embedding.len() != VOICE_EMBEDDING_DIM {
+        // An empty embedding is valid: samples now carry audio only; the profile is built from the WAVs.
+        if !self.embedding.is_empty() && self.embedding.len() != VOICE_EMBEDDING_DIM {
             return Err(VoiceSampleError::InvalidDimension {
                 expected: VOICE_EMBEDDING_DIM,
                 actual: self.embedding.len(),
@@ -647,5 +661,27 @@ mod tests {
         assert!(audio_path.is_file());
         mgr.delete_sample("s_audio", true).expect("delete");
         assert!(!audio_path.exists(), "Audio file must be deleted");
+    }
+
+    #[test]
+    fn old_sample_json_without_new_fields_still_loads() {
+        let json = r#"{"id":"s1","timestamp":"1","name":"n","audio_path":null,"embedding":[],"is_active":true}"#;
+        let s: VoiceSample = serde_json::from_str(json).unwrap();
+        assert!(s.speech_seconds.abs() < f32::EPSILON);
+        assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn embedding_must_be_empty_or_192_finite_values() {
+        let mut s: VoiceSample =
+            serde_json::from_str(r#"{"id":"s1","timestamp":"1","name":"n","audio_path":null}"#)
+                .unwrap();
+        assert!(s.embedding.is_empty() && s.validate().is_ok());
+        s.embedding = vec![0.0; 5];
+        assert!(s.validate().is_err());
+        s.embedding = vec![0.0; VOICE_EMBEDDING_DIM];
+        assert!(s.validate().is_ok());
+        s.embedding[3] = f32::NAN;
+        assert!(s.validate().is_err());
     }
 }

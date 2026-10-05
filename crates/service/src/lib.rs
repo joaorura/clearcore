@@ -11,6 +11,17 @@ pub mod settings;
 pub mod voice_intake;
 pub mod voice_samples;
 
+mod enrollment_config;
+mod enrollment_error;
+mod enrollment_ingest;
+mod enrollment_jobs;
+mod ipc_voice;
+mod voice_budget;
+mod voice_storage_migration;
+
+pub use enrollment_error::EnrollError;
+pub use enrollment_ingest::Denoiser;
+
 pub use voice_intake::{IntakeTake, VoiceIntakeEngine, VoiceIntakeError};
 pub use voice_samples::{
     PROFILE_BIN_BYTES, PROFILE_BIN_FILE_NAME, SAMPLES_FILE_NAME, VOICE_EMBEDDING_DIM, VoiceSample,
@@ -471,34 +482,15 @@ impl ServiceDaemon {
                             }),
                         )
                     }
-                    IpcCommand::AddVoiceSample { sample_json } => {
-                        match serde_json::from_str::<voice_samples::VoiceSample>(sample_json) {
-                            Ok(sample) => {
-                                let sample_id = sample.id.clone();
-                                match self.voice_samples.add_sample(sample) {
-                                    Ok(()) => {
-                                        let has_profile = self.voice_samples.compute_profile_embedding().is_some();
-                                        IpcResponse::success(
-                                            "add-voice-sample-resp",
-                                            json!({
-                                                "success": true,
-                                                "sample_id": sample_id,
-                                                "has_profile": has_profile,
-                                            }),
-                                        )
-                                    }
-                                    Err(_) => IpcResponse::internal_error(
-                                        "add-voice-sample-resp",
-                                        "Failed to persist voice sample",
-                                    ),
-                                }
-                            }
-                            Err(_) => IpcResponse::invalid_command(
-                                "add-voice-sample-resp",
-                                "Invalid voice sample payload",
-                            ),
-                        }
-                    }
+                    // Provisional until task S6 wires the ingest/build/job handlers.
+                    IpcCommand::AddVoiceSample { .. }
+                    | IpcCommand::BuildVoiceProfile { .. }
+                    | IpcCommand::GetEnrollmentJob { .. } => IpcResponse::error(
+                        "enrollment-resp",
+                        IpcStatus::InternalError,
+                        realtime_noise_ipc::enrollment_codes::ENROLL_FAILED,
+                        "not implemented",
+                    ),
                     IpcCommand::DeleteVoiceSample { id } => {
                         match self.voice_samples.delete_sample(id, true) {
                             Ok(deleted) => {

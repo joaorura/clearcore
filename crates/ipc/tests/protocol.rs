@@ -221,7 +221,11 @@ fn debug_of_set_voice_profile_never_prints_the_biometric_payload() {
 fn debug_of_voice_sample_and_intake_payloads_is_redacted() {
     let secret = r#"{"embedding":[0.987654321],"audio":"SECRET_AUDIO_WAV"}"#;
     let add_sample = IpcCommand::AddVoiceSample {
-        sample_json: secret.to_owned(),
+        name: "Secret Name".to_owned(),
+        pcm_f32_le_b64: secret.to_owned(),
+        sample_rate: 48_000,
+        device_label: "Secret Mic".to_owned(),
+        device_id_hash: "h".to_owned(),
     };
     let add_intake = IpcCommand::AddIntakeSuggestion {
         take_json: secret.to_owned(),
@@ -268,7 +272,11 @@ fn voice_samples_and_intake_commands_roundtrip_through_json() {
     let commands = vec![
         IpcCommand::ListVoiceSamples,
         IpcCommand::AddVoiceSample {
-            sample_json: r#"{"id":"s1"}"#.to_string(),
+            name: "s1".to_string(),
+            pcm_f32_le_b64: "AAAA".to_string(),
+            sample_rate: 48_000,
+            device_label: "Mic".to_string(),
+            device_id_hash: "ab12".to_string(),
         },
         IpcCommand::DeleteVoiceSample {
             id: "s1".to_string(),
@@ -293,4 +301,57 @@ fn voice_samples_and_intake_commands_roundtrip_through_json() {
         let parsed = IpcRequest::from_json(&wire).expect("deserialize");
         assert_eq!(parsed.command, cmd);
     }
+}
+
+#[test]
+fn enrollment_commands_roundtrip_through_json() {
+    let cmds = vec![
+        IpcCommand::AddVoiceSample {
+            name: "n".into(),
+            pcm_f32_le_b64: "AAAA".into(),
+            sample_rate: 48_000,
+            device_label: "Mic".into(),
+            device_id_hash: "ab12".into(),
+        },
+        IpcCommand::BuildVoiceProfile {
+            name: "João".into(),
+        },
+        IpcCommand::GetEnrollmentJob {
+            job_id: "job-1".into(),
+        },
+    ];
+    for c in cmds {
+        let json = serde_json::to_string(&c).unwrap();
+        let back: IpcCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(format!("{c:?}"), format!("{back:?}"));
+    }
+}
+
+#[test]
+fn debug_of_enrollment_commands_never_prints_audio_or_names() {
+    let c = IpcCommand::AddVoiceSample {
+        name: "Secret Name".into(),
+        pcm_f32_le_b64: "SECRETAUDIO".into(),
+        sample_rate: 48_000,
+        device_label: "Secret Mic".into(),
+        device_id_hash: "h".into(),
+    };
+    let d = format!("{c:?}");
+    assert!(!d.contains("SECRETAUDIO") && !d.contains("Secret Name") && !d.contains("Secret Mic"));
+    let b = format!(
+        "{:?}",
+        IpcCommand::BuildVoiceProfile {
+            name: "Secret Name".into()
+        }
+    );
+    assert!(!b.contains("Secret Name"));
+    assert_eq!(
+        format!(
+            "{:?}",
+            IpcCommand::GetEnrollmentJob {
+                job_id: "job-1".into()
+            }
+        ),
+        "GetEnrollmentJob { job_id: \"job-1\" }"
+    );
 }
