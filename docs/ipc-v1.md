@@ -173,67 +173,87 @@ Stores one recording as a gallery sample. Replaces the previous embedding-carryi
   | `device_label` | Display label of the physical capture device. |
   | `device_id_hash` | Stable hash of the device identifier, computed by the app. Identifies the microphone group used by the budget and the profile build. |
 
-- **Response Payload (immediate):** `{"job_id": "..."}`. The final result is read with `GetEnrollmentJob`.
-- **Errors (immediate):** `ENROLL_PAYLOAD_TOO_LARGE`, `ENROLL_INVALID_AUDIO`, `ENROLL_MODEL_NOT_CONFIGURED`, `ENROLL_BUSY`. Errors found during processing (`ENROLL_CLIPPING`, `ENROLL_TOO_QUIET`, `ENROLL_BUDGET_EXCEEDED`, `ENROLL_FAILED`) arrive as the `failed` state of the job.
+- **Response Payload (immediate):** `{"success": true, "job_id": "sample-job-1"}`. Sample ingestion jobs use the `sample-job-N` id format. The final result is read with `GetEnrollmentJob`.
+- **Errors (immediate):** `INVALID_COMMAND` (status `InvalidCommand`, message `invalid sample metadata`) when `name` is empty or `name`, `device_label` or `device_id_hash` exceed 256 bytes; `ENROLL_INVALID_AUDIO` (a `sample_rate` other than `48000`, bad base64, empty or misaligned PCM); `ENROLL_PAYLOAD_TOO_LARGE` (more than 90 s of PCM); `ENROLL_BUSY` (two jobs already running; status `InternalError`). Errors found during processing (`ENROLL_CLIPPING`, `ENROLL_TOO_QUIET`, `ENROLL_BUDGET_EXCEEDED`, `ENROLL_FAILED`) arrive as the `failed` state of the job. `ENROLL_FAILED` also covers a service without the base denoiser available.
 - **Rules:** a raw peak of `0.99` or more is rejected as clipping; an RMS below -40 dBFS is rejected as too quiet; if the microphone's used speech plus the sample's speech would exceed 90 s (section 3.1.5), nothing is stored and the job fails with `ENROLL_BUDGET_EXCEEDED` carrying `remaining_seconds`.
 
 #### 3.1.2 `BuildVoiceProfile`
 Builds a profile from the active samples of the **most recent sample's microphone** and applies it. Samples of other microphones stay in the gallery, flagged `other_microphone`, and are not used. Speech is trimmed (20 ms frames, 40 ms margin), levels are matched to the group median (gain limited to +/-12 dB), segments are joined with a 20 ms crossfade, the microphone EQ is estimated, the audio is resampled 48 to 16 kHz and enrolled with the development model.
 
 - **Request:** `{"BuildVoiceProfile":{"name":"My voice"}}`
-- **Response Payload (immediate):** `{"job_id": "..."}`.
-- **Job errors:** `ENROLL_TOO_LITTLE_SPEECH` (under 6 s of speech in the group: record more with this microphone), `ENROLL_BUDGET_EXCEEDED` (more than 90 s found, e.g. data from before the budget; the builder never discards audio on its own), `ENROLL_MODEL_NOT_CONFIGURED`, `ENROLL_FAILED`.
+- **Response Payload (immediate):** `{"success": true, "job_id": "profile-job-1"}`. Profile build jobs use the `profile-job-N` id format.
+- **Immediate errors:** `ENROLL_TOO_LITTLE_SPEECH` (no eligible sample group, or under 6 s of speech in it: record more with this microphone; no job is created), `ENROLL_BUSY` (two jobs already running; no job is created), `INVALID_COMMAND` for an invalid `name` (empty or over 256 bytes).
+- **Job errors:** `ENROLL_MODEL_NOT_CONFIGURED` (the development model is loaded by the job: variables unset, archive missing, unreadable, oversized, or SHA-256 mismatch, stage `enroll`), `ENROLL_BUDGET_EXCEEDED` (more than 90 s found, e.g. data from before the budget; the builder never discards audio on its own), `ENROLL_FAILED` (including a sample WAV that cannot be read back).
+- **Input:** the build reads only `samples/<id>.wav` inside the profile store (ids are validated); the `audio_path` stored in a manifest is never used.
 
 #### 3.1.3 `GetEnrollmentJob`
 Reads the state of a job started by `AddVoiceSample` or `BuildVoiceProfile`.
 
-- **Request:** `{"GetEnrollmentJob":{"job_id":"..."}}`
+- **Request:** `{"GetEnrollmentJob":{"job_id":"sample-job-1"}}`. The service looks the id up in the sample table (`sample-job-N`) and in the profile table (`profile-job-N`); the ids are no longer `job-N`.
 - **Response Payload:**
   ```json
   {
-    "job_id": "job-1",
+    "job_id": "sample-job-1",
     "state": "done",
-    "stage": "apply",
+    "stage": "denoise",
     "error_code": null,
     "remaining_seconds": null,
-    "sample_id": "s-1",
+    "sample_id": "s-1760000000000-1",
     "profile_id": null,
+    "take_id": null,
+    "recorded": null,
+    "reason": null,
     "quality": {"peak": 0.42, "rms_dbfs": -23.1, "active_fraction": 0.71, "speech_seconds": 8.4}
   }
   ```
+  All keys are always present; unused ones are `null`.
 
   | Field | Meaning |
   | :--- | :--- |
   | `job_id` | The job id. |
   | `state` | `running`, `done` or `failed`. |
-  | `stage` | Where the job is or stopped: `denoise`, `trim`, `eq`, `enroll`, `apply`. A job refused for load reports `queued`; a job that exceeded its time limit reports `timeout`. |
+  | `stage` | Where the job is or stopped: `denoise` (sample jobs), `trim` (build jobs; also where a build reports `ENROLL_BUDGET_EXCEEDED` or an unreadable WAV), `eq`, `enroll`, `apply`. The stage of a running job is its starting stage; it is not updated while it runs. The service does not currently produce `timeout`, and an over-load request is refused immediately with `ENROLL_BUSY` rather than as a `queued` job. |
   | `error_code` | Fixed `ENROLL_*` code when `state` is `failed`, otherwise `null`. |
   | `remaining_seconds` | Budget left; present on `ENROLL_BUDGET_EXCEEDED`. |
-  | `sample_id` | Id of the stored sample (sample jobs, when done). |
+  | `sample_id` | Id of the stored sample (`AddVoiceSample` jobs, when done). |
+  | `take_id` | Id of the stored call take (`AddIntakeSuggestion` jobs, when recorded). |
+  | `recorded` | `AddIntakeSuggestion` jobs only: `true` when the take was stored, `false` when it was skipped. |
+  | `reason` | `"budget"` when `recorded` is `false`, otherwise `null`. |
   | `profile_id` | Id of the applied profile (build jobs, when done). |
-  | `quality` | `peak` (raw), `rms_dbfs` and `active_fraction` (denoised), `speech_seconds` (active speech after trimming). Sample jobs only. |
+  | `quality` | `peak` (raw), `rms_dbfs` and `active_fraction` (denoised), `speech_seconds` (active speech after trimming). Sample and take jobs once applied, otherwise `null`. |
 
-  An unknown or expired job id returns `ENROLL_JOB_NOT_FOUND`. The service keeps only the most recent finished jobs.
-
-  Note (contract): the exact `quality` and `sample_id` / `profile_id` field placement follows the specification and is finalized by the service handler (task S6).
+  An unknown or expired job id (or one without a valid prefix) returns `ENROLL_JOB_NOT_FOUND`. Each table keeps only the 64 most recent finished jobs.
 
 #### 3.1.4 Job lifecycle
-- `AddVoiceSample` and `BuildVoiceProfile` answer immediately with a `job_id`; the work runs on a worker thread.
-- At most **2 jobs run at the same time**. A third request is refused with `ENROLL_BUSY` (stage `queued`); retry after a job finishes.
+- `AddVoiceSample`, `AddIntakeSuggestion` and `BuildVoiceProfile` answer immediately with a `job_id` (`sample-job-N` or `profile-job-N`); the work runs on a worker thread.
+- At most **2 jobs run at the same time per job table**. A further request is refused immediately with `ENROLL_BUSY`; no job is created. Retry after a job finishes.
 - A finished job does not change service state by itself: its result is **applied on the daemon thread at the start of the NEXT request** (any request, e.g. the periodic `GetStatus`). The client must therefore call `GetEnrollmentJob` periodically until `state` leaves `running`; the poll itself triggers the application. A job that finishes while no client is talking to the service waits for the next request.
 - The profile of a build job is applied through the `SetVoiceProfile` transaction (apply to the backend, persist atomically, roll back on failure).
+- Connection limits: the service serves **one client at a time**. Every accepted connection has a 30 s read and write timeout; a peer that stays idle longer, or never finishes a line, has its session ended (the daemon keeps accepting). A request line is read with a cap of 32 MiB; a longer line is discarded up to its newline and answered with `ENROLL_PAYLOAD_TOO_LARGE` (status `InvalidCommand`, request id `unknown`), and the connection stays usable.
 
 #### 3.1.5 Changed commands and the speech budget
-- **`ListVoiceSamples`:** `audio_path` now points to the stored WAV. Each sample adds `speech_seconds`, `device_label`, `used_in_profile`, `needs_reenroll` (migrated sample with no WAV; counts 0 s and must be recorded again) and `other_microphone` (sample of a microphone other than the current group; not used). The reply adds:
+- **`ListVoiceSamples`:** `audio_path` is **not exposed** (neither for the stored WAV nor for legacy samples). Reply:
   ```json
-  {"budget": {"used_seconds": 42.5, "max_seconds": 90, "remaining_seconds": 47.5}}
+  {
+    "samples": [
+      {"id": "s-1760000000000-1", "name": "Take 1", "timestamp": "1760000000000", "speech_seconds": 8.4,
+       "device_label": "Built-in Microphone", "device_id_hash": "3f2a...", "is_active": true,
+       "needs_reenroll": false, "used_in_profile": true, "other_microphone": false}
+    ],
+    "total_count": 1,
+    "has_profile": false,
+    "selected_device_id_hash": "3f2a...",
+    "selected_device_label": "Built-in Microphone",
+    "budget": {"used_seconds": 8.4, "max_seconds": 90.0, "remaining_seconds": 81.6}
+  }
   ```
-  The budget is evaluated for the current microphone group: `used_seconds` is the sum of `speech_seconds` of its active samples.
-- **`AddIntakeSuggestion` / `ApproveIntakeSuggestion`:** same commands, now carrying audio like `AddVoiceSample` and gated by the budget. A call take (`AddIntakeSuggestion`) is recorded only if `remaining_seconds` is at least 5 s **and** the take's speech fits in `remaining_seconds`; otherwise it is **not stored and no error is returned** (the reply says `recorded: false, reason: "budget"`). `ApproveIntakeSuggestion` rechecks the budget; if the take no longer fits it is refused with `ENROLL_BUDGET_EXCEEDED` and **the take is kept** so the user can free budget and approve again.
+  `needs_reenroll` marks a migrated sample with no WAV (counts 0 s and must be recorded again). `other_microphone` marks a sample of a microphone other than the selected group (not used). The selected group is the `device_id_hash` of the most recent active sample that has audio; `selected_device_id_hash` is that hash and `selected_device_label` the label of its most recent sample, both `null` when no sample is eligible. `used_seconds` is the sum of `speech_seconds` of the active samples with audio in the selected group; with no eligible sample the budget is empty (`0` used, `90` remaining).
+- **`AddIntakeSuggestion`:** `take_json` is a JSON **string** with the same audio as `AddVoiceSample`: `{"pcm_f32_le_b64":"<base64>","sample_rate":48000,"device_label":"...","device_id_hash":"...","name":"optional"}` (unknown fields are rejected; `device_label`, `device_id_hash` and `name` are optional). The old JSON form without PCM is refused with `INVALID_COMMAND` (`Invalid intake suggestion payload`). Audio errors are the immediate ones of `AddVoiceSample` (`ENROLL_INVALID_AUDIO`, `ENROLL_PAYLOAD_TOO_LARGE`, `ENROLL_BUSY`). The reply is `{"success": true, "job_id": "sample-job-N"}`; the take is denoised like a sample and the outcome is read with `GetEnrollmentJob`: `recorded: true` with `take_id`, or `recorded: false, reason: "budget"` with `state: "done"` and **no error** when the microphone's `remaining_seconds` is under 5 s or the take's speech does not fit in it (nothing is stored). A budget skip is never a `failed` job.
+- **`ListIntakeSuggestions`:** items carry `id`, `timestamp`, `duration_secs`, `snr`, `speech_seconds` and `device_label`; the audio path is not exposed. The reply adds `count`.
+- **`ApproveIntakeSuggestion`:** rechecks the budget of the take's microphone before touching the take. If the take no longer fits, the call is refused with `ENROLL_BUDGET_EXCEEDED` (status `InvalidCommand`) and **the take is kept** so the user can free budget and approve again. On success: `{"success": true, "approved": true, "sample_id": "...", "has_profile": false}`. An unknown id returns `TAKE_NOT_FOUND`.
 - **`DeleteVoiceSample`:** unchanged request; also removes the WAV. The client triggers a rebuild if it wants one. Only the user frees budget; nothing is deleted automatically.
-- **`GetVoiceProfileEmbedding`:** **deprecated** (it exposed a placeholder embedding). It keeps returning an error until removed.
-
-Note (contract): the `recorded` / `reason` reply of `AddIntakeSuggestion` and the budget fields above follow the specification (section 4.4 and 5); the handler is finalized in task S6.
+- **`GetVoiceProfileEmbedding`:** **deprecated** (it exposed a placeholder embedding). It always answers the fixed error `ENROLL_FAILED` (status `InternalError`, message `deprecated`) until removed.
+- **Legacy samples:** the gallery from before the pipeline is migrated once, in a single pass, into the profile store directory when the daemon starts. Migrated samples carry no audio and appear as `needs_reenroll`; a failed migration only logs a fixed line and never stops the daemon.
 
 #### 3.1.6 Error codes
 Codes are fixed strings with no free text and no echo of the payload (`crates/ipc/src/enrollment_codes.rs`).
@@ -242,14 +262,14 @@ Codes are fixed strings with no free text and no echo of the payload (`crates/ip
 | :--- | :--- |
 | `ENROLL_CLIPPING` | The recording clips (raw peak at or above 0.99). Re-record at a lower input level. |
 | `ENROLL_TOO_QUIET` | The denoised speech is quieter than -40 dBFS RMS. |
-| `ENROLL_TOO_LITTLE_SPEECH` | Less than 6 s of speech in the recording group; record more with the same microphone. |
-| `ENROLL_MODEL_NOT_CONFIGURED` | The development enrollment model is not configured (see below). |
+| `ENROLL_TOO_LITTLE_SPEECH` | Less than 6 s of speech in the recording group (or no group). Immediate response of `BuildVoiceProfile`; record more with the same microphone. |
+| `ENROLL_MODEL_NOT_CONFIGURED` | The development enrollment model is absent, unreadable, oversized or its SHA-256 does not match (see below). Reported by the build job. |
 | `ENROLL_BUDGET_EXCEEDED` | The microphone would exceed 90 s of speech. Delete audio first. |
 | `ENROLL_INVALID_AUDIO` | The audio payload is not valid (bad base64, wrong length, non-finite samples, unsupported sample rate). |
-| `ENROLL_PAYLOAD_TOO_LARGE` | The request line exceeded 32 MiB (`MAX_REQUEST_LINE_BYTES`). |
+| `ENROLL_PAYLOAD_TOO_LARGE` | The request line exceeded 32 MiB (`MAX_REQUEST_LINE_BYTES`), or the PCM exceeded 90 s. |
 | `ENROLL_JOB_NOT_FOUND` | Unknown or expired `job_id`. |
 | `ENROLL_FAILED` | Generic failure of the pipeline (denoise, enrollment, persistence). No detail is exposed. |
-| `ENROLL_BUSY` | Two enrollment jobs are already running; retry later. |
+| `ENROLL_BUSY` | Two enrollment jobs are already running in that table; immediate response, no job is created; retry later. |
 
 #### 3.1.7 Development model configuration
 The enrollment model is loaded only when both environment variables are set for the service:
@@ -259,7 +279,7 @@ The enrollment model is loaded only when both environment variables are set for 
 | `CLEARCORE_DEV_ENROLLMENT_ASSET` | Absolute path of the asset archive (`voice-enrollment-asset-v1.tar.gz`). |
 | `CLEARCORE_DEV_ENROLLMENT_SHA256` | Expected SHA-256 of the **entire file**: 64 lowercase hex characters. |
 
-The hash is checked over the whole file and only an allowlisted archive member (`enrollment.onnx`) is read. Without a valid configuration, enrollment answers `ENROLL_MODEL_NOT_CONFIGURED`. The asset is not pinned in the registry, not signed and not distributed. Denoising uses the approved base DFNet3. Scope: development-integrated; the packaged virtual microphone does not apply the profile yet, and no improvement of voice isolation is claimed.
+The hash is checked over the whole file and only an allowlisted archive member (`enrollment.onnx`) is read. Without a valid configuration (variables unset, archive missing, unreadable or oversized, or a hash mismatch), `BuildVoiceProfile` jobs fail with `ENROLL_MODEL_NOT_CONFIGURED`; sample ingestion does not need the model. The asset is not pinned in the registry, not signed and not distributed. Denoising uses the approved base DFNet3. Scope: development-integrated; the packaged virtual microphone does not apply the profile yet, and no improvement of voice isolation is claimed.
 
 #### 3.1.8 Privacy
 - Raw PCM exists only in memory and is zeroed after denoising; **raw audio never goes to disk**. The stored WAV is the **denoised** one.
