@@ -1,9 +1,14 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useI18n } from './i18n';
 import { invokeBridge } from './bridge';
-import type { VoiceSample, CallSuggestionTake, VoiceProfileStatus, InputDeviceInfo } from './types';
-import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels, Quality } from './voice/enrollmentTypes';
-import { enrollmentErrorCode, isBudgetError } from './voice/enrollmentErrors';
+import type { CallSuggestionTake, VoiceProfileStatus, InputDeviceInfo } from './types';
+import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels, Quality, SampleList } from './voice/enrollmentTypes';
+import { enrollmentErrorCode, errorLabel, isBudgetError } from './voice/enrollmentErrors';
+import { addSample, deleteSample, listSamples, waitForJob } from './voice/enrollmentClient';
+import { VoiceBudgetMeter } from './voice/VoiceBudgetMeter';
+import { VoiceSampleGallery } from './voice/VoiceSampleGallery';
+import { BudgetErrorBanner } from './voice/BudgetErrorBanner';
+import { EnrollmentJobStatus } from './voice/EnrollmentJobStatus';
 import { formatSeconds } from './voice/speechBudget';
 import { MAX_RECORD_SECONDS, MIN_RECORD_SECONDS } from './voice/enrollmentTypes';
 import type { CapturedPcm, DeviceInfo } from './voice/enrollmentTypes';
@@ -22,27 +27,8 @@ export { isVirtualOrLoopbackAudioDevice, resolvePhysicalAudioDevice } from './vo
 const MIN_RECORDING_SECONDS = MIN_RECORD_SECONDS;
 const MAX_RECORDING_SECONDS = MAX_RECORD_SECONDS;
 
-const STORAGE_ENROLLED_KEY = 'clearcore_voice_profile_enrolled';
-const STORAGE_SAMPLES_KEY = 'clearcore_voice_profile_samples';
-const STORAGE_CALL_TAKES_KEY = 'clearcore_voice_intake_takes';
+/** UI preference only (open questions vs reading); no sample, take or profile data is stored locally. */
 const STORAGE_READING_MODE_KEY = 'clearcore_voice_reading_mode';
-
-const INITIAL_CALL_TAKES: CallSuggestionTake[] = [
-  {
-    id: 'take-meet-104',
-    title: 'Reunião de Alinhamento (Google Meet)',
-    timestamp: 'Há 35 min',
-    durationSec: 5.2,
-    snrDb: 26.4,
-  },
-  {
-    id: 'take-zoom-105',
-    title: 'Chamada de Planejamento (Zoom)',
-    timestamp: 'Ontem às 16:20',
-    durationSec: 4.8,
-    snrDb: 24.1,
-  },
-];
 
 export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
   const r = (res ?? {}) as Partial<VoiceProfileStatus> & { profile?: Partial<VoiceProfileStatus> };
@@ -266,9 +252,24 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   // Active Tab: 'samples' (Galeria Cumulativa) | 'intake' (Sugestões de Chamadas)
   const [activeTab, setActiveTab] = useState<'samples' | 'intake'>('samples');
 
-  // Cumulative Samples Gallery & Call Suggestions
-  const [samples, setSamples] = useState<VoiceSample[]>([]);
-  const [callTakes, setCallTakes] = useState<CallSuggestionTake[]>(INITIAL_CALL_TAKES);
+  // Samples and budget come from the service only; takes too (empty list when none).
+  const [sampleList, setSampleList] = useState<SampleList | null>(null);
+  const [samplesLoadFailed, setSamplesLoadFailed] = useState<boolean>(false);
+  const [callTakes, setCallTakes] = useState<CallSuggestionTake[]>([]);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Service job feedback: stage while running, quality when done, error/budget prompt when not.
+  const [currentJob, setCurrentJob] = useState<EnrollmentJob | null>(null);
+  const [jobBusy, setJobBusy] = useState<boolean>(false);
+  const [enrollErrorText, setEnrollErrorText] = useState<string | null>(null);
+  const [budgetError, setBudgetError] = useState<{ remainingSeconds: number | null } | null>(null);
+
+  const labels = useMemo(() => buildEnrollmentLabels(t), [t]);
+  const bannerLabels = useMemo(
+    () => ({ ...labels, budgetExceededBody: interpolateBudgetBody(labels.budgetExceededBody, budgetError?.remainingSeconds ?? null, locale) }),
+    [labels, budgetError, locale],
+  );
+  const samples = sampleList?.samples ?? [];
 
   // Recording State (both for guided steps and modal voluntary sample)
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -326,84 +327,111 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     },
   ];
 
-  // Load initial persistent state
+  const refreshSamples = useCallback(async (): Promise<SampleList | null> => {
+    try {
+      const res = await listSamples();
+      if (enrollmentErrorCode(res) !== null || !('samples' in res)) {
+        setSamplesLoadFailed(true);
+        return null;
+      }
+      setSampleList(res);
+      setSamplesLoadFailed(false);
+      return res;
+    } catch {
+      setSamplesLoadFailed(true);
+      return null;
+    }
+  }, []);
+
+  const refreshCallTakes = useCallback(async () => {
+    try {
+      const res = await invokeBridge<{ takes?: CallSuggestionTake[] } | CallSuggestionTake[]>('get_call_takes');
+      if (Array.isArray(res)) setCallTakes(res);
+      else if (res && typeof res === 'object' && Array.isArray(res.takes)) setCallTakes(res.takes);
+      else setCallTakes([]);
+    } catch {
+      setCallTakes([]);
+    }
+  }, []);
+
+  // Initial state: samples, takes and profile status from the service.
   useEffect(() => {
     const initVoiceData = async () => {
       try {
-        const savedEnrolled = localStorage.getItem(STORAGE_ENROLLED_KEY) === 'true';
-        const savedReading = localStorage.getItem(STORAGE_READING_MODE_KEY) === 'true';
-        setIsReadingMode(savedReading);
-
-        let loadedSamples: VoiceSample[] = [];
-        try {
-          const res = await invokeBridge<{ success?: boolean; samples?: VoiceSample[] } | VoiceSample[]>('get_voice_samples');
-          if (Array.isArray(res) && res.length > 0) {
-            loadedSamples = res;
-          } else if (res && typeof res === 'object' && 'samples' in res && Array.isArray(res.samples) && res.samples.length > 0) {
-            loadedSamples = res.samples;
-          }
-        } catch {}
-
-        if (loadedSamples.length === 0) {
-          const savedSamplesJson = localStorage.getItem(STORAGE_SAMPLES_KEY);
-          if (savedSamplesJson) {
-            loadedSamples = JSON.parse(savedSamplesJson);
-          } else if (savedEnrolled) {
-            // Generate initial 5 samples if marked enrolled
-            loadedSamples = stepQuestions.map((q, idx) => ({
-              id: `sample-${idx + 1}`,
-              title: `Amostra ${idx + 1}: ${t(q.categoryKey)}`,
-              category: t(q.categoryKey),
-              timestamp: new Date().toLocaleDateString(),
-              durationSec: 5.0,
-              isInitialStep: true,
-            }));
-          }
-        }
-        setSamples(loadedSamples);
-
-        let loadedTakes: CallSuggestionTake[] = [];
-        try {
-          const res = await invokeBridge<{ success?: boolean; takes?: CallSuggestionTake[] } | CallSuggestionTake[]>('get_call_takes');
-          if (Array.isArray(res) && res.length > 0) {
-            loadedTakes = res;
-          } else if (res && typeof res === 'object' && 'takes' in res && Array.isArray(res.takes) && res.takes.length > 0) {
-            loadedTakes = res.takes;
-          }
-        } catch {}
-
-        if (loadedTakes.length === 0) {
-          const savedTakesJson = localStorage.getItem(STORAGE_CALL_TAKES_KEY);
-          if (savedTakesJson) {
-            loadedTakes = JSON.parse(savedTakesJson);
-          }
-        }
-        setCallTakes(loadedTakes);
-
-        let initialProfile: VoiceProfileStatus = {
-          is_enrolled: savedEnrolled && loadedSamples.length > 0,
-          active_samples_count: loadedSamples.length,
-          embedding_dim: 192,
-          neural_eq_calibrated: savedEnrolled && loadedSamples.length > 0,
-          gain_boost_db: 1.8,
-        };
-
-        try {
-          const profileRes = await invokeBridge<unknown>('get_voice_profile');
-          initialProfile = mergeVoiceProfileStatus(initialProfile, profileRes, loadedSamples.length);
-        } catch {}
-
-        setProfileStatus(initialProfile);
-        if (initialProfile.is_enrolled) {
-          setCurrentStep(5);
-        }
+        setIsReadingMode(localStorage.getItem(STORAGE_READING_MODE_KEY) === 'true');
       } catch {
-        // Ignore local storage / bridge initialization errors
+        // UI preference only
+      }
+
+      const list = await refreshSamples();
+      await refreshCallTakes();
+
+      let initialProfile: VoiceProfileStatus = {
+        is_enrolled: false,
+        active_samples_count: list?.samples.length ?? 0,
+        embedding_dim: 192,
+        neural_eq_calibrated: false,
+        gain_boost_db: 1.8,
+      };
+      try {
+        const profileRes = await invokeBridge<unknown>('get_voice_profile');
+        initialProfile = mergeVoiceProfileStatus(initialProfile, profileRes, list?.samples.length ?? 0);
+      } catch {
+        // service unreachable: status stays neutral
+      }
+
+      setProfileStatus(initialProfile);
+      if (initialProfile.is_enrolled) {
+        setCurrentStep(5);
       }
     };
 
     initVoiceData();
-  }, []);
+  }, [refreshSamples, refreshCallTakes]);
+
+  /** Applies the outcome of a sample job; the budget error opens the gallery with delete highlighted. */
+  const applyJobOutcome = (outcome: JobOutcome) => {
+    if (outcome.kind === 'done') return;
+    setCurrentJob(null);
+    if (outcome.kind === 'show-budget-error') {
+      setBudgetError({ remainingSeconds: outcome.remainingSeconds });
+      if (shouldOpenGalleryOnError('ENROLL_BUDGET_EXCEEDED')) setActiveTab('samples');
+      return;
+    }
+    if (shouldOpenGalleryOnError(outcome.code)) setActiveTab('samples');
+    setEnrollErrorText(errorLabel(outcome.code, labels));
+  };
+
+  /** Sends one captured sample to the service and follows its job until done/failed. */
+  const submitSample = async (captured: CapturedPcm, name: string): Promise<JobOutcome> => {
+    setBudgetError(null);
+    setEnrollErrorText(null);
+    setCurrentJob(null);
+    setJobBusy(true);
+    let outcome: JobOutcome;
+    try {
+      const start = await addSample(captured, name);
+      const startError = enrollmentErrorCode(start);
+      if (startError !== null || !('jobId' in start)) {
+        outcome = isBudgetError(startError)
+          ? { kind: 'show-budget-error', remainingSeconds: null }
+          : { kind: 'show-error', code: startError ?? 'ENROLL_FAILED' };
+      } else {
+        const job = await waitForJob(start.jobId, { onUpdate: setCurrentJob });
+        setCurrentJob(job);
+        outcome = nextStepAfterJob(job);
+      }
+      applyJobOutcome(outcome);
+    } catch (err) {
+      outcome = { kind: 'show-error', code: 'SERVICE_UNAVAILABLE' };
+      setCurrentJob(null);
+      setEnrollErrorText(err instanceof Error && err.message === 'timeout' ? t('voiceProfile.jobTimeout') : errorLabel('SERVICE_UNAVAILABLE', labels));
+    } finally {
+      setJobBusy(false);
+    }
+    await refreshSamples();
+    return outcome;
+  };
 
   // Stops any capture in progress and discards its PCM.
   const cleanupRecording = useCallback(() => {
@@ -539,9 +567,11 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     const captured = await stopCapture();
     if (!captured) return;
 
+    const outcome = await submitSample(captured, t(stepQuestions[stepNum - 1].categoryKey));
+    if (outcome.kind !== 'done') return;
     setCompletedSteps((prev) => ({
       ...prev,
-      [stepNum]: { duration: captured.durationSec, captured },
+      [stepNum]: { duration: outcome.quality?.speechSeconds ?? captured.durationSec, captured },
     }));
 
     setFeedbackMessage(t('voiceProfile.sampleCompleted'));
@@ -576,24 +606,9 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
   // Activate Profile (Once 5/5 are complete)
   const handleActivateProfile = async () => {
-    const newSamples: VoiceSample[] = stepQuestions.map((q, idx) => ({
-      id: `sample-init-${idx + 1}-${Date.now()}`,
-      title: `${t(q.categoryKey)}`,
-      category: t(q.categoryKey),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      durationSec: completedSteps[idx + 1]?.duration ?? 0,
-      isInitialStep: true,
-    }));
-
-    setSamples(newSamples);
-    try {
-      localStorage.setItem(STORAGE_SAMPLES_KEY, JSON.stringify(newSamples));
-      localStorage.setItem(STORAGE_ENROLLED_KEY, 'true');
-    } catch {}
-
     const newStatus: VoiceProfileStatus = {
       is_enrolled: true,
-      active_samples_count: newSamples.length,
+      active_samples_count: samples.length,
       embedding_dim: 192,
       neural_eq_calibrated: true,
       gain_boost_db: 1.8,
@@ -602,9 +617,6 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
     const setRes = await invokeBridge<unknown>('set_voice_profile', { profile: stripServiceVoiceProfileKeys(newStatus) }).catch(() => undefined);
     setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, setRes));
-    for (const sample of newSamples) {
-      await invokeBridge('add_voice_sample', { sample }).catch(() => {});
-    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: newStatus }));
     }
@@ -649,72 +661,57 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     });
   }, []);
 
-  // Delete Sample from Cumulative Gallery
-  const handleDeleteSample = (id: string) => {
-    const updated = samples.filter((s) => s.id !== id);
-    setSamples(updated);
+  // Delete Sample from the service gallery
+  const handleDeleteSample = async (id: string) => {
+    setDeletingId(id);
     try {
-      localStorage.setItem(STORAGE_SAMPLES_KEY, JSON.stringify(updated));
-      localStorage.setItem(STORAGE_ENROLLED_KEY, String(updated.length > 0));
-    } catch {}
+      await deleteSample(id);
+    } catch {
+      // the refreshed list shows what the service still has
+    }
+    const list = await refreshSamples();
+    setDeletingId(null);
+    if (list) setBudgetError(null);
 
+    const remaining = list?.samples.length ?? samples.length;
     const newStatus: VoiceProfileStatus = {
       ...stripServiceVoiceProfileKeys(profileStatus),
-      is_enrolled: updated.length > 0,
-      active_samples_count: updated.length,
-      neural_eq_calibrated: updated.length > 0,
+      is_enrolled: remaining > 0,
+      active_samples_count: remaining,
     };
-    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, undefined));
-    invokeBridge('delete_voice_sample', { id }).catch(() => {});
     pushProfileStatus(newStatus);
   };
 
-  // Approve Call Suggestion Take (Voice Intake Engine)
-  const handleApproveCallTake = (take: CallSuggestionTake) => {
-    // Add to cumulative samples gallery
-    const newSample: VoiceSample = {
-      id: `take-approved-${take.id}-${Date.now()}`,
-      title: take.title,
-      category: 'Chamada Real (Intake)',
-      timestamp: take.timestamp,
-      durationSec: take.durationSec,
-      audioUrl: take.audioUrl,
-    };
-    const updatedSamples = [newSample, ...samples];
-    setSamples(updatedSamples);
-
-    // Remove from suggestions
-    const updatedTakes = callTakes.filter((tItem) => tItem.id !== take.id);
-    setCallTakes(updatedTakes);
-
+  // Approve Call Suggestion Take: the service rechecks the speech budget.
+  const handleApproveCallTake = async (take: CallSuggestionTake) => {
+    setBudgetError(null);
+    setEnrollErrorText(null);
+    let res: unknown;
     try {
-      localStorage.setItem(STORAGE_SAMPLES_KEY, JSON.stringify(updatedSamples));
-      localStorage.setItem(STORAGE_CALL_TAKES_KEY, JSON.stringify(updatedTakes));
-      localStorage.setItem(STORAGE_ENROLLED_KEY, 'true');
-    } catch {}
-
-    const newStatus: VoiceProfileStatus = {
-      ...stripServiceVoiceProfileKeys(profileStatus),
-      is_enrolled: true,
-      active_samples_count: updatedSamples.length,
-      neural_eq_calibrated: true,
-    };
-    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, undefined));
-    invokeBridge('approve_call_take', { id: take.id, name: take.title, take }).catch(() => {});
-    pushProfileStatus(newStatus);
-
-    setFeedbackMessage(t('voiceProfile.takeApprovedFeedback'));
-    setTimeout(() => setFeedbackMessage(null), 4000);
+      res = await invokeBridge<unknown>('approve_call_take', { id: take.id, name: take.title });
+    } catch {
+      res = { errorCode: 'SERVICE_UNAVAILABLE' };
+    }
+    if (shouldShowTakeError(res)) {
+      const code = enrollmentErrorCode(res);
+      if (isBudgetError(code)) {
+        const remaining = (res as { remainingSeconds?: unknown }).remainingSeconds;
+        setBudgetError({ remainingSeconds: typeof remaining === 'number' ? remaining : null });
+        setActiveTab('samples');
+      } else {
+        setEnrollErrorText(errorLabel(code, labels));
+      }
+    } else {
+      setFeedbackMessage(t('voiceProfile.takeApprovedFeedback'));
+      setTimeout(() => setFeedbackMessage(null), 4000);
+    }
+    await Promise.all([refreshSamples(), refreshCallTakes()]);
   };
 
   // Dismiss Call Suggestion Take
-  const handleDismissCallTake = (id: string) => {
-    const updatedTakes = callTakes.filter((tItem) => tItem.id !== id);
-    setCallTakes(updatedTakes);
-    try {
-      localStorage.setItem(STORAGE_CALL_TAKES_KEY, JSON.stringify(updatedTakes));
-    } catch {}
-    invokeBridge('dismiss_call_take', { id }).catch(() => {});
+  const handleDismissCallTake = async (id: string) => {
+    await invokeBridge('dismiss_call_take', { id }).catch(() => undefined);
+    await refreshCallTakes();
     setFeedbackMessage(t('voiceProfile.takeDismissedFeedback'));
     setTimeout(() => setFeedbackMessage(null), 3000);
   };
@@ -731,39 +728,20 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     });
   };
 
-  // Modal: Save Voluntary Sample to Gallery
-  const handleSaveModalSample = () => {
-    const sampleTitle = modalSampleName.trim() || `Amostra Adicional #${samples.length + 1}`;
-    const newSample: VoiceSample = {
-      id: `sample-vol-${Date.now()}`,
-      title: sampleTitle,
-      category: 'Adição Voluntária',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      durationSec: modalCaptured?.durationSec ?? 0,
-    };
-
-    const updated = [newSample, ...samples];
-    setSamples(updated);
-    try {
-      localStorage.setItem(STORAGE_SAMPLES_KEY, JSON.stringify(updated));
-      localStorage.setItem(STORAGE_ENROLLED_KEY, 'true');
-    } catch {}
-
-    const newStatus: VoiceProfileStatus = {
-      ...stripServiceVoiceProfileKeys(profileStatus),
-      is_enrolled: true,
-      active_samples_count: updated.length,
-      neural_eq_calibrated: true,
-    };
-    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, undefined));
-    invokeBridge('add_voice_sample', { sample: newSample }).catch(() => {});
-    pushProfileStatus(newStatus);
-
+  // Modal: send the voluntary sample to the service
+  const handleSaveModalSample = async () => {
+    if (!modalCaptured) return;
+    const name = modalSampleName.trim() || t('voiceProfile.defaultSampleName', { n: String(samples.length + 1) });
+    const outcome = await submitSample(modalCaptured, name);
+    if (outcome.kind === 'show-error') return; // the modal stays open with the error
+    // Done, or budget exceeded: close the modal so the gallery (and its delete buttons) is reachable.
     setIsModalOpen(false);
-    setModalSampleName('');
-    setModalCaptured(null);
-    setFeedbackMessage(t('voiceProfile.sampleCompleted'));
-    setTimeout(() => setFeedbackMessage(null), 3500);
+    if (outcome.kind === 'done') {
+      setModalSampleName('');
+      setModalCaptured(null);
+      setFeedbackMessage(t('voiceProfile.sampleCompleted'));
+      setTimeout(() => setFeedbackMessage(null), 3500);
+    }
   };
 
   const completedCount = Object.keys(completedSteps).length;
@@ -820,6 +798,19 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
         </div>
       )}
 
+      {/* Service job feedback (outside the modal) */}
+      {!isModalOpen && (jobBusy || currentJob || enrollErrorText) && (
+        <div style={{ marginBottom: 12 }}>
+          {jobBusy && !currentJob && (
+            <div role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('voiceProfile.sendingSample')}</div>
+          )}
+          <EnrollmentJobStatus job={currentJob} labels={labels} />
+          {enrollErrorText && (
+            <div role="alert" style={{ color: '#f87171', fontSize: 13, marginTop: 4 }}>{enrollErrorText}</div>
+          )}
+        </div>
+      )}
+
       {/* Profile Overview Bar */}
       <div className="profile-overview-box">
         <div className="overview-metric">
@@ -839,9 +830,9 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
           )}
         </div>
         <div className="overview-metric">
-          <div className="overview-label">Amostras Registradas</div>
+          <div className="overview-label">{t('voiceProfile.samplesRegisteredTitle')}</div>
           <div className="overview-value">
-            {profileStatus.active_samples_count} {t('voiceProfile.statusSamplesPill', { count: String(profileStatus.active_samples_count) })}
+            {t('voiceProfile.statusSamplesPill', { count: String(sampleList ? samples.length : profileStatus.active_samples_count) })}
           </div>
         </div>
         <div className="overview-metric">
@@ -884,7 +875,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                   key={stepIdx}
                   className={`stepper-segment ${isDone ? 'done' : isCur ? 'current' : 'pending'}`}
                   onClick={() => setCurrentStep(stepIdx)}
-                  title={`Etapa ${stepIdx}`}
+                  title={t('voiceProfile.stepTitle', { n: String(stepIdx) })}
                 >
                   <div className="segment-number">{isDone ? '✓' : stepIdx}</div>
                   <div className="segment-fill" />
@@ -902,9 +893,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
               {isReadingMode ? `"${t(currentQ.fallbackKey)}"` : `"${t(currentQ.textKey)}"`}
             </div>
             <div className="prompt-hint-sub">
-              {isReadingMode
-                ? 'Leia a frase em voz alta com seu ritmo natural de fala.'
-                : 'Responda espontaneamente, sem pensar muito, exatamente como falaria com um colega em uma chamada.'}
+              {isReadingMode ? t('voiceProfile.readingHint') : t('voiceProfile.openHint')}
             </div>
           </div>
 
@@ -953,6 +942,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                   </button>
                   <button
                     className="action-btn"
+                    disabled={jobBusy}
                     onClick={() => handleRedoStep(currentStep)}
                   >
                     {t('voiceProfile.redoSample')}
@@ -969,6 +959,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
               ) : (
                 <button
                   className="record-btn-trigger"
+                  disabled={jobBusy}
                   onClick={() => handleStartStepRecording(currentStep)}
                 >
                   🎙️ {t('voiceProfile.recordSample')}
@@ -1042,46 +1033,43 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             </p>
             <button
               className="action-btn add-sample-accent-btn"
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => {
+                setEnrollErrorText(null);
+                setCurrentJob(null);
+                setIsModalOpen(true);
+              }}
             >
               {t('voiceProfile.addNewSampleBtn')}
             </button>
           </div>
 
-          {samples.length > 0 ? (
-            <div className="samples-list-grid">
-              {samples.map((s, idx) => (
-                <div key={s.id} className="sample-card-item">
-                  <div className="sample-card-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className="sample-mic-icon">🎙️</span>
-                      <div>
-                        <div className="sample-card-title">{s.title || `Amostra #${idx + 1}`}</div>
-                        <div className="sample-card-meta">
-                          {s.timestamp} • {s.durationSec.toFixed(1)}s {s.category ? `• ${s.category}` : ''}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      className="delete-sample-icon-btn"
-                      onClick={() => handleDeleteSample(s.id)}
-                      title={t('voiceProfile.deleteSample')}
-                    >
-                      🗑
-                    </button>
-                  </div>
-
-                  <div className="sample-card-actions">
-                    <button
-                      className={`action-btn sample-play-toggle-btn ${playingAudioId === s.id ? 'btn-playing' : ''}`}
-                      onClick={() => handlePlayAudio(s.id, s.audioUrl)}
-                    >
-                      {playingAudioId === s.id ? `⏹ ${t('voiceProfile.stopSample')}` : `▶ ${t('voiceProfile.playSample')}`}
-                    </button>
-                  </div>
-                </div>
-              ))}
+          {sampleList && (
+            <div style={{ marginBottom: 12 }}>
+              <VoiceBudgetMeter budget={sampleList.budget} labels={labels} />
             </div>
+          )}
+
+          {budgetError && (
+            <div style={{ marginBottom: 12 }}>
+              <BudgetErrorBanner remainingSeconds={budgetError.remainingSeconds} labels={bannerLabels} />
+            </div>
+          )}
+
+          {samplesLoadFailed && (
+            <div role="alert" style={{ color: '#fbbf24', fontSize: 13, marginBottom: 12 }}>
+              {t('voiceProfile.samplesLoadFailed')}
+            </div>
+          )}
+
+          {sampleList && samples.length > 0 ? (
+            <VoiceSampleGallery
+              samples={samples}
+              budget={sampleList.budget}
+              labels={labels}
+              onDelete={(id) => void handleDeleteSample(id)}
+              deletingId={deletingId}
+              highlightDelete={budgetError !== null}
+            />
           ) : (
             <div className="empty-state-card">
               {t('voiceProfile.emptyGallery')}
@@ -1105,32 +1093,42 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                 <div key={take.id} className="intake-take-card">
                   <div className="intake-take-info">
                     <div className="take-title-row">
-                      <span className="take-badge-live">Take Reunião</span>
-                      <strong style={{ fontSize: '0.95rem' }}>{take.title}</strong>
+                      <span className="take-badge-live">{t('voiceProfile.takeBadge')}</span>
+                      {take.title && <strong style={{ fontSize: '0.95rem' }}>{take.title}</strong>}
                     </div>
                     <div className="take-meta-row">
                       <span>🕒 {take.timestamp}</span>
-                      <span>⏱ {t('voiceProfile.takeDuration', { sec: take.durationSec.toFixed(1) })}</span>
-                      <span className="take-snr-badge">🟢 {t('voiceProfile.takeSnr', { snr: take.snrDb.toFixed(1) })}</span>
+                      {typeof take.speech_seconds === 'number' && (
+                        <span>⏱ {t('voiceProfile.takeSpeech', { sec: formatSecondsForLocale(take.speech_seconds, locale) })}</span>
+                      )}
+                      {typeof take.speech_seconds !== 'number' && typeof take.durationSec === 'number' && (
+                        <span>⏱ {t('voiceProfile.takeDuration', { sec: formatSecondsForLocale(take.durationSec, locale) })}</span>
+                      )}
+                      {typeof take.snrDb === 'number' && (
+                        <span className="take-snr-badge">{t('voiceProfile.takeSnr', { snr: formatSecondsForLocale(take.snrDb, locale) })}</span>
+                      )}
+                      {take.device_label && <span>🎙️ {take.device_label}</span>}
                     </div>
                   </div>
 
                   <div className="intake-take-actions">
-                    <button
-                      className="action-btn take-play-btn"
-                      onClick={() => handlePlayAudio(take.id, take.audioUrl)}
-                    >
-                      {playingAudioId === take.id ? `⏹ ${t('voiceProfile.stopSample')}` : `▶ ${t('voiceProfile.playSample')}`}
-                    </button>
+                    {take.audioUrl && (
+                      <button
+                        className="action-btn take-play-btn"
+                        onClick={() => handlePlayAudio(take.id, take.audioUrl)}
+                      >
+                        {playingAudioId === take.id ? t('voiceProfile.stopSample') : t('voiceProfile.playSample')}
+                      </button>
+                    )}
                     <button
                       className="action-btn take-approve-btn"
-                      onClick={() => handleApproveCallTake(take)}
+                      onClick={() => void handleApproveCallTake(take)}
                     >
                       {t('voiceProfile.approveTake')}
                     </button>
                     <button
                       className="action-btn take-dismiss-btn"
-                      onClick={() => handleDismissCallTake(take.id)}
+                      onClick={() => void handleDismissCallTake(take.id)}
                     >
                       {t('voiceProfile.dismissTake')}
                     </button>
@@ -1159,7 +1157,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 6 }}>
-                Identificação da Amostra (Opcional):
+                {t('voiceProfile.sampleNameLabel')}
               </label>
               <input
                 type="text"
@@ -1194,6 +1192,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
               {!isRecording ? (
                 <button
                   className="record-btn-trigger"
+                  disabled={jobBusy}
                   onClick={handleStartModalRecording}
                 >
                   🎙️ {modalCaptured ? t('voiceProfile.redoSample') : t('voiceProfile.recordSample')}
@@ -1240,6 +1239,18 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
               </div>
             )}
 
+            {(jobBusy || currentJob || enrollErrorText) && (
+              <div style={{ marginBottom: 12 }}>
+                {jobBusy && !currentJob && (
+                  <div role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('voiceProfile.sendingSample')}</div>
+                )}
+                <EnrollmentJobStatus job={currentJob} labels={labels} />
+                {enrollErrorText && (
+                  <div role="alert" style={{ color: '#f87171', fontSize: 13, marginTop: 4 }}>{enrollErrorText}</div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
               <button
                 className="action-btn"
@@ -1249,14 +1260,15 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                   setIsModalOpen(false);
                   setModalCaptured(null);
                   setCaptureError(null);
+                  setEnrollErrorText(null);
                 }}
               >
                 {t('voiceProfile.modalCancel')}
               </button>
               <button
                 className="action-btn primary-next-btn"
-                disabled={!modalCaptured}
-                onClick={handleSaveModalSample}
+                disabled={!modalCaptured || jobBusy || isRecording}
+                onClick={() => void handleSaveModalSample()}
               >
                 {t('voiceProfile.modalSave')}
               </button>

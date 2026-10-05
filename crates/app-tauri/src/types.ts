@@ -46,13 +46,16 @@ export interface VoiceSample {
   isInitialStep?: boolean;
 }
 
+/** A call take as listed by the service (fields it does not send stay absent, never invented). */
 export interface CallSuggestionTake {
   id: string;
-  title: string;
+  title?: string;
   timestamp: string;
-  durationSec: number;
-  snrDb: number;
+  durationSec?: number;
+  snrDb?: number;
   audioUrl?: string;
+  speech_seconds?: number;
+  device_label?: string;
 }
 
 export interface VoiceProfileStatus {
