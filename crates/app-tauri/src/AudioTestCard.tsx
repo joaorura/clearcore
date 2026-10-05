@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useI18n } from './i18n';
+import { formatDecimalLocale } from './voice/format';
 import { InputDeviceInfo } from './App';
 
 interface AudioTestCardProps {
@@ -13,7 +14,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
   selectedInputId,
   inputDevices,
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   // Recording State
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -484,8 +485,8 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
   };
 
   const formatSeconds = (sec: number) => {
-    if (!Number.isFinite(sec) || isNaN(sec) || sec < 0) return '0.0s';
-    return `${sec.toFixed(1)}s`;
+    if (!Number.isFinite(sec) || isNaN(sec) || sec < 0) return `${formatDecimalLocale(0, 1, locale)}s`;
+    return `${formatDecimalLocale(sec, 1, locale)}s`;
   };
 
   return (

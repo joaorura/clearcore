@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useI18n } from './i18n';
+import { formatDecimalLocale } from './voice/format';
 
 export interface LatencyPercentiles {
   p50_us: number;
@@ -43,7 +44,7 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
   diagnostics,
   onRefresh,
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   const handleExport = async () => {
@@ -118,15 +119,15 @@ export const DiagnosticsPanel: React.FC<DiagnosticsPanelProps> = ({
       <div className="grid-cols-2" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 16 }}>
         <div className="metric-box">
           <div className="metric-label">{t('diagnostics.p50')}</div>
-          <div className="metric-value">{(latencies.p50_us / 1000).toFixed(2)} ms</div>
+          <div className="metric-value">{formatDecimalLocale(latencies.p50_us / 1000, 2, locale)} ms</div>
         </div>
         <div className="metric-box">
           <div className="metric-label">{t('diagnostics.p95')}</div>
-          <div className="metric-value">{(latencies.p95_us / 1000).toFixed(2)} ms</div>
+          <div className="metric-value">{formatDecimalLocale(latencies.p95_us / 1000, 2, locale)} ms</div>
         </div>
         <div className="metric-box">
           <div className="metric-label">{t('diagnostics.p99')}</div>
-          <div className="metric-value">{(latencies.p99_us / 1000).toFixed(2)} ms</div>
+          <div className="metric-value">{formatDecimalLocale(latencies.p99_us / 1000, 2, locale)} ms</div>
         </div>
       </div>
 
