@@ -8,7 +8,7 @@ pub mod worker;
 
 pub use engine::{
     DenoiseEngine, DenoiseMode, EngineError, EngineState, EngineStatus, INFERENCE_HARD_DEADLINE,
-    ResetReason,
+    ResetReason, VoiceProfileUpdate,
 };
 pub use generation::{Generation, GenerationId, GenerationState};
 pub use queue::{BoundedQueueTransport, DEFAULT_WATERMARK_HOPS};

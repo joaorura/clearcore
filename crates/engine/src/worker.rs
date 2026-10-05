@@ -15,7 +15,9 @@ use realtime_noise_contracts::{
 };
 use realtime_noise_model::InferenceError;
 
-use crate::engine::{DenoiseMode, EngineSharedState, INFERENCE_HARD_DEADLINE, ResetReason};
+use crate::engine::{
+    DenoiseMode, EngineSharedState, INFERENCE_HARD_DEADLINE, ResetReason, apply_profile_update,
+};
 use crate::queue::DEFAULT_WATERMARK_HOPS;
 
 /// Real-time noise worker processing engine.
@@ -54,6 +56,12 @@ impl DenoiseWorker {
         // Apply any pending backend switch at 480-sample hop boundary
         if let Some(pending) = state.pending_backend.take() {
             state.backend = Some(pending);
+        }
+
+        // Apply any pending voice profile update here, before the timed inference region, so a
+        // blocking backend round trip never counts toward the 10 ms deadline.
+        if let Some(update) = state.pending_voice_profile.take() {
+            apply_profile_update(&mut state, &update);
         }
 
         // Check if queue age watermark is exceeded (> 2 hops / 20 ms)
@@ -234,6 +242,9 @@ mod tests {
             deadline_miss_count: 0,
             is_running: true,
             studio: Some(StudioAttachment::new(control, reset.clone())),
+            pending_voice_profile: None,
+            applied_voice_profile_id: None,
+            voice_profile_error: None,
         }))
     }
 

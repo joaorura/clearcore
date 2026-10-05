@@ -12,7 +12,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES, RealtimeTransport};
-use realtime_noise_model::{InferenceBackend, InferenceError, StudioBackend, StudioResetHandle};
+use realtime_noise_model::{
+    InferenceBackend, InferenceError, StudioBackend, StudioResetHandle, VoiceProfile,
+};
 use studio_dsp::StudioControl;
 
 use crate::generation::{Generation, GenerationId};
@@ -116,6 +118,17 @@ impl fmt::Display for EngineError {
 
 impl Error for EngineError {}
 
+/// Voice profile change requested of the engine.
+#[derive(Debug, Clone, PartialEq)]
+// `Set` carries the profile by value as part of the public contract; the update is short-lived.
+#[allow(clippy::large_enum_variant)]
+pub enum VoiceProfileUpdate {
+    /// Condition the backend on this profile.
+    Set(VoiceProfile),
+    /// Return the backend to the neutral (no profile) state.
+    Clear,
+}
+
 /// Shared internal state between the engine coordinator and worker thread.
 pub(crate) struct EngineSharedState {
     pub(crate) state: EngineState,
@@ -126,6 +139,29 @@ pub(crate) struct EngineSharedState {
     pub(crate) deadline_miss_count: u64,
     pub(crate) is_running: bool,
     pub(crate) studio: Option<StudioAttachment>,
+    pub(crate) pending_voice_profile: Option<VoiceProfileUpdate>,
+    pub(crate) applied_voice_profile_id: Option<String>,
+    pub(crate) voice_profile_error: Option<String>,
+}
+
+/// Applies a voice profile update to the active backend and records the outcome.
+/// A failed update leaves the previously applied profile id unchanged.
+pub(crate) fn apply_profile_update(state: &mut EngineSharedState, update: &VoiceProfileUpdate) {
+    let Some(backend) = state.backend.as_mut() else {
+        state.voice_profile_error = Some("no active backend".into());
+        return;
+    };
+    let (arg, id) = match update {
+        VoiceProfileUpdate::Set(p) => (Some(p), Some(p.id.clone())),
+        VoiceProfileUpdate::Clear => (None, None),
+    };
+    match backend.set_voice_profile(arg) {
+        Ok(()) => {
+            state.applied_voice_profile_id = id;
+            state.voice_profile_error = None;
+        }
+        Err(e) => state.voice_profile_error = Some(e.to_string()),
+    }
 }
 
 /// Studio finishing chain attached to the engine by [`DenoiseEngine::with_studio`].
@@ -203,6 +239,9 @@ impl DenoiseEngine {
             deadline_miss_count: 0,
             is_running: false,
             studio: None,
+            pending_voice_profile: None,
+            applied_voice_profile_id: None,
+            voice_profile_error: None,
         }));
 
         Self {
@@ -309,6 +348,37 @@ impl DenoiseEngine {
         }
         drop(shared);
         Ok(())
+    }
+
+    /// Requests a voice profile change. A stopped engine applies it synchronously; a running one
+    /// stores it (latest wins) for the worker to apply at the next frame boundary, so this call
+    /// never blocks on the backend.
+    pub fn set_voice_profile(&mut self, update: VoiceProfileUpdate) -> Result<(), EngineError> {
+        let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        if shared.is_running {
+            shared.pending_voice_profile = Some(update);
+            return Ok(());
+        }
+        shared.pending_voice_profile = None;
+        apply_profile_update(&mut shared, &update);
+        shared
+            .voice_profile_error
+            .clone()
+            .map_or(Ok(()), |msg| Err(EngineError::BackendError(msg)))
+    }
+
+    /// Id of the voice profile the backend is currently conditioned on, if any.
+    #[must_use]
+    pub fn applied_voice_profile_id(&self) -> Option<String> {
+        let shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        shared.applied_voice_profile_id.clone()
+    }
+
+    /// Error from the most recent voice profile update, if it failed.
+    #[must_use]
+    pub fn voice_profile_error(&self) -> Option<String> {
+        let shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        shared.voice_profile_error.clone()
     }
 
     /// Closes the current generation, increments generation ID, and records restart reason.
