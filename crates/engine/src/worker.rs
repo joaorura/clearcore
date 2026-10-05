@@ -56,6 +56,9 @@ impl DenoiseWorker {
         // Apply any pending backend switch at 480-sample hop boundary
         if let Some(pending) = state.pending_backend.take() {
             state.backend = Some(pending);
+            // The new backend starts neutral; a pending update below restores the right id.
+            state.applied_voice_profile_id = None;
+            state.voice_profile_error = None;
         }
 
         // Apply any pending voice profile update here, before the timed inference region, so a

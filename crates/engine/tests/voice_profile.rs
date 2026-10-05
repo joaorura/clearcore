@@ -18,6 +18,7 @@ type Calls = Arc<Mutex<Vec<Option<String>>>>;
 struct ProfileBackend {
     calls: Calls,
     supports: Arc<AtomicBool>,
+    delay: Duration,
 }
 
 impl ProfileBackend {
@@ -48,6 +49,7 @@ impl InferenceBackend for ProfileBackend {
     }
 
     fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
+        std::thread::sleep(self.delay);
         if !self.supports.load(Ordering::SeqCst) {
             return Err(InferenceError::UnsupportedFeature(
                 "voice profile conditioning".to_owned(),
@@ -74,6 +76,10 @@ struct Rig {
 }
 
 fn rig() -> Rig {
+    rig_with_delay(Duration::ZERO)
+}
+
+fn rig_with_delay(delay: Duration) -> Rig {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     let supports = Arc::new(AtomicBool::new(true));
     let input = Arc::new(BoundedQueueTransport::new());
@@ -84,6 +90,7 @@ fn rig() -> Rig {
         Box::new(ProfileBackend {
             calls: Arc::clone(&calls),
             supports: Arc::clone(&supports),
+            delay,
         }),
     );
     Rig {
@@ -165,5 +172,109 @@ fn failed_update_keeps_previous_profile_id() {
     push_hop_and_wait(&rig, 1);
     assert_eq!(rig.engine.applied_voice_profile_id(), Some("a".to_owned()));
     assert!(rig.engine.voice_profile_error().is_some());
+    rig.engine.stop().unwrap();
+}
+
+fn fresh_backend(rig: &Rig) -> Box<dyn InferenceBackend> {
+    Box::new(ProfileBackend {
+        calls: Arc::clone(&rig.calls),
+        supports: Arc::clone(&rig.supports),
+        delay: Duration::ZERO,
+    })
+}
+
+#[test]
+fn stopped_backend_swap_clears_applied_profile_id() {
+    let mut rig = rig();
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("a")))
+        .unwrap();
+    rig.supports.store(false, Ordering::SeqCst);
+    let _ = rig
+        .engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("b")));
+    assert!(rig.engine.voice_profile_error().is_some());
+    rig.engine.set_backend(fresh_backend(&rig)).unwrap();
+    assert_eq!(rig.engine.applied_voice_profile_id(), None);
+    assert_eq!(rig.engine.voice_profile_error(), None);
+}
+
+#[test]
+fn running_backend_swap_clears_applied_profile_id() {
+    let mut rig = rig();
+    rig.engine.start().unwrap();
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("a")))
+        .unwrap();
+    push_hop_and_wait(&rig, 1);
+    assert_eq!(rig.engine.applied_voice_profile_id(), Some("a".to_owned()));
+    rig.engine.set_backend(fresh_backend(&rig)).unwrap();
+    push_hop_and_wait(&rig, 2);
+    assert_eq!(rig.engine.applied_voice_profile_id(), None);
+    rig.engine.stop().unwrap();
+}
+
+#[test]
+fn backend_swap_with_pending_update_ends_with_the_pending_id() {
+    let mut rig = rig();
+    rig.engine.start().unwrap();
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("a")))
+        .unwrap();
+    push_hop_and_wait(&rig, 1);
+    rig.engine.set_backend(fresh_backend(&rig)).unwrap();
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("b")))
+        .unwrap();
+    push_hop_and_wait(&rig, 2);
+    assert_eq!(rig.engine.applied_voice_profile_id(), Some("b".to_owned()));
+    rig.engine.stop().unwrap();
+}
+
+#[test]
+fn slow_profile_update_does_not_count_toward_the_inference_deadline() {
+    let mut rig = rig_with_delay(Duration::from_millis(15));
+    rig.engine.start().unwrap();
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("a")))
+        .unwrap();
+    push_hop_and_wait(&rig, 1);
+    assert_eq!(rig.engine.status().deadline_miss_count, 0);
+    assert_eq!(rig.engine.applied_voice_profile_id(), Some("a".to_owned()));
+    rig.engine.stop().unwrap();
+}
+
+#[test]
+fn successful_update_after_failure_clears_the_error() {
+    let mut rig = rig();
+    rig.engine.start().unwrap();
+    rig.supports.store(false, Ordering::SeqCst);
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("b")))
+        .unwrap();
+    push_hop_and_wait(&rig, 1);
+    assert!(rig.engine.voice_profile_error().is_some());
+    rig.supports.store(true, Ordering::SeqCst);
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("c")))
+        .unwrap();
+    push_hop_and_wait(&rig, 2);
+    assert_eq!(rig.engine.voice_profile_error(), None);
+    assert_eq!(rig.engine.applied_voice_profile_id(), Some("c".to_owned()));
+    rig.engine.stop().unwrap();
+}
+
+#[test]
+fn latest_pending_request_wins() {
+    let mut rig = rig();
+    rig.engine.start().unwrap();
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("a")))
+        .unwrap();
+    rig.engine
+        .set_voice_profile(VoiceProfileUpdate::Clear)
+        .unwrap();
+    push_hop_and_wait(&rig, 1);
+    assert_eq!(*rig.calls.lock().unwrap(), vec![None]);
     rig.engine.stop().unwrap();
 }

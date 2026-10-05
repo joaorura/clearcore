@@ -345,14 +345,17 @@ impl DenoiseEngine {
             shared.pending_backend = Some(backend);
         } else {
             shared.backend = Some(backend);
+            // The new backend starts neutral: the old label no longer describes it.
+            shared.applied_voice_profile_id = None;
+            shared.voice_profile_error = None;
         }
         drop(shared);
         Ok(())
     }
 
     /// Requests a voice profile change. A stopped engine applies it synchronously; a running one
-    /// stores it (latest wins) for the worker to apply at the next frame boundary, so this call
-    /// never blocks on the backend.
+    /// stores it (latest wins) for the worker to apply at the next frame boundary, so a running call
+    /// never calls the backend.
     pub fn set_voice_profile(&mut self, update: VoiceProfileUpdate) -> Result<(), EngineError> {
         let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
         if shared.is_running {
