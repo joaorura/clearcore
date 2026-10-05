@@ -251,6 +251,11 @@ export interface Translations {
     reEnrollBtn: string;
     tabSamples: string;
     tabCallSuggestions: string;
+    tabEnroll: string;
+    tabGallery: string;
+    tabCalls: string;
+    tabProfile: string;
+    tabsAriaLabel: string;
     addNewSampleBtn: string;
     sampleGalleryDesc: string;
     callSuggestionsDesc: string;
