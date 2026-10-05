@@ -128,6 +128,10 @@ update-desktop-database /usr/share/applications 2>/dev/null || true
 %postun
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database /usr/share/applications 2>/dev/null || true
+
+%changelog
+* Mon Oct 05 2026 João Rura <joaorura@users.noreply.github.com> - TARGET_VERSION-1
+- Official Clearcore multi-platform beta release.
 EOF
 
     # Replace placeholders
