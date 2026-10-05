@@ -295,6 +295,8 @@ export interface Translations {
     deviceSwitchConfirm: string;
     deviceSwitchCancel: string;
     captureNotStarted: string;
+    buildTooLittleSpeech: string;
+    reEnrollHint: string;
     enrollment: {
       budgetTitle: string;
       budgetUsed: string;

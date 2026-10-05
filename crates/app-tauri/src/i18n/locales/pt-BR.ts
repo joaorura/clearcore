@@ -297,6 +297,8 @@ export const ptBR: Translations = {
     deviceSwitchConfirm: 'Usar este microfone',
     deviceSwitchCancel: 'Cancelar e descartar a gravação',
     captureNotStarted: 'A gravação não começou. Tente de novo.',
+    buildTooLittleSpeech: 'Fala insuficiente para gerar o perfil com este microfone. Grave mais amostras com este microfone e refaça o perfil.',
+    reEnrollHint: 'As amostras antigas continuam no serviço e consomem o orçamento de 90 s de fala até serem apagadas na Galeria.',
     enrollment: {
       budgetTitle: 'Fala usada no perfil',
       budgetUsed: 'Usado',

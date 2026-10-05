@@ -1,6 +1,6 @@
 import type { VoiceProfileStatus } from '../../types';
-import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels, Quality } from '../enrollmentTypes';
-import { enrollmentErrorCode, isBudgetError } from '../enrollmentErrors';
+import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels, Quality, ServiceSample } from '../enrollmentTypes';
+import { enrollmentErrorCode, errorLabel, isBudgetError } from '../enrollmentErrors';
 import { formatSecondsLocale } from '../format';
 
 /*
@@ -231,4 +231,24 @@ export function shouldReportUnstartedCapture(
   if (status === 'busy') return true;
   if (status === 'cancelled') return !cancelRequested;
   return false;
+}
+
+/**
+ * Error label by the job's origin: ENROLL_TOO_LITTLE_SPEECH from a profile BUILD means the
+ * current microphone's samples do not add up to enough speech (record more with it), which is not
+ * the same as one short sample.
+ */
+export function errorLabelForJob(
+  code: EnrollErrorCode | null,
+  kind: 'sample' | 'build' | 'take',
+  labels: EnrollmentLabels,
+  t: Translate,
+): string {
+  if (kind === 'build' && code === 'ENROLL_TOO_LITTLE_SPEECH') return t('voiceProfile.buildTooLittleSpeech');
+  return errorLabel(code, labels);
+}
+
+/** Samples the current profile is built from (not other-microphone nor re-record ones). */
+export function samplesUsedInProfile(samples: ServiceSample[]): number {
+  return samples.filter((s) => s.usedInProfile).length;
 }

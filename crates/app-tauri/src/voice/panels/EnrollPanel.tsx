@@ -46,10 +46,16 @@ export function EnrollPanel(p: EnrollPanelProps) {
     <div>
       {p.isEnrolled && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-          <button className="action-btn" onClick={p.onResetEnrollment} style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
+          <button className="action-btn" onClick={p.onResetEnrollment} title={t('voiceProfile.reEnrollHint')} style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
             {t('voiceProfile.reEnrollBtn')}
           </button>
         </div>
+      )}
+
+      {p.isEnrolled && (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', margin: '0 0 12px', textAlign: 'right' }}>
+          {t('voiceProfile.reEnrollHint')}
+        </p>
       )}
 
       <JobFeedbackBlock feedback={p.feedback} labels={p.labels} t={t} locale={p.locale} />

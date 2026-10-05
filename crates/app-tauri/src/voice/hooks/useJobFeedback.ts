@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { EnrollmentJob, EnrollmentLabels } from '../enrollmentTypes';
 import { errorLabel } from '../enrollmentErrors';
-import { shouldOpenGalleryOnError, type JobOutcome, type Translate } from './voiceProfileLogic';
+import { errorLabelForJob, shouldOpenGalleryOnError, type JobOutcome, type Translate } from './voiceProfileLogic';
 
 /** Where a job was started; its feedback is shown there (same ids as the card tabs). */
 export type JobOrigin = 'enroll' | 'gallery' | 'calls' | 'profile';
@@ -25,7 +25,8 @@ export interface JobFeedback {
   /** Clears error and job (e.g. when the voluntary sample modal opens or closes). */
   clearMessages: () => void;
   /** Applies a non-done outcome; the budget error calls `onBudgetError` (the card opens the gallery). */
-  applyOutcome: (outcome: JobOutcome) => void;
+  /** `kind` picks the error label by origin (a build's ENROLL_TOO_LITTLE_SPEECH differs). */
+  applyOutcome: (outcome: JobOutcome, kind?: JobKind) => void;
   /** Shows the error of a request that threw (timeout or unreachable service). */
   failWith: (err: unknown) => void;
   /** Error of a call take approval (`kind: 'take'`). */
@@ -60,7 +61,7 @@ export function useJobFeedback(t: Translate, labels: EnrollmentLabels, onBudgetE
       setEnrollErrorText(null);
       setCurrentJob(null);
     },
-    applyOutcome: (outcome) => {
+    applyOutcome: (outcome, kind = 'sample') => {
       if (outcome.kind === 'done') return;
       setCurrentJob(null);
       if (outcome.kind === 'show-budget-error') {
@@ -68,7 +69,7 @@ export function useJobFeedback(t: Translate, labels: EnrollmentLabels, onBudgetE
         return;
       }
       if (shouldOpenGalleryOnError(outcome.code)) onBudgetError();
-      setEnrollErrorText(errorLabel(outcome.code, labels));
+      setEnrollErrorText(errorLabelForJob(outcome.code, kind, labels, t));
     },
     failWith: (err) => {
       setCurrentJob(null);

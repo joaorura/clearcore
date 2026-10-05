@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { invokeBridge } from '../../bridge';
 import type { VoiceProfileStatus } from '../../types';
 import type { EnrollmentLabels, SampleList } from '../enrollmentTypes';
-import { enrollmentErrorCode, errorLabel } from '../enrollmentErrors';
+import { enrollmentErrorCode } from '../enrollmentErrors';
 import { buildProfile, waitForJob } from '../enrollmentClient';
 import {
   applySetVoiceProfileResult,
+  errorLabelForJob,
   mergeVoiceProfileStatus,
   nextStepAfterJob,
   normalizeVoiceProfileStatus,
@@ -65,13 +66,13 @@ export function useProfileBuild(opts: {
       const start = await buildProfile(t('voiceProfile.defaultProfileName'));
       const startError = enrollmentErrorCode(start);
       if (startError !== null || !('jobId' in start)) {
-        jobs.setEnrollErrorText(errorLabel(startError ?? 'ENROLL_FAILED', labels));
+        jobs.setEnrollErrorText(errorLabelForJob(startError ?? 'ENROLL_FAILED', 'build', labels, t));
       } else {
         const job = await waitForJob(start.jobId, { onUpdate: jobs.setCurrentJob });
         jobs.setCurrentJob(job);
         const outcome = nextStepAfterJob(job);
         if (outcome.kind === 'done') done = true;
-        else jobs.applyOutcome(outcome);
+        else jobs.applyOutcome(outcome, 'build');
       }
     } catch (err) {
       jobs.failWith(err);

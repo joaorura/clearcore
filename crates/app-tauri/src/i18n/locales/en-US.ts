@@ -297,6 +297,8 @@ export const enUS: Translations = {
     deviceSwitchConfirm: 'Use this microphone',
     deviceSwitchCancel: 'Cancel and discard the recording',
     captureNotStarted: 'Recording did not start. Try again.',
+    buildTooLittleSpeech: 'Not enough speech to build the profile with this microphone. Record more samples with this microphone and rebuild the profile.',
+    reEnrollHint: 'The old samples stay in the service and use the 90 s speech budget until you delete them in the Gallery.',
     enrollment: {
       budgetTitle: 'Speech used in the profile',
       budgetUsed: 'Used',
