@@ -25,23 +25,50 @@ export async function deleteSample(id: string): Promise<boolean> {
 }
 
 const defaultGetJob: GetJob = (jobId) => invokeBridge(CMD.getJob, { jobId });
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const MAX_TRANSIENT_FAILURES = 3;
+
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('aborted'));
+    const onAbort = () => { clearTimeout(t); reject(new Error('aborted')); };
+    const t = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 export async function waitForJob(
   jobId: string,
-  o: { intervalMs?: number; timeoutMs?: number; onUpdate?: (j: EnrollmentJob) => void; getJob?: GetJob } = {},
+  o: { intervalMs?: number; timeoutMs?: number; onUpdate?: (j: EnrollmentJob) => void; getJob?: GetJob; signal?: AbortSignal } = {},
 ): Promise<EnrollmentJob> {
-  const { intervalMs = 500, timeoutMs = 120_000, onUpdate, getJob = defaultGetJob } = o;
+  const { intervalMs = 500, timeoutMs = 120_000, onUpdate, getJob = defaultGetJob, signal } = o;
   const deadline = Date.now() + timeoutMs;
+  let transient = 0;
   for (;;) {
-    const res = await getJob(jobId);
-    const err = enrollmentErrorCode(res);
-    const job: EnrollmentJob = 'state' in res
-      ? res
-      : { jobId, state: 'failed', stage: 'queued', errorCode: err ?? 'ENROLL_FAILED', remainingSeconds: null, sampleId: null, profileId: null, quality: null };
-    onUpdate?.(job);
-    if (job.state !== 'running') return job;
+    if (signal?.aborted) throw new Error('aborted');
+    let res: EnrollmentJob | { errorCode: EnrollErrorCode } | null = null;
+    try {
+      res = await getJob(jobId);
+    } catch {
+      res = { errorCode: 'SERVICE_UNAVAILABLE' };
+    }
+    if (signal?.aborted) throw new Error('aborted');
+    let job: EnrollmentJob | null = null;
+    if ('state' in res) {
+      transient = 0;
+      job = res;
+    } else {
+      const code = enrollmentErrorCode(res) ?? 'ENROLL_FAILED';
+      if (code === 'SERVICE_UNAVAILABLE' && ++transient < MAX_TRANSIENT_FAILURES) {
+        job = null;
+      } else {
+        job = { jobId, state: 'failed', stage: 'queued', errorCode: code, remainingSeconds: null, sampleId: null, profileId: null, quality: null };
+      }
+    }
+    if (job) {
+      onUpdate?.(job);
+      if (job.state !== 'running') return job;
+    }
     if (Date.now() + intervalMs > deadline) throw new Error('timeout');
-    await sleep(intervalMs);
+    await abortableSleep(intervalMs, signal);
   }
 }

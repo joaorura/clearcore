@@ -63,3 +63,47 @@ it('deleteSample resolves true/false and false on error', async () => {
   mock.mockResolvedValueOnce({ success: false }); expect(await deleteSample('a')).toBe(false);
   mock.mockResolvedValueOnce({ errorCode: 'ENROLL_FAILED' }); expect(await deleteSample('a')).toBe(false);
 });
+
+const unavailable = { errorCode: 'SERVICE_UNAVAILABLE' as const };
+const seqGet = (items: Array<EnrollmentJob | { errorCode: 'SERVICE_UNAVAILABLE' | 'ENROLL_JOB_NOT_FOUND' } | Error>) => {
+  const fn = vi.fn(async () => { const x = items.shift()!; if (x instanceof Error) throw x; return x; });
+  return fn;
+};
+it('waitForJob rejects aborted and stops polling when aborted mid-wait', async () => {
+  const ac = new AbortController();
+  const getJob = vi.fn(async () => job('running', 'queued'));
+  const p = waitForJob('job-1', { intervalMs: 20, getJob, signal: ac.signal });
+  await new Promise((r) => setTimeout(r, 5));
+  ac.abort();
+  await expect(p).rejects.toThrow('aborted');
+  const n = getJob.mock.calls.length;
+  await new Promise((r) => setTimeout(r, 60));
+  expect(getJob.mock.calls.length).toBe(n);
+});
+it('waitForJob with an already aborted signal never polls', async () => {
+  const ac = new AbortController(); ac.abort();
+  const getJob = vi.fn(async () => job('done', 'apply'));
+  await expect(waitForJob('job-1', { intervalMs: 1, getJob, signal: ac.signal })).rejects.toThrow('aborted');
+  expect(getJob).not.toHaveBeenCalled();
+});
+it('waitForJob rides out one transient error', async () => {
+  const out = await waitForJob('job-1', { intervalMs: 1, getJob: seqGet([unavailable, job('running', 'trim'), job('done', 'apply')]) });
+  expect(out.state).toBe('done');
+  const out2 = await waitForJob('job-1', { intervalMs: 1, getJob: seqGet([unavailable, job('done', 'apply')]) });
+  expect(out2.state).toBe('done');
+});
+it('waitForJob rides out a thrown invoke error', async () => {
+  const out = await waitForJob('job-1', { intervalMs: 1, getJob: seqGet([new Error('ipc'), job('done', 'apply')]) });
+  expect(out.state).toBe('done');
+});
+it('waitForJob fails after 3 consecutive transient errors, and the counter resets on good responses', async () => {
+  const out = await waitForJob('job-1', { intervalMs: 1, getJob: seqGet([unavailable, unavailable, unavailable]) });
+  expect(out.state).toBe('failed'); expect(out.errorCode).toBe('SERVICE_UNAVAILABLE');
+  const ok = await waitForJob('job-1', { intervalMs: 1, getJob: seqGet([unavailable, unavailable, job('running', 'trim'), unavailable, unavailable, job('done', 'apply')]) });
+  expect(ok.state).toBe('done');
+});
+it('waitForJob fails immediately on ENROLL_JOB_NOT_FOUND', async () => {
+  const getJob = seqGet([{ errorCode: 'ENROLL_JOB_NOT_FOUND' }, job('done', 'apply')]);
+  const out = await waitForJob('job-1', { intervalMs: 1, getJob });
+  expect(out.errorCode).toBe('ENROLL_JOB_NOT_FOUND'); expect(getJob).toHaveBeenCalledTimes(1);
+});
