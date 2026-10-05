@@ -160,7 +160,9 @@ describe('ProfilePanel', () => {
   });
   it('neural EQ shows calibrated only when the service says so', () => {
     expect(html(<ProfilePanel {...profileProps()} />)).toContain('voiceProfile.neuralEqPending');
-    expect(html(<ProfilePanel {...profileProps({ profileStatus: { is_enrolled: true, active_samples_count: 1, neural_eq_calibrated: true } })} />)).toContain('voiceProfile.neuralEqCalibrated');
+    // As the service would send it (the renderer never sets this field itself).
+    const fromService = JSON.parse('{"is_enrolled":true,"active_samples_count":1,"neural_eq_calibrated":true}') as VoiceProfileStatus;
+    expect(html(<ProfilePanel {...profileProps({ profileStatus: fromService })} />)).toContain('voiceProfile.neuralEqCalibrated');
   });
 });
 
