@@ -4,15 +4,11 @@ Release:        1%{?dist}
 Summary:        Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
 License:        PolyForm Noncommercial 1.0.0
 URL:            https://github.com/joaorura/clearcore
-%ifarch x86_64
-Source0:        https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-linux-x64.tar.gz
-%endif
-%ifarch aarch64
-Source0:        https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-linux-arm64.tar.gz
-%endif
+Source0:        LICENSE
 
 ExclusiveArch:  x86_64 aarch64
 AutoReqProv:    no
+BuildRequires:  curl, tar
 Requires:       pipewire >= 0.3.0
 
 %description
@@ -22,11 +18,12 @@ Provides voice isolation, neural EQ acoustic calibration, and studio DSP.
 
 %prep
 %ifarch x86_64
-%setup -q -n Clearcore-linux-x64
+curl -fsSL -o bundle.tar.gz https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-linux-x64.tar.gz
 %endif
 %ifarch aarch64
-%setup -q -n Clearcore-linux-arm64
+curl -fsSL -o bundle.tar.gz https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-linux-arm64.tar.gz
 %endif
+tar -xzf bundle.tar.gz --strip-components=1
 
 %install
 rm -rf %{buildroot}
