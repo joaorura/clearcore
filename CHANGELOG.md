@@ -12,11 +12,18 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 ### Added
 - Voice profile activation (development-integrated): `InferenceBackend` gains `set_voice_profile`, backends that cannot condition on a profile reject it explicitly, and the service applies `SetVoiceProfile` / `ClearVoiceProfile` transactionally (verify, apply to the backend, persist; rollback on failure) and re-applies the stored profile on every backend selection. The packaged virtual microphone (`filter-capi` / helper) does not apply the profile yet.
 
+- Voice enrollment pipeline (development-integrated): samples are denoised in memory with the base DFNet3 and stored as 16-bit 48 kHz mono WAV (the raw recording never reaches disk), each microphone has a budget of 90 s of speech, and the profile is built from the samples of the most recent microphone by concatenating the trimmed speech (silence removed, levels matched, microphone EQ estimated) and enrolled with a development model that is loaded only through `CLEARCORE_DEV_ENROLLMENT_ASSET` and `CLEARCORE_DEV_ENROLLMENT_SHA256`. Scope: the packaged virtual microphone does not apply the profile yet, and no improvement of voice isolation is claimed.
+- IPC: `AddVoiceSample` (now carries PCM and the capture device), `BuildVoiceProfile` and `GetEnrollmentJob`, with fixed `ENROLL_*` error codes (including `ENROLL_BUSY`). Jobs answer immediately, at most two run at once and their result is applied on the next request, so clients poll `GetEnrollmentJob`. `ListVoiceSamples` adds `speech_seconds`, `device_label`, `used_in_profile`, `needs_reenroll`, `other_microphone` and `budget`. Call takes over the budget margin are skipped without an error and approving one above the budget is refused while the take is kept. See `docs/ipc-v1.md`.
+- App: the capture records raw PCM from the physical microphone, with no fallback to an unconstrained stream, and the voice card shows the speech budget meter, per-sample quality and the delete prompt when the budget is exceeded.
+
 ### Fixed
+- IPC hardening: request lines are capped at 32 MiB (`ENROLL_PAYLOAD_TOO_LARGE`) with a bounded read buffer, malformed requests get the fixed message `malformed request`, `VERSION_MISMATCH` no longer echoes the client version, echoed request ids are cut to 64 characters, and a transport error ends the session.
+- Diagnostics no longer include voice samples, WAV files or profiles.
 - `GetStatus` now reports the truth about voice profiles: `active_voice_profile_id` / `is_voice_profile_active` mean "applied on the service backend", while `stored_voice_profile_id` / `voice_profile_selected` mean "persisted on disk", with a generic `voice_profile_error` when they differ. The error field never carries backend error text or profile data.
 - The app-tauri TypeScript build is repaired after the voice profile changes.
 
 ### Changed
+- `GetVoiceProfileEmbedding` is deprecated and keeps returning an error; the voice profile no longer stores a placeholder embedding. The voice samples move to the profile store directory (one-time migration; samples without audio are flagged `needs_reenroll`).
 - Licensing: the whole project becomes non-commercial. Source code is now under the PolyForm Noncommercial License 1.0.0; model weights and documentation authored by ClearCore are under CC BY-NC 4.0. Releases up to `v0.1.0-beta.2` stay under the licenses they were published with (Apache-2.0 / MIT OR Apache-2.0). Third-party components keep their own licenses.
 
 ## [0.1.0-beta.2] - 2026-10-02
