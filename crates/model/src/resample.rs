@@ -4,6 +4,11 @@
 //! keeping every third sample, with the filter group delay compensated.
 
 /// Decimates 48 kHz audio to 16 kHz. Output length is `input.len() / 3`.
+///
+/// Edges: the first and last ~`TAPS / 2` input samples are filtered with
+/// zero padding; this is irrelevant in practice because the speech trim
+/// leaves a 40 ms margin. Up to 2 trailing input samples (`input.len() % 3`)
+/// are discarded.
 pub fn decimate_48k_to_16k(input: &[f32]) -> Vec<f32> {
     let h = lowpass_taps();
     let m = (TAPS - 1) / 2;
@@ -26,9 +31,9 @@ pub fn decimate_48k_to_16k(input: &[f32]) -> Vec<f32> {
 }
 
 const FACTOR: usize = 3;
-const TAPS: usize = 127;
+const TAPS: usize = 255;
 /// Cutoff in cycles per sample at 48 kHz.
-const CUTOFF: f64 = 7_000.0 / 48_000.0;
+const CUTOFF: f64 = 7_500.0 / 48_000.0;
 
 /// Windowed-sinc low-pass (4-term Blackman-Harris), normalised to unit DC gain.
 #[allow(
@@ -96,15 +101,34 @@ mod tests {
     #[test]
     fn passband_tone_keeps_its_level() {
         let db = tone_db(1_000.0);
-        eprintln!("1 kHz: {db} dB");
         assert!(db.abs() < 0.5, "{db} dB");
     }
     #[test]
     fn alias_band_tone_is_rejected() {
         // 10 kHz would alias to 6 kHz at 16 kHz if not filtered.
         let db = tone_db(10_000.0);
-        eprintln!("10 kHz: {db} dB");
         assert!(db < -60.0, "{db} dB");
+    }
+    #[test]
+    fn response_at_7khz_is_within_one_db() {
+        let db = tone_db(7_000.0);
+        assert!(db > -1.0, "{db} dB");
+    }
+    #[test]
+    fn stopband_tones_are_rejected() {
+        let d85 = tone_db(8_500.0);
+        let d12 = tone_db(12_000.0);
+        assert!(d85 < -40.0, "{d85} dB");
+        assert!(d12 < -60.0, "{d12} dB");
+    }
+    #[test]
+    #[ignore = "timing check; run with --release -- --ignored"]
+    fn ninety_seconds_of_audio_decimates() {
+        let x = vec![0.1_f32; 90 * 48_000];
+        let start = std::time::Instant::now();
+        let y = decimate_48k_to_16k(&x);
+        println!("90 s decimation: {:?}", start.elapsed());
+        assert_eq!(y.len(), 90 * 16_000);
     }
     #[test]
     fn dc_gain_is_unity() {
@@ -117,7 +141,7 @@ mod tests {
         // windowed sinc, so the last kHz below it rolls off by design).
         let secs = 4.0_f32;
         let n = (48_000.0 * secs) as usize;
-        let (f0, f1) = (100.0_f32, 6_000.0_f32);
+        let (f0, f1) = (100.0_f32, 7_000.0_f32);
         let k = (f1 - f0) / secs;
         let x: Vec<f32> = (0..n)
             .map(|i| {
@@ -135,7 +159,6 @@ mod tests {
             hi = hi.max(db);
             s += win;
         }
-        eprintln!("chirp gain: min {lo} dB, max {hi} dB");
         assert!(lo > -1.0 && hi < 1.0, "min {lo} dB, max {hi} dB");
     }
 }
