@@ -95,12 +95,10 @@ fn peak_of(samples: &[f32]) -> f32 {
     samples.iter().fold(0.0_f32, |m, v| m.max(v.abs()))
 }
 
-#[cfg(feature = "tract")]
 pub struct TractDenoiser {
     repo_root: std::path::PathBuf,
 }
 
-#[cfg(feature = "tract")]
 impl TractDenoiser {
     #[must_use]
     pub fn new(repo_root: std::path::PathBuf) -> Self {
@@ -108,7 +106,6 @@ impl TractDenoiser {
     }
 }
 
-#[cfg(feature = "tract")]
 impl Denoiser for TractDenoiser {
     fn denoise(&mut self, pcm48: &[f32]) -> Result<Vec<f32>, EnrollError> {
         use realtime_noise_contracts::HOP_SAMPLES;
@@ -252,7 +249,6 @@ mod tests {
         assert!((r.peak - 0.2).abs() < 0.01);
     }
 
-    #[cfg(feature = "tract")]
     #[test]
     #[ignore = "uses the approved DFNet3 asset; run locally"]
     fn tract_denoiser_keeps_length_and_is_finite() {
@@ -316,7 +312,6 @@ mod tests {
         assert!(g.0.iter().all(|v| *v == 0.5));
     }
 
-    #[cfg(feature = "tract")]
     #[test]
     #[ignore = "uses the approved DFNet3 asset; run locally"]
     fn tract_denoiser_latency_is_compensated() {

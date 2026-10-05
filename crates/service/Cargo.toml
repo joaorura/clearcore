@@ -11,7 +11,10 @@ realtime-noise-accelerators = { path = "../accelerators" }
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-engine = { path = "../engine" }
 realtime-noise-ipc = { path = "../ipc" }
-realtime-noise-model = { path = "../model" }
+# `tract` is explicit (it is already enabled unconditionally through the supervisor and the
+# accelerators): the enrollment ingestion needs the real base DFNet3 denoiser and the development
+# archive loader in the DEFAULT build. A default feature would violate the workspace policy.
+realtime-noise-model = { path = "../model", features = ["tract"] }
 base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }
 realtime-noise-supervisor = { path = "../supervisor" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }

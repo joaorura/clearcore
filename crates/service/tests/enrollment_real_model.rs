@@ -3,9 +3,8 @@
 //! `CLEARCORE_DEV_ENROLLMENT_ASSET` + `CLEARCORE_DEV_ENROLLMENT_SHA256`. Development-integrated,
 //! not end-to-end and not a quality claim (spec 1, 3.1, 12.8).
 //!
-//! Run: `cargo test -p realtime-noise-service --features tract --test enrollment_real_model
+//! Run: `cargo test -p realtime-noise-service --release --test enrollment_real_model
 //! -- --ignored --nocapture` with both variables set.
-#![cfg(feature = "tract")]
 #![forbid(unsafe_code)]
 #![allow(
     clippy::unwrap_used,

@@ -51,7 +51,6 @@ const MAX_METADATA_BYTES: usize = 256;
 /// Upper bound of one stored sample WAV read back at build time (90 s at 16 bit + header).
 const MAX_SAMPLE_WAV_BYTES: u64 = 16 * 1024 * 1024;
 /// Upper bound of the development enrollment archive read from disk.
-#[cfg(feature = "tract")]
 const MAX_DEV_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
 /// Level matching: largest gain change applied to one sample (spec 4.2 step 1).
 const MAX_LEVEL_GAIN_DB: f32 = 12.0;
@@ -103,16 +102,6 @@ struct BoxedModel(Box<dyn SpeakerEmbeddingModel + Send>);
 impl SpeakerEmbeddingModel for BoxedModel {
     fn extract(&mut self, samples_16khz: &[f32]) -> Result<RawFilmVectors, EnrollmentError> {
         self.0.extract(samples_16khz)
-    }
-}
-
-/// Denoiser used when the base `DFNet3` cannot run (no `tract` feature or unknown repo root):
-/// ingestion fails closed instead of storing raw audio.
-struct UnavailableDenoiser;
-
-impl Denoiser for UnavailableDenoiser {
-    fn denoise(&mut self, _pcm48: &[f32]) -> Result<Vec<f32>, EnrollError> {
-        Err(EnrollError::Failed)
     }
 }
 
@@ -205,7 +194,6 @@ impl EnrollmentState {
     }
 }
 
-#[cfg(feature = "tract")]
 fn load_dev_model(
     config: &EnrollmentConfig,
 ) -> Result<Box<dyn SpeakerEmbeddingModel + Send>, EnrollError> {
@@ -224,13 +212,6 @@ fn load_dev_model(
         .map_err(|_| EnrollError::ModelNotConfigured);
     bytes.fill(0);
     Ok(Box::new(model?))
-}
-
-#[cfg(not(feature = "tract"))]
-fn load_dev_model(
-    _config: &EnrollmentConfig,
-) -> Result<Box<dyn SpeakerEmbeddingModel + Send>, EnrollError> {
-    Err(EnrollError::ModelNotConfigured)
 }
 
 /// Reads a regular file of at most `max` bytes; symlinks and anything else are refused.
@@ -340,7 +321,9 @@ const fn message_for(error: &EnrollError) -> &'static str {
         EnrollError::Clipping => "the recording is clipped",
         EnrollError::TooQuiet => "the recording is too quiet",
         EnrollError::TooLittleSpeech => "not enough speech from this microphone",
-        EnrollError::ModelNotConfigured => "the development enrollment model is not configured",
+        EnrollError::ModelNotConfigured => {
+            "the development enrollment model or the base denoiser is not available"
+        }
         EnrollError::BudgetExceeded => "the speech budget is full; delete audio first",
         EnrollError::InvalidAudio => "invalid audio payload",
         EnrollError::PayloadTooLarge => "audio payload too large",
@@ -572,17 +555,18 @@ impl ServiceDaemon {
         self
     }
 
-    fn make_denoiser(&self) -> Box<dyn Denoiser> {
+    /// A fresh denoiser for one sample, or `None` when no usable denoiser exists (no test hook
+    /// and an unknown repository root, so the approved base `DFNet3` asset cannot be located).
+    /// The real denoiser is always compiled in: the service depends on the model crate with its
+    /// `tract` feature (see `crates/service/Cargo.toml`).
+    pub(crate) fn make_denoiser(&self) -> Option<Box<dyn Denoiser>> {
         if let Some(factory) = &self.enrollment.denoiser_factory {
-            return factory();
+            return Some(factory());
         }
-        #[cfg(feature = "tract")]
-        if let Some(root) = self.repo_root.as_deref() {
-            return Box::new(crate::enrollment_ingest::TractDenoiser::new(
-                root.to_path_buf(),
-            ));
-        }
-        Box::new(UnavailableDenoiser)
+        let root = self.repo_root.as_deref()?;
+        Some(Box::new(crate::enrollment_ingest::TractDenoiser::new(
+            root.to_path_buf(),
+        )))
     }
 
     /// Applies every finished job on the daemon thread (called before each request).
@@ -605,8 +589,13 @@ impl ServiceDaemon {
         });
     }
 
-    fn spawn_ingest(&mut self, request_id: &str, pcm: Pcm, kind: IngestKind) -> IpcResponse {
-        let mut denoiser = self.make_denoiser();
+    fn spawn_ingest(
+        &mut self,
+        request_id: &str,
+        mut denoiser: Box<dyn Denoiser>,
+        pcm: Pcm,
+        kind: IngestKind,
+    ) -> IpcResponse {
         let spawned = self.enrollment.sample_jobs.spawn("denoise", move || {
             let mut pcm = pcm;
             ingest_sample(denoiser.as_mut(), &mut pcm.0)
@@ -638,12 +627,17 @@ impl ServiceDaemon {
         {
             return IpcResponse::invalid_command(REQUEST_ID, "invalid sample metadata");
         }
+        // Fail closed BEFORE decoding anything: without the base denoiser nothing is stored.
+        let Some(denoiser) = self.make_denoiser() else {
+            return enroll_error(REQUEST_ID, &EnrollError::ModelNotConfigured);
+        };
         let pcm = match decode_pcm(pcm_f32_le_b64, sample_rate) {
             Ok(pcm) => pcm,
             Err(e) => return enroll_error(REQUEST_ID, &e),
         };
         self.spawn_ingest(
             REQUEST_ID,
+            denoiser,
             pcm,
             IngestKind::Manual {
                 name: name.to_owned(),
@@ -668,6 +662,9 @@ impl ServiceDaemon {
         {
             return IpcResponse::invalid_command(REQUEST_ID, "Invalid intake suggestion payload");
         }
+        let Some(denoiser) = self.make_denoiser() else {
+            return enroll_error(REQUEST_ID, &EnrollError::ModelNotConfigured);
+        };
         let pcm = match decode_pcm(&request.pcm_f32_le_b64, request.sample_rate) {
             Ok(pcm) => pcm,
             Err(e) => return enroll_error(REQUEST_ID, &e),
@@ -678,7 +675,7 @@ impl ServiceDaemon {
             device_id_hash: request.device_id_hash.clone(),
         };
         drop(request);
-        self.spawn_ingest(REQUEST_ID, pcm, kind)
+        self.spawn_ingest(REQUEST_ID, denoiser, pcm, kind)
     }
 
     fn store_ingested(&mut self, job_id: &str, outcome: &IngestOutcome) {
@@ -1135,5 +1132,32 @@ mod tests {
         assert_eq!(rfc3339_from_epoch(0), "1970-01-01T00:00:00Z");
         assert_eq!(rfc3339_from_epoch(951_782_400), "2000-02-29T00:00:00Z");
         assert_eq!(rfc3339_from_epoch(1_791_201_845), "2026-10-05T12:04:05Z");
+    }
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    #[test]
+    fn default_build_has_a_real_denoiser() {
+        let mut daemon =
+            ServiceDaemon::with_supervisor(realtime_noise_supervisor::EngineSupervisor::default())
+                .with_enrollment_hooks(EnrollmentHooks::default());
+        assert!(daemon.make_denoiser().is_none(), "no repo root, no hook");
+        daemon.set_repo_root(repo_root());
+        assert!(daemon.make_denoiser().is_some());
+    }
+
+    #[test]
+    #[ignore = "runs the approved DFNet3 asset; run locally"]
+    fn default_build_denoiser_is_the_base_dfnet3() {
+        let mut daemon =
+            ServiceDaemon::with_supervisor(realtime_noise_supervisor::EngineSupervisor::default())
+                .with_enrollment_hooks(EnrollmentHooks::default());
+        daemon.set_repo_root(repo_root());
+        let input = speech(0.5, 0.3);
+        let out = daemon.make_denoiser().unwrap().denoise(&input).unwrap();
+        assert_eq!(out.len(), input.len());
+        assert!(out.iter().zip(&input).any(|(o, i)| (o - i).abs() > 1e-3));
     }
 }

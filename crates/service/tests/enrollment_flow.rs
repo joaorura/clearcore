@@ -67,15 +67,17 @@ impl InferenceBackend for ProfileBackend {
     }
 }
 
-/// Attenuates by 0.5, so the stored WAV is provably the denoised signal and not the raw one.
-struct HalfDenoiser {
+/// Scales by `gain` (0.5 by default), so the stored WAV is provably the denoised signal and
+/// not the raw one.
+struct GainDenoiser {
     delay: Duration,
+    gain: f32,
 }
 
-impl Denoiser for HalfDenoiser {
+impl Denoiser for GainDenoiser {
     fn denoise(&mut self, pcm48: &[f32]) -> Result<Vec<f32>, EnrollError> {
         std::thread::sleep(self.delay);
-        Ok(pcm48.iter().map(|v| v * 0.5).collect())
+        Ok(pcm48.iter().map(|v| v * self.gain).collect())
     }
 }
 
@@ -101,6 +103,8 @@ impl SpeakerEmbeddingModel for FakeModel {
 
 struct Setup {
     denoise_delay: Duration,
+    /// `None` = no denoiser factory (production path; no repo root in these tests).
+    denoise_gain: Option<f32>,
     /// `None` = production loader without a development asset (not configured).
     model_delay: Option<Duration>,
     legacy: Option<PathBuf>,
@@ -110,6 +114,7 @@ impl Default for Setup {
     fn default() -> Self {
         Self {
             denoise_delay: Duration::ZERO,
+            denoise_gain: Some(0.5),
             model_delay: Some(Duration::ZERO),
             legacy: None,
         }
@@ -120,6 +125,12 @@ fn daemon_with(dir: &Path, setup: Setup) -> (ServiceDaemon, Arc<Mutex<Option<f32
     let seen_peak = Arc::new(Mutex::new(None));
     let peak_slot = Arc::clone(&seen_peak);
     let delay = setup.denoise_delay;
+    let denoiser_factory: Option<realtime_noise_service::DenoiserFactory> =
+        setup.denoise_gain.map(|gain| {
+            let factory: realtime_noise_service::DenoiserFactory =
+                Box::new(move || Box::new(GainDenoiser { delay, gain }));
+            factory
+        });
     let model_factory: Option<realtime_noise_service::ModelFactory> =
         setup.model_delay.map(|model_delay| {
             let factory: realtime_noise_service::ModelFactory = Box::new(move || {
@@ -131,7 +142,7 @@ fn daemon_with(dir: &Path, setup: Setup) -> (ServiceDaemon, Arc<Mutex<Option<f32
             factory
         });
     let hooks = EnrollmentHooks {
-        denoiser_factory: Some(Box::new(move || Box::new(HalfDenoiser { delay }))),
+        denoiser_factory,
         model_factory,
         dev_enrollment_asset: None,
         legacy_samples_dir: setup.legacy,
@@ -963,4 +974,45 @@ fn listing_exposes_the_selected_device_group() {
         .map(|i| i["device_id_hash"].as_str().expect("hash"))
         .collect();
     assert_eq!(hashes, vec!["hash-a", "hash-a", "hash-b"]);
+}
+
+#[test]
+fn without_a_usable_denoiser_samples_and_takes_fail_synchronously() {
+    let temp = TempDir::new("enroll-no-denoiser");
+    let (mut daemon, _) = daemon_with(
+        temp.path(),
+        Setup {
+            denoise_gain: None,
+            ..Setup::default()
+        },
+    );
+    for cmd in [
+        add_cmd(&speech_pcm(2.0, 0.3), "mic-a"),
+        take_cmd(&speech_pcm(2.0, 0.3), "mic-a"),
+        // Checked before the base64 is decoded.
+        IpcCommand::AddVoiceSample {
+            name: "n".into(),
+            pcm_f32_le_b64: "not-base64!".into(),
+            sample_rate: 48_000,
+            device_label: "Mic".into(),
+            device_id_hash: "h".into(),
+        },
+    ] {
+        let resp = send(&mut daemon, cmd);
+        assert_eq!(error_code(&resp), ENROLL_MODEL_NOT_CONFIGURED, "{resp:?}");
+        assert!(resp.payload.get("job_id").is_none());
+    }
+    let none = send(
+        &mut daemon,
+        IpcCommand::GetEnrollmentJob {
+            job_id: "sample-job-1".to_owned(),
+        },
+    );
+    assert_eq!(
+        error_code(&none),
+        ENROLL_JOB_NOT_FOUND,
+        "no job was created"
+    );
+    assert_eq!(list(&mut daemon)["total_count"], 0);
+    assert!(!temp.path().join("samples").exists());
 }
