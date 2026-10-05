@@ -21,6 +21,7 @@ This spec is **development-integrated**, not product end-to-end and not producti
 | D4 | Samples are **concatenated with silence removed**; no quality-driven upper duration limit. | The validator's 12 s maximum is relaxed (§6.2). |
 | D5 | The **microphone EQ is calibrated on the denoised audio** (48 kHz). | Matches the runtime chain, where the EQ sits after the denoiser. |
 | D6 | Scope: development end-to-end with the M3 `enrollment.onnx` behind explicit development configuration, plus the same path in CI with the synthetic test ONNX. | Honest labelling in the UI (§9). |
+| D7 | Only samples from the **same capture source** (same microphone) are concatenated. | Each sample records its capture device; the builder uses one device group (§4.2); the microphone EQ of D5 is a property of that microphone. |
 
 ## 3. Evidence on duration (experiment of 2026-10-05)
 
@@ -32,7 +33,7 @@ Inference only, `runs/m3/enrollment.onnx`, onnxruntime CPU, 10 speakers of CML-T
 
 Same speaker, another 12 s window ("floor"): 0.077. Different speakers: 0.143. Median CPU latency: 190 ms (12 s) to 1.6 s (90 s), roughly linear. All outputs finite, no collapse, no norm growth with duration. With pink noise at 10 dB SNR the vector moved by about 0.06 and showed no visible trend from 12 s to 60 s.
 
-**What this supports:** up to 90 s the vector stays inside the same-speaker window-to-window variation. **What it does not show:** (a) only 10 speakers of read speech from one source; (b) prefixes overlap, so the dip at 12 s is partly a bias; (c) it measures vector stability, **not** denoiser quality (SI-SDR/TSOS with the conditioned pDFNet3); (d) the same-speaker floor is already 54% of the between-speaker distance, so the vector separates speakers weakly. Material: `docs/superpowers/research/2026-10-05-enrollment-duration/`.
+**What this supports:** up to 90 s the vector stays inside the same-speaker window-to-window variation. **What it does not show:** (a) only 10 speakers of read speech from one source; (b) prefixes overlap, so the dip at 12 s is partly a bias, and the Common Voice run concatenated clips of one `client_id` that may come from different sessions and microphones, which is exactly what D7 forbids in the product; (c) it measures vector stability, **not** denoiser quality (SI-SDR/TSOS with the conditioned pDFNet3); (d) the same-speaker floor is already 54% of the between-speaker distance, so the vector separates speakers weakly. Material: `docs/superpowers/research/2026-10-05-enrollment-duration/`.
 
 Hence the engineering cap in §6.2 is **90 s of speech, the measured range**, not a quality limit.
 
@@ -41,12 +42,13 @@ Hence the engineering cap in §6.2 is **90 s of speech, the measured range**, no
 Two service-side units, separated so each can be tested alone.
 
 ### 4.1 Sample ingestion
-`PCM 48 kHz mono f32 (memory only)` → base DFNet3 denoise (neutral conditioning, fresh state per sample, latency compensated: the first `algorithmic_latency_samples` output samples are dropped and the tail is flushed with zeros) → quality measures (peak, RMS dBFS, active-speech fraction) → reject clipping (`peak ≥ 0.99`) or too quiet (`RMS < −40 dBFS`) → write the denoised **WAV, 16-bit, 48 kHz, mono** (§8) → record the `VoiceSample` (no embedding) → zero the raw PCM → reply with the quality numbers.
+`PCM 48 kHz mono f32 (memory only)` → base DFNet3 denoise (neutral conditioning, fresh state per sample, latency compensated: the first `algorithmic_latency_samples` output samples are dropped and the tail is flushed with zeros) → quality measures (peak, RMS dBFS, active-speech fraction) → reject clipping (`peak ≥ 0.99`) or too quiet (`RMS < −40 dBFS`) → write the denoised **WAV, 16-bit, 48 kHz, mono** (§8) → record the `VoiceSample` (no embedding) together with its **capture device** (display label and a stable hash of the device identifier, both sent by the app, plus the capture sample rate) → zero the raw PCM → reply with the quality numbers. The device identity lives in the sample records (`voice_samples.json`), not in the `VoiceProfile`, so the profile format, its version and its integrity hash do not change.
 
 ### 4.2 Profile builder
 Triggered by `BuildVoiceProfile`. Reads the active samples' WAVs in chronological order, then:
 
-1. **Trim and join:** frame energy VAD (20 ms frames, threshold `max(−50 dBFS, loudest − 30 dB)`, the same rule as `validate_enrollment_audio`); keep each active segment with a 40 ms margin; join segments with a 20 ms linear crossfade.
+0. **Select one device group (D7):** among the active samples, take the capture device of the **most recent** sample and use only the samples of that device. Samples of other devices stay in the gallery, are flagged `other_microphone` (not used) and are listed to the user; the build fails with `ENROLL_TOO_LITTLE_SPEECH` and a "record more with this microphone" message if the group has under 6 s of speech.
+1. **Trim and join:** frame energy VAD (20 ms frames, threshold `max(−50 dBFS, loudest − 30 dB)`, the same rule as `validate_enrollment_audio`); keep each active segment with a 40 ms margin; **match the active-speech RMS of every sample to the group median (gain limited to ±12 dB)** so there is no level step at the joins; join segments with a 20 ms linear crossfade.
 2. **Cap:** if the speech exceeds 90 s, keep the samples with the highest active-speech fraction (then lowest peak) until 90 s; otherwise keep all, chronologically.
 3. **EQ:** `estimate_microphone_eq` on the joined 48 kHz audio (D5).
 4. **Resample 48 → 16 kHz** (integer factor 3): reuse an existing resampler if the codebase has one (first task of the plan checks); otherwise a polyphase low-pass FIR in `crates/model`, no new dependency, with a frequency-response test.
@@ -61,10 +63,10 @@ Triggered by `BuildVoiceProfile`. Reads the active samples' WAVs in chronologica
 
 New or changed commands (`crates/ipc/src/protocol.rs`), all payload sizes capped:
 
-- `AddVoiceSample { name, pcm_f32_le_b64, sample_rate }` — **changed**: carries audio (48 kHz mono) instead of an embedding. Reply: `{ job_id }`. Final status carries the sample id and quality numbers.
+- `AddVoiceSample { name, pcm_f32_le_b64, sample_rate, device_label, device_id_hash }` — **changed**: carries audio (48 kHz mono) and the capture device instead of an embedding. Reply: `{ job_id }`. Final status carries the sample id and quality numbers.
 - `BuildVoiceProfile { name }` — **new**. Reply: `{ job_id }`.
 - `GetEnrollmentJob { job_id }` — **new**: `state` (`running` | `done` | `failed`), `stage` (`denoise` | `trim` | `eq` | `enroll` | `apply`), fixed error code on failure.
-- `ListVoiceSamples` — unchanged shape; `audio_path` now points to the saved WAV; samples without a WAV are flagged `needs_reenroll`.
+- `ListVoiceSamples` — `audio_path` now points to the saved WAV; each item adds `device_label` and `used_in_profile`; samples without a WAV are flagged `needs_reenroll`, samples of a non-selected device `other_microphone`.
 - `DeleteVoiceSample` — unchanged; also removes the WAV. A rebuild is triggered by the client.
 - `GetVoiceProfileEmbedding`, `profile.bin` — **deprecated** (they exposed the fake embedding). Kept returning an error until removed.
 
@@ -73,7 +75,7 @@ Error codes are fixed strings (no free text, no payload echo), e.g. `ENROLL_CLIP
 ## 6. Changes to existing code
 
 ### 6.1 App (`crates/app-tauri`)
-- Capture: raw physical device only, 48 kHz mono; drop the fallback to an unconstrained `getUserMedia`; if the physical device cannot be opened, show an error. Send PCM, not a `blob:` URL.
+- Capture: raw physical device only, 48 kHz mono; drop the fallback to an unconstrained `getUserMedia`; if the physical device cannot be opened, show an error. Send PCM, not a `blob:` URL, together with the device label and a stable hash of the device id. Show which microphone each sample used and which samples are not used in the profile.
 - `handleActivateProfile`: stop writing `neural_eq_calibrated: true` and `gain_boost_db: 1.8`; those fields come from the service result. Stop sending the local status as `profile_json`.
 - Show per-sample quality numbers and the build/apply state (§9).
 
@@ -122,3 +124,4 @@ The Stage 1 semantics stand: "applied" means applied in the service backend; the
 6. The IPC loop is never blocked by denoise or enrollment.
 7. A failed build leaves the previous profile and the stored state unchanged.
 8. Nothing in the code or UI calls the result product end-to-end or production-approved.
+9. A profile is built only from samples of one capture device; samples of other devices are visibly excluded, and the level step between joined samples is removed.
