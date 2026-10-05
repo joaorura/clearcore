@@ -7,7 +7,7 @@ use crate::error::CudaError;
 pub type CUresult = c_int;
 pub type CUdevice = c_int;
 pub type CUcontext = *mut c_void;
-pub type CUdeviceptr = libc::uintptr_t;
+pub type CUdeviceptr = usize;
 pub type CUstream = *mut c_void;
 
 pub const CUDA_SUCCESS: CUresult = 0;

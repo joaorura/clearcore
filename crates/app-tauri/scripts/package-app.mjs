@@ -16,6 +16,7 @@ const targetRelease = rustTriple && fs.existsSync(path.resolve(repoRoot, 'target
   ? path.resolve(repoRoot, 'target', rustTriple, 'release')
   : path.resolve(repoRoot, 'target', 'release');
 const electronDist = path.resolve(appDir, 'node_modules', 'electron', 'dist');
+const releaseDir = path.resolve(repoRoot, 'release');
 
 const bundleName = `Clearcore-${platform}-${arch}`;
 const bundleDir = path.join(releaseDir, bundleName);

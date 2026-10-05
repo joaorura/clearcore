@@ -324,6 +324,13 @@ jobs:
           toolchain: 1.90.0
           targets: aarch64-pc-windows-msvc
 
+      - name: Setup Clang for ARM64 Cross-compilation
+        shell: powershell
+        run: |
+          "CC=clang" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CXX=clang++" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "AR=llvm-ar" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Build Native Rust Binaries for Windows ARM64
         shell: powershell
         run: cargo build --release --target aarch64-pc-windows-msvc -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
