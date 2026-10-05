@@ -35,3 +35,18 @@ export function stepAfterSubmit(
   if (outcome.kind !== 'done') return prev;
   return { duration: outcome.quality?.speechSeconds ?? captured.durationSec, captured, sampleId };
 }
+
+/**
+ * Re-recording a guided step: the step's old sample is deleted in the service only AFTER the new
+ * one was accepted. If the new one fails, the old one stays (returns null).
+ */
+export function replacedSampleToDelete(
+  prev: Pick<StepTake, 'sampleId'> | undefined,
+  outcome: JobOutcome,
+  newSampleId: string | null,
+): string | null {
+  if (outcome.kind !== 'done') return null;
+  const old = prev?.sampleId;
+  if (typeof old !== 'string' || old.length === 0 || old === newSampleId) return null;
+  return old;
+}

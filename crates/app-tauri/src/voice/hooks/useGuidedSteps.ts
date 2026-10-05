@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { GUIDED_STEP_COUNT, STEP_QUESTIONS, stepAfterSubmit, type CompletedSteps } from './guidedSteps';
+import { useEffect, useRef, useState } from 'react';
+import { GUIDED_STEP_COUNT, STEP_QUESTIONS, replacedSampleToDelete, stepAfterSubmit, type CompletedSteps } from './guidedSteps';
 import type { EnrollmentRecorder } from './useEnrollmentRecorder';
 import type { Translate } from './voiceProfileLogic';
 
@@ -24,11 +24,16 @@ export function useGuidedSteps(opts: {
   recorder: EnrollmentRecorder;
   t: Translate;
   flash: (message: string, ms: number) => void;
+  /** Deletes a sample in the service (the old take of a step recorded again). */
+  deleteReplacedSample: (sampleId: string) => Promise<unknown>;
 }): GuidedSteps {
-  const { recorder, t, flash } = opts;
+  const { recorder, t, flash, deleteReplacedSample } = opts;
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [isReadingMode, setIsReadingMode] = useState<boolean>(false);
   const [completedSteps, setCompletedSteps] = useState<CompletedSteps>({});
+  // Read at the end of a recording (the limit timer holds an older closure).
+  const completedRef = useRef<CompletedSteps>(completedSteps);
+  completedRef.current = completedSteps;
 
   useEffect(() => {
     try {
@@ -42,13 +47,17 @@ export function useGuidedSteps(opts: {
     const captured = await recorder.stopCapture();
     if (!captured) return;
 
+    const previous = completedRef.current[step];
     const { outcome, sampleId } = await recorder.submitSample(captured, t(STEP_QUESTIONS[step - 1].categoryKey), 'enroll');
+    // A failed take keeps the step (and its sample in the service) as it was.
     if (outcome.kind !== 'done') return;
     setCompletedSteps((prev) => {
       const take = stepAfterSubmit(prev[step], outcome, sampleId, captured);
       return take ? { ...prev, [step]: take } : prev;
     });
     flash(t('voiceProfile.sampleCompleted'), 3500);
+    const replaced = replacedSampleToDelete(previous, outcome, sampleId);
+    if (replaced !== null) await deleteReplacedSample(replaced);
   };
 
   // Up to MAX_RECORD_SECONDS with manual stop; the limit finishes the step by itself.
@@ -58,12 +67,8 @@ export function useGuidedSteps(opts: {
     });
   };
 
+  // The step keeps its current take until the new one is accepted (then the old sample is deleted).
   const redoStep = (step: number) => {
-    setCompletedSteps((prev) => {
-      const copy = { ...prev };
-      delete copy[step];
-      return copy;
-    });
     void startStep(step);
   };
 
