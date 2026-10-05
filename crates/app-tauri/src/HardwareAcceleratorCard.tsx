@@ -17,7 +17,6 @@ export const HardwareAcceleratorCard: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedHelpBackend, setSelectedHelpBackend] = useState<HardwareBackendItem | null>(null);
   const [selectedOsTab, setSelectedOsTab] = useState<'ubuntu' | 'fedora' | 'arch' | 'python' | 'windows'>('ubuntu');
-  const [copied, setCopied] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -92,10 +91,8 @@ export const HardwareAcceleratorCard: React.FC = () => {
         document.execCommand('copy');
         document.body.removeChild(textarea);
       }
-      setCopied(true);
       if (key) setCopiedKey(key);
       setTimeout(() => {
-        setCopied(false);
         setCopiedKey(null);
       }, 2500);
     } catch (err) {

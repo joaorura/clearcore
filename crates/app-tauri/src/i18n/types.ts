@@ -177,6 +177,16 @@ export interface Translations {
     autoRecommend: string;
     autoResolvedCurrent: string;
     refreshBtn: string;
+    librarySearchedTitle: string;
+    librarySearchedDesc: string;
+    officialDocsTitle: string;
+    officialDocsDesc: string;
+    openDocLink: string;
+    diagnosticGuideTitle: string;
+    diagnosticGuideDesc: string;
+    nativeCommandsTitle: string;
+    copyCommandShort: string;
+    recheckBtn: string;
     refreshingBtn: string;
   };
   voiceProfile: {

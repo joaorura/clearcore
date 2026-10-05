@@ -243,6 +243,18 @@ const INITIAL_CALL_TAKES: CallSuggestionTake[] = [
   },
 ];
 
+export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
+  const r = (res ?? {}) as Partial<VoiceProfileStatus> & { profile?: Partial<VoiceProfileStatus> };
+  const src = r.profile ?? r;
+  return {
+    is_enrolled: Boolean(src.is_enrolled),
+    active_samples_count: src.active_samples_count ?? 0,
+    embedding_dim: src.embedding_dim ?? 0,
+    neural_eq_calibrated: Boolean(src.neural_eq_calibrated),
+    gain_boost_db: src.gain_boost_db,
+  };
+}
+
 export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   selectedInputId,
   virtualMicPresent: _virtualMicPresent,
@@ -395,9 +407,9 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
         };
 
         try {
-          const profileRes = await invokeBridge<{ success?: boolean; profile?: VoiceProfileStatus; is_enrolled?: boolean } | VoiceProfileStatus>('get_voice_profile');
+          const profileRes = await invokeBridge<unknown>('get_voice_profile');
           if (profileRes && typeof profileRes === 'object') {
-            const prof = ('profile' in profileRes && profileRes.profile) ? profileRes.profile : profileRes;
+            const prof = normalizeVoiceProfileStatus(profileRes);
             if (prof && typeof prof.is_enrolled === 'boolean') {
               initialProfile = {
                 ...initialProfile,

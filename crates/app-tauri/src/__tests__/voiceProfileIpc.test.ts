@@ -273,3 +273,20 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
     expect(delRes.success).toBe(true);
   });
 });
+
+import { normalizeVoiceProfileStatus } from '../VoiceProfileCard';
+
+describe('normalizeVoiceProfileStatus', () => {
+  const base = { is_enrolled: true, active_samples_count: 3, embedding_dim: 192, neural_eq_calibrated: false };
+  it('reads a flat status', () => {
+    expect(normalizeVoiceProfileStatus(base).active_samples_count).toBe(3);
+  });
+  it('reads a nested-only envelope', () => {
+    expect(normalizeVoiceProfileStatus({ success: true, profile: base }).active_samples_count).toBe(3);
+  });
+  it('defaults safely for an empty envelope', () => {
+    const s = normalizeVoiceProfileStatus({ success: false });
+    expect(s.is_enrolled).toBe(false);
+    expect(s.active_samples_count).toBe(0);
+  });
+});
