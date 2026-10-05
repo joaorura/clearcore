@@ -80,9 +80,69 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
     "can_restart": true,
     "mode": "Active",
     "crash_count_15m": 0,
-    "total_crashes": 0
+    "total_crashes": 0,
+    "active_voice_profile_id": "spk-1",
+    "stored_voice_profile_id": "spk-1",
+    "voice_profile_selected": true,
+    "is_voice_profile_active": true,
+    "voice_profile_error": null
   }
   ```
+  (The payload also carries preset, backend and voice-sample fields, omitted here.)
+
+  Voice profile fields:
+
+  | Field | Meaning |
+  | :--- | :--- |
+  | `active_voice_profile_id` | Id of the profile **applied** on the service's backend, or `null`. Since this change it no longer means "stored on disk": a stored profile the backend rejected is reported as `null`. |
+  | `stored_voice_profile_id` | Id of the profile persisted on disk (the one reloaded at startup and after a backend swap), or `null`. |
+  | `voice_profile_selected` | `true` when `stored_voice_profile_id` is not `null`. |
+  | `is_voice_profile_active` | `true` when `active_voice_profile_id` is not `null`. |
+  | `voice_profile_error` | Generic, constant reason the stored profile is not applied (backend rejected it, file missing/unreadable, rollback failed), or `null`. Never carries profile data or backend error text. |
+
+  Scope: "applied" means applied on the **service's own** backend. The packaged audio path
+  (`filter-capi` / helper / virtual microphone) does not use the profile yet (stage 2). The
+  fields are reported in every mode, including `Mute`, `Bypass` and `TerminalSafeState`.
+
+### `SetVoiceProfile`
+Applies a voice profile to the service backend, then persists it. The operation is transactional:
+the profile is verified, applied to the backend and saved; if saving fails the backend returns to
+the previous profile.
+
+- **Request:**
+  ```json
+  {"version":"realtime-noise.v1","request_id":"c6","command":{"SetVoiceProfile":{"profile_json":"{...}"}},"payload":{}}
+  ```
+- **Response Payload:**
+  ```json
+  {"active_voice_profile_id": "spk-1"}
+  ```
+- **Errors:**
+
+  | Status | Code | Cause |
+  | :--- | :--- | :--- |
+  | `InvalidCommand` | `INVALID_COMMAND` | `profile_json` is not a valid voice profile (the message never echoes the input). |
+  | `InternalError` | `NO_PROFILE_STORE` | The service has no profile storage configured. |
+  | `InternalError` | `VOICE_PROFILE_NOT_APPLICABLE` | The active backend cannot apply this profile; nothing is persisted. |
+  | `InternalError` | `INTERNAL_ERROR` | Persisting failed (`Failed to persist voice profile`); the backend was rolled back. |
+
+### `ClearVoiceProfile`
+Returns the backend to the neutral voice and removes the stored profile. Idempotent.
+
+- **Request:**
+  ```json
+  {"version":"realtime-noise.v1","request_id":"c7","command":"ClearVoiceProfile","payload":{}}
+  ```
+- **Response Payload:**
+  ```json
+  {"active_voice_profile_id": null}
+  ```
+- **Errors:**
+
+  | Status | Code | Cause |
+  | :--- | :--- | :--- |
+  | `InternalError` | `VOICE_PROFILE_CLEAR_FAILED` | The backend could not go neutral; disk and reported state are left untouched. |
+  | `InternalError` | `INTERNAL_ERROR` | Removing the stored file failed; the backend was restored. |
 
 ### `SetMode`
 Changes active suppression mode: `"Active"`, `"Bypass"`, or `"Mute"`.

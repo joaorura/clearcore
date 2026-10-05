@@ -9,6 +9,13 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 
 ## [Unreleased]
 
+### Added
+- Voice profile activation (development-integrated): `InferenceBackend` gains `set_voice_profile`, backends that cannot condition on a profile reject it explicitly, and the service applies `SetVoiceProfile` / `ClearVoiceProfile` transactionally (verify, apply to the backend, persist; rollback on failure) and re-applies the stored profile on every backend selection. The packaged virtual microphone (`filter-capi` / helper) does not apply the profile yet.
+
+### Fixed
+- `GetStatus` now reports the truth about voice profiles: `active_voice_profile_id` / `is_voice_profile_active` mean "applied on the service backend", while `stored_voice_profile_id` / `voice_profile_selected` mean "persisted on disk", with a generic `voice_profile_error` when they differ. The error field never carries backend error text or profile data.
+- The app-tauri TypeScript build is repaired after the voice profile changes.
+
 ### Changed
 - Licensing: the whole project becomes non-commercial. Source code is now under the PolyForm Noncommercial License 1.0.0; model weights and documentation authored by ClearCore are under CC BY-NC 4.0. Releases up to `v0.1.0-beta.2` stay under the licenses they were published with (Apache-2.0 / MIT OR Apache-2.0). Third-party components keep their own licenses.
 
