@@ -5,25 +5,30 @@ import { shouldOpenGalleryOnError, type JobOutcome, type Translate } from './voi
 
 /** Where a job was started; its feedback is shown there (same ids as the card tabs). */
 export type JobOrigin = 'enroll' | 'gallery' | 'calls' | 'profile';
+/** What the job does: store a sample, build the profile, or approve a call take. */
+export type JobKind = 'sample' | 'build' | 'take';
+/** The running job, or the last one whose result is still shown. */
+export interface JobSource { origin: JobOrigin; kind: JobKind }
 
 export interface JobFeedback {
   currentJob: EnrollmentJob | null;
   jobBusy: boolean;
   enrollErrorText: string | null;
   budgetError: { remainingSeconds: number | null } | null;
-  origin: JobOrigin | null;
+  source: JobSource | null;
   setCurrentJob: (job: EnrollmentJob | null) => void;
   setJobBusy: (busy: boolean) => void;
   setEnrollErrorText: (text: string | null) => void;
   setBudgetError: (b: { remainingSeconds: number | null } | null) => void;
-  /** Clears the previous feedback and marks a job as running for `origin`. */
-  begin: (origin: JobOrigin) => void;
+  /** Clears the previous feedback and marks a job of `kind` as running, started on `origin`. */
+  begin: (origin: JobOrigin, kind?: JobKind) => void;
   /** Clears error and job (e.g. when the voluntary sample modal opens or closes). */
   clearMessages: () => void;
   /** Applies a non-done outcome; the budget error calls `onBudgetError` (the card opens the gallery). */
   applyOutcome: (outcome: JobOutcome) => void;
   /** Shows the error of a request that threw (timeout or unreachable service). */
   failWith: (err: unknown) => void;
+  /** Error of a call take approval (`kind: 'take'`). */
   showError: (origin: JobOrigin, text: string) => void;
   showBudgetError: (remainingSeconds: number | null) => void;
 }
@@ -34,7 +39,7 @@ export function useJobFeedback(t: Translate, labels: EnrollmentLabels, onBudgetE
   const [jobBusy, setJobBusy] = useState<boolean>(false);
   const [enrollErrorText, setEnrollErrorText] = useState<string | null>(null);
   const [budgetError, setBudgetError] = useState<{ remainingSeconds: number | null } | null>(null);
-  const [origin, setOrigin] = useState<JobOrigin | null>(null);
+  const [source, setSource] = useState<JobSource | null>(null);
 
   const showBudgetError = (remainingSeconds: number | null) => {
     setBudgetError({ remainingSeconds });
@@ -42,13 +47,13 @@ export function useJobFeedback(t: Translate, labels: EnrollmentLabels, onBudgetE
   };
 
   return {
-    currentJob, jobBusy, enrollErrorText, budgetError, origin,
+    currentJob, jobBusy, enrollErrorText, budgetError, source,
     setCurrentJob, setJobBusy, setEnrollErrorText, setBudgetError,
-    begin: (o) => {
+    begin: (o, kind = 'sample') => {
       setBudgetError(null);
       setEnrollErrorText(null);
       setCurrentJob(null);
-      setOrigin(o);
+      setSource({ origin: o, kind });
       setJobBusy(true);
     },
     clearMessages: () => {
@@ -72,7 +77,7 @@ export function useJobFeedback(t: Translate, labels: EnrollmentLabels, onBudgetE
       );
     },
     showError: (o, text) => {
-      setOrigin(o);
+      setSource({ origin: o, kind: 'take' });
       setEnrollErrorText(text);
     },
     showBudgetError,

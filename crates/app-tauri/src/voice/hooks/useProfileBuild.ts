@@ -11,14 +11,17 @@ import {
   normalizeVoiceProfileStatus,
   type Translate,
 } from './voiceProfileLogic';
-import type { JobFeedback } from './useJobFeedback';
+import type { JobFeedback, JobOrigin } from './useJobFeedback';
 
 export interface ProfileBuild {
   profileStatus: VoiceProfileStatus;
   /** Reads the service status once at start (neutral when the service is unreachable). */
   loadInitialStatus: (loadedSamplesCount: number) => Promise<VoiceProfileStatus>;
-  /** Builds the profile in the service and follows the job; resolves true when it finished. */
-  buildProfile: () => Promise<boolean>;
+  /**
+   * Builds the profile in the service and follows the job; resolves true when it finished.
+   * `origin` is the tab whose button was clicked: progress and errors show there (and on Profile).
+   */
+  buildProfile: (origin: Extract<JobOrigin, 'enroll' | 'profile'>) => Promise<boolean>;
 }
 
 /**
@@ -55,8 +58,8 @@ export function useProfileBuild(opts: {
     return initialProfile;
   };
 
-  const runBuild = async (): Promise<boolean> => {
-    jobs.begin('profile');
+  const runBuild = async (origin: Extract<JobOrigin, 'enroll' | 'profile'>): Promise<boolean> => {
+    jobs.begin(origin, 'build');
     let done = false;
     try {
       const start = await buildProfile(t('voiceProfile.defaultProfileName'));

@@ -21,11 +21,12 @@ import { profileStatusLabel } from './voice/panels/profileStatusLabel';
 import {
   browserStorage,
   loadVoiceTab,
+  jobFeedbackFor,
   parseVoiceTab,
+  resolveTabChange,
   saveVoiceTab,
-  showsJobFeedback,
-  tabAfterError,
   voiceTabBadges,
+  type TabChange,
   type VoiceTabId,
 } from './voice/panels/voiceTabs';
 import { Tabs, type TabDef } from './voice/Tabs';
@@ -70,16 +71,16 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
   // Active tab: a UI preference kept in localStorage (validated against the tab ids).
   const [activeTab, setActiveTab] = useState<VoiceTabId>(() => loadVoiceTab(browserStorage()));
-  const selectTab = (id: string) => {
-    const tab = parseVoiceTab(id);
+  const changeTab = (change: TabChange) => {
+    const { tab, persist } = resolveTabChange(activeTab, change);
     setActiveTab(tab);
-    saveVoiceTab(tab, browserStorage());
+    if (persist) saveVoiceTab(tab, browserStorage());
   };
 
   const labels = useMemo(() => buildEnrollmentLabels(t), [t]);
   const { message: feedbackMessage, flash } = useFlashMessage();
   // ENROLL_BUDGET_EXCEEDED opens the gallery, where the delete action is highlighted.
-  const jobs = useJobFeedback(t, labels, () => selectTab(tabAfterError(activeTab, 'ENROLL_BUDGET_EXCEEDED')));
+  const jobs = useJobFeedback(t, labels, () => changeTab({ by: 'budget-error' }));
   const { jobBusy, currentJob, enrollErrorText, budgetError } = jobs;
   const { sampleList, samples, samplesLoadFailed, deletingId, refreshSamples, removeSample } = useVoiceSamples();
   const rec = useEnrollmentRecorder({ selectedInputId, inputDevices, t, jobs, refreshSamples });
@@ -106,8 +107,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     void initVoiceData();
   }, [refreshSamples, refreshCallTakes]);
 
-  const handleBuildProfile = async () => {
-    if (await profile.buildProfile()) flash(t('voiceProfile.profileActivatedSuccess'), 5000);
+  const handleBuildProfile = async (origin: 'enroll' | 'profile') => {
+    if (await profile.buildProfile(origin)) flash(t('voiceProfile.profileActivatedSuccess'), 5000);
   };
 
   const handleDeleteSample = async (id: string) => {
@@ -132,7 +133,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
   const status = profileStatusLabel(profileStatus, t);
   const feedbackView = { jobBusy, currentJob, enrollErrorText };
-  const feedbackFor = (tab: VoiceTabId) => (showsJobFeedback(tab, jobs.origin) ? feedbackView : null);
+  const feedbackFor = (tab: VoiceTabId) => jobFeedbackFor(tab, jobs.source, feedbackView);
   const badges = voiceTabBadges(samples.length, callTakes.length);
   // While the microphone records, the other tabs stay closed so the stop button stays in view.
   const tabs: TabDef[] = [
@@ -166,7 +167,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             locale={locale}
             takes={callTakes}
             playingAudioId={playingAudioId}
-            errorText={jobs.origin === 'calls' ? enrollErrorText : null}
+            errorText={feedbackFor('calls')?.enrollErrorText ?? null}
             onPlay={playback.playUrl}
             onApprove={(take) => void handleApproveCallTake(take)}
             onDismiss={(takeId) => void handleDismissCallTake(takeId)}
@@ -183,7 +184,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             canBuild={samples.length > 0}
             busy={jobBusy || isRecording}
             feedback={feedbackFor('profile')}
-            onBuildProfile={() => void handleBuildProfile()}
+            onBuildProfile={() => void handleBuildProfile('profile')}
           />
         );
       default:
@@ -213,7 +214,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
               const c = completedSteps[step]?.captured;
               if (c) playCaptured(`step-${step}`, c);
             }}
-            onBuildProfile={() => void handleBuildProfile()}
+            onBuildProfile={() => void handleBuildProfile('enroll')}
             onResetEnrollment={steps.resetSteps}
           />
         );
@@ -235,7 +236,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
       {feedbackMessage && <div className="feedback-banner success-banner">{feedbackMessage}</div>}
 
-      <Tabs tabs={tabs} activeId={activeTab} onChange={selectTab} renderPanel={renderPanel} ariaLabel={t('voiceProfile.tabsAriaLabel')} idPrefix="voice-profile" />
+      <Tabs tabs={tabs} activeId={activeTab} onChange={(id) => changeTab({ by: 'user', id })} renderPanel={renderPanel} ariaLabel={t('voiceProfile.tabsAriaLabel')} idPrefix="voice-profile" />
 
       {isModalOpen && (
         <AddSampleModal

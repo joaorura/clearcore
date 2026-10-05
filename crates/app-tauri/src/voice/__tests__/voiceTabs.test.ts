@@ -7,7 +7,8 @@ import {
   saveVoiceTab,
   tabAfterError,
   voiceTabBadges,
-  showsJobFeedback,
+  jobFeedbackFor,
+  resolveTabChange,
 } from '../panels/voiceTabs';
 
 describe('persisted voice tab', () => {
@@ -55,12 +56,35 @@ describe('voiceTabBadges', () => {
   });
 });
 
-describe('showsJobFeedback', () => {
-  it('shows job feedback only in the tab that started the job', () => {
-    expect(showsJobFeedback('enroll', 'enroll')).toBe(true);
-    expect(showsJobFeedback('profile', 'profile')).toBe(true);
-    expect(showsJobFeedback('enroll', 'profile')).toBe(false);
-    expect(showsJobFeedback('gallery', null)).toBe(false);
+describe('jobFeedbackFor', () => {
+  const view = { jobBusy: false, currentJob: null, enrollErrorText: 'x' };
+  it('a profile build started on Enrollment shows on Enrollment and on Profile only', () => {
+    const src = { origin: 'enroll', kind: 'build' } as const;
+    expect(jobFeedbackFor('enroll', src, view)).toBe(view);
+    expect(jobFeedbackFor('profile', src, view)).toBe(view);
+    expect(jobFeedbackFor('gallery', src, view)).toBeNull();
+    expect(jobFeedbackFor('calls', src, view)).toBeNull();
+  });
+  it('a profile build started on Profile shows on Profile only', () => {
+    const src = { origin: 'profile', kind: 'build' } as const;
+    expect(jobFeedbackFor('profile', src, view)).toBe(view);
+    expect(jobFeedbackFor('enroll', src, view)).toBeNull();
+  });
+  it('a sample job shows only where it started; nothing without a job', () => {
+    expect(jobFeedbackFor('enroll', { origin: 'enroll', kind: 'sample' }, view)).toBe(view);
+    expect(jobFeedbackFor('profile', { origin: 'enroll', kind: 'sample' }, view)).toBeNull();
+    expect(jobFeedbackFor('gallery', { origin: 'gallery', kind: 'sample' }, view)).toBe(view);
+    for (const tab of VOICE_TAB_IDS) expect(jobFeedbackFor(tab, null, view)).toBeNull();
+  });
+});
+
+describe('resolveTabChange', () => {
+  it('a user choice is validated and persisted', () => {
+    expect(resolveTabChange('enroll', { by: 'user', id: 'calls' })).toEqual({ tab: 'calls', persist: true });
+    expect(resolveTabChange('calls', { by: 'user', id: 'bogus' })).toEqual({ tab: 'enroll', persist: true });
+  });
+  it('the automatic gallery switch on the budget error is not persisted', () => {
+    for (const id of VOICE_TAB_IDS) expect(resolveTabChange(id, { by: 'budget-error' })).toEqual({ tab: 'gallery', persist: false });
   });
 });
 

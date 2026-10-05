@@ -1,6 +1,6 @@
 import type { EnrollErrorCode } from '../enrollmentTypes';
 import { isBudgetError } from '../enrollmentErrors';
-import type { JobOrigin } from '../hooks/useJobFeedback';
+import type { JobOrigin, JobSource } from '../hooks/useJobFeedback';
 
 export const VOICE_TAB_IDS = ['enroll', 'gallery', 'calls', 'profile'] as const satisfies ReadonlyArray<JobOrigin>;
 export type VoiceTabId = (typeof VOICE_TAB_IDS)[number];
@@ -48,7 +48,23 @@ export function voiceTabBadges(samplesCount: number, pendingTakes: number): { ga
   return { gallery: samplesCount, calls: pendingTakes > 0 ? pendingTakes : undefined };
 }
 
-/** Job feedback is shown in the tab whose action started the job. */
-export function showsJobFeedback(tab: VoiceTabId, origin: JobOrigin | null): boolean {
-  return origin === tab;
+/**
+ * Job feedback for one tab: shown on the tab whose action started the job; a profile build is
+ * also shown on Profile, wherever it was started.
+ */
+export function jobFeedbackFor<V>(tab: VoiceTabId, source: JobSource | null, view: V): V | null {
+  if (!source) return null;
+  if (source.origin === tab) return view;
+  return source.kind === 'build' && tab === 'profile' ? view : null;
+}
+
+export type TabChange = { by: 'user'; id: string } | { by: 'budget-error' };
+
+/**
+ * Only a tab the user chose is persisted; the automatic switch to the gallery on
+ * ENROLL_BUDGET_EXCEEDED changes the tab for now and leaves the stored preference alone.
+ */
+export function resolveTabChange(current: VoiceTabId, change: TabChange): { tab: VoiceTabId; persist: boolean } {
+  if (change.by === 'user') return { tab: parseVoiceTab(change.id), persist: true };
+  return { tab: tabAfterError(current, 'ENROLL_BUDGET_EXCEEDED'), persist: false };
 }
