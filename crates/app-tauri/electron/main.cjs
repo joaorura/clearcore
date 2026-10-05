@@ -11,6 +11,7 @@ const { resolveBackendSelection } = require('./backend-selection.cjs');
 const updater = require('./updater.cjs');
 const voiceProfileStore = require('./voice-profile-store.cjs');
 const voiceProfileMerge = require('./voice-profile-merge.cjs');
+const enrollmentIpc = require('./enrollment-ipc.cjs');
 
 // ClearCore Runtime Application Version
 const APP_VERSION = '0.1.0-beta.1';
@@ -1655,7 +1656,7 @@ ipcMain.handle('get_voice_profile', () => readMergedVoiceProfile());
 ipcMain.handle('get_voice_profile_status', () => readMergedVoiceProfile());
 
 // Voice enrollment channels (enrollment_add_sample, enrollment_list_samples, ...).
-require('./enrollment-ipc.cjs').registerEnrollmentHandlers(ipcMain, { sendIpcRequest });
+enrollmentIpc.registerEnrollmentHandlers(ipcMain, { sendIpcRequest });
 
 ipcMain.handle('get_call_takes', async () => {
   // Cache is only a fallback while the service is unreachable; the service is the source of truth.
@@ -1689,7 +1690,7 @@ ipcMain.handle('approve_call_take', async (_event, args) => {
     // No free-form message is returned: the renderer maps errorCode to its own label.
     await sendIpcRequest({ ApproveIntakeSuggestion: { id, name } }, {}, 60000);
   } catch (e) {
-    return { errorCode: require('./enrollment-ipc.cjs').classifyEnrollError(e) };
+    return { errorCode: enrollmentIpc.classifyEnrollError(e) };
   }
   return { success: true, ...voiceProfileStore.approveCallTake(id) };
 });

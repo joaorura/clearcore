@@ -67,10 +67,6 @@ function getVoiceProfilePath(baseDir) {
   return path.join(baseDir || getClearcoreStorageDir(), 'voice_profile.json');
 }
 
-function getVoiceSamplesPath(baseDir) {
-  return path.join(baseDir || getClearcoreStorageDir(), 'voice_samples.json');
-}
-
 function getCallTakesPath(baseDir) {
   return path.join(baseDir || getClearcoreStorageDir(), 'call_takes.json');
 }
@@ -99,7 +95,18 @@ function writeJsonFile(filePath, data) {
   }
 }
 
+// Legacy file written by the old Electron layer with fabricated samples; the service owns samples now.
+function purgeLegacyVoiceSamples(baseDir) {
+  try {
+    const legacy = path.join(baseDir || getClearcoreStorageDir(), 'voice_samples.json');
+    if (fs.existsSync(legacy)) fs.unlinkSync(legacy);
+  } catch (err) {
+    console.warn('[VoiceProfileStore] Could not remove legacy voice_samples.json:', err.message);
+  }
+}
+
 function readVoiceProfile(baseDir) {
+  purgeLegacyVoiceSamples(baseDir);
   const current = readJsonFile(getVoiceProfilePath(baseDir), DEFAULT_PROFILE);
   return {
     ...DEFAULT_PROFILE,
@@ -115,11 +122,6 @@ function writeVoiceProfile(profileUpdates = {}, baseDir) {
   };
   writeJsonFile(getVoiceProfilePath(baseDir), updated);
   return updated;
-}
-
-function readVoiceSamples(baseDir) {
-  const samples = readJsonFile(getVoiceSamplesPath(baseDir), []);
-  return Array.isArray(samples) ? samples : [];
 }
 
 function readCallTakes(baseDir) {
@@ -151,11 +153,9 @@ module.exports = {
   DEFAULT_PROFILE,
   getClearcoreStorageDir,
   getVoiceProfilePath,
-  getVoiceSamplesPath,
   getCallTakesPath,
   readVoiceProfile,
   writeVoiceProfile,
-  readVoiceSamples,
   readCallTakes,
   writeCallTakes,
   approveCallTake,

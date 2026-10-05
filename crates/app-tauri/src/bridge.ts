@@ -52,9 +52,6 @@ export interface ClearcoreApi {
   getVoiceProfile?: () => Promise<VoiceProfileStatus & { success: boolean; profile: VoiceProfileStatus }>;
   getVoiceProfileStatus?: () => Promise<VoiceProfileStatus>;
   setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean; profile?: VoiceProfileStatus }>;
-  getVoiceSamples?: () => Promise<{ success: boolean; samples: VoiceSample[] } | VoiceSample[]>;
-  addVoiceSample?: (sample: unknown) => Promise<{ success: boolean; sample?: VoiceSample; samples?: VoiceSample[] }>;
-  deleteVoiceSample?: (id: string) => Promise<{ success: boolean; id: string; samples?: VoiceSample[] }>;
   getCallTakes?: () => Promise<{ success: boolean; takes: CallSuggestionTake[] } | CallSuggestionTake[]>;
   approveCallTake?: (id: string, name?: string, take?: unknown) => Promise<{ success: boolean; id: string; sample?: VoiceSample }>;
   dismissCallTake?: (id: string) => Promise<{ success: boolean; id: string; takes?: CallSuggestionTake[] }>;
@@ -142,21 +139,6 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
         return (await api.setVoiceProfile(args?.profile ?? args)) as unknown as T;
       }
     }
-    if (cmd === 'get_voice_samples') {
-      if (typeof api.getVoiceSamples === 'function') {
-        return (await api.getVoiceSamples()) as unknown as T;
-      }
-    }
-    if (cmd === 'add_voice_sample') {
-      if (typeof api.addVoiceSample === 'function') {
-        return (await api.addVoiceSample(args?.sample ?? args)) as unknown as T;
-      }
-    }
-    if (cmd === 'delete_voice_sample') {
-      if (typeof api.deleteVoiceSample === 'function') {
-        return (await api.deleteVoiceSample(String(args?.id ?? ''))) as unknown as T;
-      }
-    }
     if (cmd === 'get_call_takes') {
       if (typeof api.getCallTakes === 'function') {
         return (await api.getCallTakes()) as unknown as T;
@@ -224,7 +206,7 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
   }
   if (cmd === 'get_voice_profile' || cmd === 'get_voice_profile_status') {
     const enrolled = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_profile_enrolled') === 'true' : false;
-    const count = typeof localStorage !== 'undefined' ? Number(localStorage.getItem('clearcore_voice_sample_count') || '0') : 0;
+    const count = 0;
     const profile: VoiceProfileStatus = {
       is_enrolled: enrolled,
       active_samples_count: count,
@@ -233,7 +215,7 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
   }
   if (cmd === 'set_voice_profile') {
     const p = (args?.profile ?? args) as VoiceProfileStatus;
-    const enrolled = p && typeof p.is_enrolled === 'boolean' ? p.is_enrolled : true;
+    const enrolled = p && typeof p.is_enrolled === 'boolean' ? p.is_enrolled : false;
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem('clearcore_voice_profile_enrolled', String(enrolled));
     }
@@ -242,18 +224,6 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
       active_samples_count: p?.active_samples_count ?? 0,
     };
     return { success: true, profile, ...profile } as unknown as T;
-  }
-  if (cmd === 'get_voice_samples') {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_profile_samples') : null;
-    const samples = raw ? JSON.parse(raw) : [];
-    return samples as unknown as T;
-  }
-  if (cmd === 'add_voice_sample') {
-    const sample = (args?.sample ?? args) as VoiceSample;
-    return { success: true, sample } as unknown as T;
-  }
-  if (cmd === 'delete_voice_sample') {
-    return { success: true, id: String(args?.id ?? '') } as unknown as T;
   }
   if (cmd === 'get_call_takes') {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_intake_takes') : null;

@@ -3,7 +3,7 @@ import { invokeBridge } from '../bridge';
 import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState, voiceProfileStatusLabelKey, stripServiceVoiceProfileKeys, applySetVoiceProfileResult, voiceProfileErrorKey } from '../VoiceProfileCard';
 import { ptBR } from '../i18n/locales/pt-BR';
 import { enUS } from '../i18n/locales/en-US';
-import type { VoiceProfileStatus, VoiceSample, CallSuggestionTake, StudioPreset } from '../types';
+import type { VoiceProfileStatus, CallSuggestionTake, StudioPreset } from '../types';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -61,7 +61,7 @@ describe('VoiceProfileStore (electron/voice-profile-store.cjs)', () => {
     for (const gone of ['addVoiceSample', 'deleteVoiceSample', 'writeVoiceSamples']) {
       expect(voiceProfileStore[gone], gone).toBeUndefined();
     }
-    expect(voiceProfileStore.readVoiceSamples(testDir)).toEqual([]);
+    expect(voiceProfileStore.readVoiceSamples).toBeUndefined();
   });
 
   it('handles call suggestion intake (approve & dismiss)', () => {
@@ -82,7 +82,6 @@ describe('VoiceProfileStore (electron/voice-profile-store.cjs)', () => {
     expect(approveRes.success).toBe(true);
     expect(approveRes.takes).toHaveLength(0);
     expect(approveRes.sample).toBeUndefined();
-    expect(voiceProfileStore.readVoiceSamples(testDir)).toHaveLength(0);
 
     // Dismiss take test
     voiceProfileStore.writeCallTakes([take1], testDir);
@@ -135,9 +134,6 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
       neural_eq_calibrated: true,
       gain_boost_db: 1.8,
     });
-    const mockGetSamples = vi.fn().mockResolvedValue([{ id: 's1', title: 'T1' }]);
-    const mockAddSample = vi.fn().mockResolvedValue({ success: true });
-    const mockDeleteSample = vi.fn().mockResolvedValue({ success: true, id: 's1' });
     const mockGetTakes = vi.fn().mockResolvedValue([{ id: 't1', title: 'Take 1' }]);
     const mockApproveTake = vi.fn().mockResolvedValue({ success: true, id: 't1' });
     const mockDismissTake = vi.fn().mockResolvedValue({ success: true, id: 't1' });
@@ -159,9 +155,6 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
       getInputDevices: vi.fn(),
       setVoiceProfile: mockSetProfile,
       getVoiceProfile: mockGetProfile,
-      getVoiceSamples: mockGetSamples,
-      addVoiceSample: mockAddSample,
-      deleteVoiceSample: mockDeleteSample,
       getCallTakes: mockGetTakes,
       approveCallTake: mockApproveTake,
       dismissCallTake: mockDismissTake,
@@ -184,19 +177,6 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
     const getRes = await invokeBridge<VoiceProfileStatus>('get_voice_profile');
     expect(getRes.is_enrolled).toBe(true);
     expect(mockGetProfile).toHaveBeenCalled();
-
-    // 3. get_voice_samples
-    const samplesRes = await invokeBridge<VoiceSample[]>('get_voice_samples');
-    expect(samplesRes).toHaveLength(1);
-    expect(mockGetSamples).toHaveBeenCalled();
-
-    // 4. add_voice_sample
-    await invokeBridge('add_voice_sample', { sample: { id: 's2' } });
-    expect(mockAddSample).toHaveBeenCalled();
-
-    // 5. delete_voice_sample
-    await invokeBridge('delete_voice_sample', { id: 's1' });
-    expect(mockDeleteSample).toHaveBeenCalledWith('s1');
 
     // 6. get_call_takes
     const takesRes = await invokeBridge<CallSuggestionTake[]>('get_call_takes');
@@ -233,6 +213,10 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
     });
     expect(setRes.success).toBe(true);
 
+    // A non-boolean is_enrolled never defaults to enrolled.
+    const unset = await invokeBridge<VoiceProfileStatus>('set_voice_profile', { profile: {} });
+    expect(unset.is_enrolled).toBe(false);
+
     const presetRes = await invokeBridge<StudioPreset>('get_studio_preset');
     expect(presetRes).toBe('Natural');
 
@@ -241,17 +225,6 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
     });
     expect(setPresetRes.success).toBe(true);
     expect(setPresetRes.preset).toBe('Broadcast');
-
-    const samples = await invokeBridge<VoiceSample[]>('get_voice_samples');
-    expect(Array.isArray(samples)).toBe(true);
-
-    const addRes = await invokeBridge<{ success: boolean }>('add_voice_sample', {
-      sample: { id: 'test' },
-    });
-    expect(addRes.success).toBe(true);
-
-    const delRes = await invokeBridge<{ success: boolean }>('delete_voice_sample', { id: 'test' });
-    expect(delRes.success).toBe(true);
   });
 });
 

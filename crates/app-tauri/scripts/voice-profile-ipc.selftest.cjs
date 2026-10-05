@@ -19,6 +19,21 @@ try {
   assert.strictEqual('embedding_dim' in store.DEFAULT_PROFILE, false);
   assert.strictEqual('neural_eq_calibrated' in store.DEFAULT_PROFILE, false);
 
+  console.log('Testing the legacy fabricated voice_samples.json is purged on first read...');
+  const legacy = path.join(tempDir, 'voice_samples.json');
+  fs.mkdirSync(tempDir, { recursive: true });
+  fs.writeFileSync(legacy, '[{"id":"fake"}]');
+  store.readVoiceProfile();
+  assert.strictEqual(fs.existsSync(legacy), false);
+  assert.strictEqual(store.readVoiceSamples, undefined);
+  assert.strictEqual(store.getVoiceSamplesPath, undefined);
+
+  console.log('Testing dead sample channels are gone from preload and bridge...');
+  const dead = /getVoiceSamples|addVoiceSample|deleteVoiceSample|get_voice_samples|add_voice_sample|delete_voice_sample|clearcore_voice_sample_count/;
+  for (const f of ['../electron/preload.cjs', '../src/bridge.ts']) {
+    assert.ok(!dead.test(fs.readFileSync(path.join(__dirname, f), 'utf8')), `${f} still mentions a dead channel`);
+  }
+
   console.log('Testing voice-profile-store default read...');
   const initial = store.readVoiceProfile();
   assert.strictEqual(initial.is_enrolled, false);
@@ -46,7 +61,6 @@ try {
   assert.strictEqual(approveRes.success, true);
   assert.strictEqual(approveRes.takes.length, 0);
   assert.strictEqual('samples' in approveRes, false);
-  assert.strictEqual(store.readVoiceSamples().length, 0);
 
   const profileAfterApprove = store.readVoiceProfile();
   assert.strictEqual(profileAfterApprove.active_samples_count, 5);
