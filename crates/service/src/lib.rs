@@ -339,20 +339,22 @@ impl ServiceDaemon {
                     // Same contract as `IpcServer::handle_line` (fixed parse error, version
                     // check, truncated request id), but the parsed request stays here so its
                     // audio can be wiped after the handler.
-                    let resp = match IpcRequest::from_json(trimmed) {
-                        Ok(mut request) => {
+                    let resp = IpcRequest::from_json(trimmed).map_or_else(
+                        |_| {
+                            fixed_error_json(
+                                IpcStatus::InvalidCommand,
+                                "JSON_PARSE_ERROR",
+                                "malformed request",
+                            )
+                        },
+                        |mut request| {
                             let mut resp =
                                 handle_request(&request, |cmd, _payload| self.handle_command(cmd));
                             wipe_request_audio(&mut request);
                             resp.request_id = truncate_request_id(&resp.request_id);
                             resp.to_json().unwrap_or_else(|_| "{}".to_owned())
-                        }
-                        Err(_) => fixed_error_json(
-                            IpcStatus::InvalidCommand,
-                            "JSON_PARSE_ERROR",
-                            "malformed request",
-                        ),
-                    };
+                        },
+                    );
                     // The line may carry raw PCM (base64): wipe it before the next read.
                     wipe_string(&mut line);
                     resp
