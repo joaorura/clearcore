@@ -327,6 +327,10 @@ export const enUS: Translations = {
       jobDone: 'Done',
       jobFailed: 'Failed',
       devModelNotice: 'Development enrollment model, not approved yet',
+      devIsolationModelNotice:
+        'Loaded isolation model: development pDFNet3 (checkpoint that failed M2, no proven isolation benefit). Only for testing the voice profile; not approved and not for production.',
+      devIsolationModelError:
+        'The development pDFNet3 was not loaded ({code}); isolation uses the base model.',
       qualityPeak: 'Peak',
       qualityLevel: 'Level',
       qualitySpeech: 'Speech',

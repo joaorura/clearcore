@@ -327,6 +327,10 @@ export const ptBR: Translations = {
       jobDone: 'Concluído',
       jobFailed: 'Falhou',
       devModelNotice: 'Modelo de enrollment de desenvolvimento, ainda não aprovado',
+      devIsolationModelNotice:
+        'Modelo de isolamento carregado: pDFNet3 de desenvolvimento (checkpoint reprovado no M2, sem benefício de isolamento comprovado). Serve só para testar o perfil de voz; não é aprovado nem de produção.',
+      devIsolationModelError:
+        'O pDFNet3 de desenvolvimento não foi carregado ({code}); o isolamento usa o modelo base.',
       qualityPeak: 'Pico',
       qualityLevel: 'Nível',
       qualitySpeech: 'Fala',

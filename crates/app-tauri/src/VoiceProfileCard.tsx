@@ -259,7 +259,11 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
       {/* Always visible, whatever the tab, while the enrollment model is the development asset (spec §9). */}
       <div style={{ marginBottom: 12 }}>
-        <DevModelNotice labels={labels} />
+        <DevModelNotice
+          labels={labels}
+          devBaseModel={profileStatus.dev_base_model}
+          devBaseModelError={profileStatus.dev_base_model_error}
+        />
         {legacyNotice && (
           <div role="note" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             {t('voiceProfile.legacySamplesNotice')}

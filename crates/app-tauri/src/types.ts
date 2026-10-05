@@ -78,5 +78,12 @@ export interface VoiceProfileStatus {
    * `undefined` (older service) means unknown and keeps the build available.
    */
   voice_profile_supported?: boolean;
+  /**
+   * Service-reported (GetStatus), development only: 'pdfnet3-dev' while the unsigned pDFNet3
+   * (M2 NO-GO checkpoint) is the isolation model, 'base' otherwise. `undefined` = older service.
+   */
+  dev_base_model?: 'pdfnet3-dev' | 'base';
+  /** Service-reported fixed code (`DEV_MODEL_*`) when the configured development model is not in use. */
+  dev_base_model_error?: string | null;
 }
 

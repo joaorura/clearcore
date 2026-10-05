@@ -36,7 +36,20 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     active_voice_profile_id: src.active_voice_profile_id,
     has_voice_profile: typeof src.has_voice_profile === 'boolean' ? src.has_voice_profile : undefined,
     voice_profile_supported: typeof src.voice_profile_supported === 'boolean' ? src.voice_profile_supported : undefined,
+    dev_base_model: devBaseModel(src.dev_base_model),
+    dev_base_model_error: devBaseModelError(src.dev_base_model_error),
   };
+}
+
+/** Only the two documented values are accepted; anything else is unknown. */
+export function devBaseModel(value: unknown): VoiceProfileStatus['dev_base_model'] {
+  return value === 'pdfnet3-dev' || value === 'base' ? value : undefined;
+}
+
+/** Only a fixed `DEV_MODEL_*` code is accepted (never free text such as a path). */
+export function devBaseModelError(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === 'string' && /^DEV_MODEL_[A-Z_]{1,48}$/.test(value) ? value : undefined;
 }
 
 /** The service said the active isolation model cannot apply a voice profile (absent = unknown). */
@@ -88,6 +101,8 @@ export function mergeVoiceProfileStatus(
     active_voice_profile_id: prof.active_voice_profile_id,
     has_voice_profile: prof.has_voice_profile,
     voice_profile_supported: prof.voice_profile_supported,
+    dev_base_model: prof.dev_base_model,
+    dev_base_model_error: prof.dev_base_model_error,
     active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
   };
 }
@@ -101,6 +116,8 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'has_voice_profile',
   'voice_profile_supported',
   'neural_eq_calibrated',
+  'dev_base_model',
+  'dev_base_model_error',
 ] as const;
 
 /** Service-owned fields: the renderer never resends nor inherits them. */
@@ -136,6 +153,8 @@ export function applySetVoiceProfileResult(
     active_voice_profile_id: svc.active_voice_profile_id,
     voice_profile_supported: svc.voice_profile_supported,
     neural_eq_calibrated: svc.neural_eq_calibrated,
+    dev_base_model: svc.dev_base_model,
+    dev_base_model_error: svc.dev_base_model_error,
   };
 }
 
@@ -173,7 +192,7 @@ const ENROLLMENT_LABEL_KEYS = [
   'budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', 'budgetExceededTitle', 'budgetExceededBody',
   'deleteAction', 'deleting', 'otherMicrophone', 'needsReenroll', 'usedInProfile', 'notUsed',
   'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply', 'stageTimeout',
-  'jobDone', 'jobFailed', 'devModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech',
+  'jobDone', 'jobFailed', 'devModelNotice', 'devIsolationModelNotice', 'devIsolationModelError', 'qualityPeak', 'qualityLevel', 'qualitySpeech',
 ] as const satisfies ReadonlyArray<Exclude<keyof EnrollmentLabels, 'errors'>>;
 
 const ENROLLMENT_ERROR_KEYS = [

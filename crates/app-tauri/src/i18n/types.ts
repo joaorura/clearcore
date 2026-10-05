@@ -326,6 +326,10 @@ export interface Translations {
       jobDone: string;
       jobFailed: string;
       devModelNotice: string;
+      /** GetStatus dev_base_model === 'pdfnet3-dev': the isolation model is the development pDFNet3 (M2 NO-GO). */
+      devIsolationModelNotice: string;
+      /** The development pDFNet3 was configured but not loaded; "{code}" is the fixed DEV_MODEL_* code. */
+      devIsolationModelError: string;
       qualityPeak: string;
       qualityLevel: string;
       qualitySpeech: string;

@@ -56,3 +56,27 @@ describe('neural_eq_calibrated (GetStatus, applied profile has EQ)', () => {
     expect('neural_eq_calibrated' in stripServiceVoiceProfileKeys(local)).toBe(false);
   });
 });
+
+describe('dev_base_model (GetStatus, development pDFNet3)', () => {
+  it('accepts only the documented values and fixed DEV_MODEL_* codes', () => {
+    expect(normalizeVoiceProfileStatus({ dev_base_model: 'pdfnet3-dev' }).dev_base_model).toBe('pdfnet3-dev');
+    expect(normalizeVoiceProfileStatus({ dev_base_model: 'base' }).dev_base_model).toBe('base');
+    for (const v of ['approved', 'PDFNET3-DEV', 1, null, {}]) {
+      expect(normalizeVoiceProfileStatus({ dev_base_model: v }).dev_base_model).toBeUndefined();
+    }
+    expect(normalizeVoiceProfileStatus({ dev_base_model_error: 'DEV_MODEL_HASH_MISMATCH' }).dev_base_model_error).toBe('DEV_MODEL_HASH_MISMATCH');
+    expect(normalizeVoiceProfileStatus({ dev_base_model_error: null }).dev_base_model_error).toBeNull();
+    for (const v of ['/home/x/pdfnet3.tar.gz', 'DEV_MODEL_hash', 'ENROLL_FAILED', 3]) {
+      expect(normalizeVoiceProfileStatus({ dev_base_model_error: v }).dev_base_model_error).toBeUndefined();
+    }
+  });
+  it('is a service field: merged from GetStatus and never inherited by the renderer', () => {
+    const merged = mergeVoiceProfileStatus(
+      { is_enrolled: false, active_samples_count: 0 },
+      { stored_voice_profile_id: null, dev_base_model: 'pdfnet3-dev', dev_base_model_error: null },
+      0,
+    );
+    expect(merged.dev_base_model).toBe('pdfnet3-dev');
+    expect(stripServiceVoiceProfileKeys(merged).dev_base_model).toBeUndefined();
+  });
+});

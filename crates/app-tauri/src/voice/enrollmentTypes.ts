@@ -59,6 +59,8 @@ export interface EnrollmentLabels {
   stageQueued: string; stageDenoise: string; stageTrim: string; stageEq: string; stageEnroll: string; stageApply: string; stageTimeout: string;
   jobDone: string; jobFailed: string;
   devModelNotice: string;                                          // "development model, not approved"
+  devIsolationModelNotice: string;                                 // GetStatus dev_base_model === 'pdfnet3-dev'
+  devIsolationModelError: string;                                  // dev model configured but not loaded; "{code}" placeholder
   qualityPeak: string; qualityLevel: string; qualitySpeech: string;
   errors: Record<EnrollErrorCode | 'UNKNOWN', string>;
 }

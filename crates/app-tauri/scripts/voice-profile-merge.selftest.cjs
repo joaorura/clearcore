@@ -117,4 +117,18 @@ for (const v of ['false', 0, null, {}]) {
 assert.ok(!('voice_profile_supported' in mergeLocalAndServiceProfile({}, { stored_voice_profile_id: 'p1' })));
 assert.deepStrictEqual(stripServiceVoiceProfileFields({ a: 1, voice_profile_supported: false, neural_eq_calibrated: true }), { a: 1 });
 
+console.log('Testing dev_base_model / dev_base_model_error are validated service fields...');
+assert.strictEqual(mergeLocalAndServiceProfile({}, { dev_base_model: 'pdfnet3-dev' }).dev_base_model, 'pdfnet3-dev');
+assert.strictEqual(mergeLocalAndServiceProfile({}, { dev_base_model: 'base' }).dev_base_model, 'base');
+for (const v of ['approved', true, null, 7]) {
+  assert.ok(!('dev_base_model' in mergeLocalAndServiceProfile({}, { dev_base_model: v })), 'unknown model dropped');
+}
+assert.strictEqual(mergeLocalAndServiceProfile({}, { dev_base_model_error: 'DEV_MODEL_NO_FILM' }).dev_base_model_error, 'DEV_MODEL_NO_FILM');
+assert.strictEqual(mergeLocalAndServiceProfile({}, { dev_base_model_error: null }).dev_base_model_error, null);
+for (const v of ['/home/u/pdfnet3.tar.gz', 'boom', 1]) {
+  assert.ok(!('dev_base_model_error' in mergeLocalAndServiceProfile({}, { dev_base_model_error: v })), 'free text dropped');
+}
+// Never read from the local file.
+assert.ok(!('dev_base_model' in mergeLocalAndServiceProfile({ dev_base_model: 'pdfnet3-dev' }, {})));
+
 console.log('voice-profile-merge selftest passed.');

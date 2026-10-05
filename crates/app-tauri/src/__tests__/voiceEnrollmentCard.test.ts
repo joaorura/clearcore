@@ -38,7 +38,8 @@ const LABEL_KEYS: Array<Exclude<keyof EnrollmentLabels, 'errors'>> = [
   'budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', 'budgetExceededTitle', 'budgetExceededBody',
   'deleteAction', 'deleting', 'otherMicrophone', 'needsReenroll', 'usedInProfile', 'notUsed',
   'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply',
-  'jobDone', 'jobFailed', 'devModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech',
+  'jobDone', 'jobFailed', 'devModelNotice', 'devIsolationModelNotice', 'devIsolationModelError',
+  'qualityPeak', 'qualityLevel', 'qualitySpeech',
 ];
 
 const job = (over: Partial<EnrollmentJob>): EnrollmentJob => ({
@@ -60,6 +61,11 @@ describe('buildEnrollmentLabels', () => {
         expect(labels.errors[code], code).not.toMatch(/^MISSING:/);
       }
       expect(labels.budgetExceededBody).toContain('{remaining}');
+      expect(labels.devIsolationModelError).toContain('{code}');
+      // The development pDFNet3 must never be presented as approved or production-ready.
+      expect(labels.devIsolationModelNotice).toMatch(/pDFNet3/);
+      expect(labels.devIsolationModelNotice).toMatch(/M2/);
+      expect(labels.devIsolationModelNotice.replace(/não é aprovado|not approved/g, '')).not.toMatch(/aprovad|approved/i);
     });
   }
 

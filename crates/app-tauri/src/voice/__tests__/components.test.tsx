@@ -17,7 +17,8 @@ function makeLabels(): EnrollmentLabels {
   for (const k of ['budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', 'budgetExceededTitle', 'budgetExceededBody',
     'deleteAction', 'deleting', 'otherMicrophone', 'needsReenroll', 'usedInProfile', 'notUsed',
     'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply', 'stageTimeout', 'jobDone', 'jobFailed',
-    'devModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech']) l[k] = k;
+    'devModelNotice', 'devIsolationModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech']) l[k] = k;
+  l.devIsolationModelError = 'devIsolationModelError({code})';
   l.errors = Object.fromEntries(codes.map((c) => [c, c]));
   return l as unknown as EnrollmentLabels;
 }
@@ -87,6 +88,20 @@ describe('components', () => {
   });
   it('dev model notice renders the label', () => {
     expect(html(<DevModelNotice labels={labels} />)).toContain('devModelNotice');
+  });
+  it('dev model notice names the development pDFNet3 only when the service says so', () => {
+    const dev = html(<DevModelNotice labels={labels} devBaseModel="pdfnet3-dev" />);
+    expect(dev).toContain('devModelNotice');
+    expect(dev).toContain('devIsolationModelNotice');
+    for (const m of [html(<DevModelNotice labels={labels} devBaseModel="base" />), html(<DevModelNotice labels={labels} />)]) {
+      expect(m).not.toContain('devIsolationModelNotice');
+      expect(m).not.toContain('devIsolationModelError');
+    }
+  });
+  it('dev model notice shows the fixed code when the development model was not loaded', () => {
+    const m = html(<DevModelNotice labels={labels} devBaseModel="base" devBaseModelError="DEV_MODEL_HASH_MISMATCH" />);
+    expect(m).toContain('devIsolationModelError(DEV_MODEL_HASH_MISMATCH)');
+    expect(m).not.toContain('devIsolationModelNotice');
   });
 });
 

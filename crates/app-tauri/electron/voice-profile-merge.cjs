@@ -12,7 +12,14 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'voice_profile_supported',
   // GetStatus: the APPLIED profile carries a microphone EQ (never read from the local file).
   'neural_eq_calibrated',
+  // GetStatus, development only: 'pdfnet3-dev' | 'base' (anything else is dropped).
+  'dev_base_model',
+  // GetStatus: fixed DEV_MODEL_* code or null (free text, e.g. a path, is dropped).
+  'dev_base_model_error',
 ];
+
+const DEV_BASE_MODELS = new Set(['pdfnet3-dev', 'base']);
+const DEV_BASE_MODEL_ERROR_RE = /^DEV_MODEL_[A-Z_]{1,48}$/;
 
 // Service fields accepted only as real booleans; anything else is dropped (= unknown).
 const BOOLEAN_SERVICE_KEYS = new Set([
@@ -29,6 +36,9 @@ function pickServiceVoiceProfileFields(serviceStatus) {
   for (const key of SERVICE_VOICE_PROFILE_KEYS) {
     if (!(key in serviceStatus) || serviceStatus[key] === undefined) continue;
     if (BOOLEAN_SERVICE_KEYS.has(key) && typeof serviceStatus[key] !== 'boolean') continue;
+    if (key === 'dev_base_model' && !DEV_BASE_MODELS.has(serviceStatus[key])) continue;
+    if (key === 'dev_base_model_error' && serviceStatus[key] !== null
+      && !(typeof serviceStatus[key] === 'string' && DEV_BASE_MODEL_ERROR_RE.test(serviceStatus[key]))) continue;
     out[key] = serviceStatus[key];
   }
   return out;
