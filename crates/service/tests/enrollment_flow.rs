@@ -1191,3 +1191,32 @@ fn broadband_transients_stay_under_the_ceiling_after_decimation() {
     let peak = seen_peak.lock().unwrap().expect("model ran");
     assert!(peak <= 0.99, "16 kHz peak seen by the model: {peak}");
 }
+
+// ---------------------------------------------------------------- persistence failures
+
+#[cfg(unix)]
+#[test]
+fn a_failed_manifest_write_leaves_no_phantom_sample_or_take() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = TempDir::new("enroll-persist-fails");
+    let mut daemon = daemon(temp.path());
+    assert_eq!(add_sample(&mut daemon, 3.0, "mic-a")["state"], "done");
+    let used_before = list(&mut daemon)["budget"]["used_seconds"].clone();
+    std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o500)).expect("ro");
+
+    let job = add_sample(&mut daemon, 3.0, "mic-a");
+    let take = send(&mut daemon, take_cmd(&speech_pcm(3.0, 0.3), "mic-a"));
+    let take_job = wait_job(&mut daemon, &job_id(&take));
+    let listed = list(&mut daemon);
+    let pending = send(&mut daemon, IpcCommand::ListIntakeSuggestions);
+    let wavs = files_under(&temp.path().join("samples")).len();
+    std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o700)).expect("rw");
+
+    assert_eq!(job["state"], "failed", "{job}");
+    assert_eq!(job["error_code"], "ENROLL_FAILED");
+    assert_eq!(take_job["state"], "failed", "{take_job}");
+    assert_eq!(listed["total_count"], 1, "no phantom sample in memory");
+    assert_eq!(listed["budget"]["used_seconds"], used_before);
+    assert_eq!(pending.payload["count"], 0, "no phantom take in memory");
+    assert_eq!(wavs, 1, "the freshly written WAVs were removed");
+}

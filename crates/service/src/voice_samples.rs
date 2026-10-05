@@ -445,15 +445,26 @@ impl VoiceSampleManager {
         Ok(())
     }
 
-    /// Adds or replaces a sample and persists the updated gallery and profile.
+    /// Adds or replaces a sample and persists the updated gallery and profile. If persisting
+    /// fails the in-memory gallery is restored, so a sample that is not on disk never counts.
     pub fn add_sample(&mut self, sample: VoiceSample) -> Result<(), VoiceSampleError> {
         sample.validate()?;
-        if let Some(existing) = self.samples.iter_mut().find(|s| s.id == sample.id) {
-            *existing = sample;
+        let previous = if let Some(pos) = self.samples.iter().position(|s| s.id == sample.id) {
+            Some((pos, std::mem::replace(&mut self.samples[pos], sample)))
         } else {
             self.samples.push(sample);
+            None
+        };
+        let persisted = self.persist();
+        if persisted.is_err() {
+            match previous {
+                Some((pos, old)) => self.samples[pos] = old,
+                None => {
+                    self.samples.pop();
+                }
+            }
         }
-        self.persist()
+        persisted
     }
 
     /// Lists all stored voice samples.

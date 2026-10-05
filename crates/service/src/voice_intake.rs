@@ -265,14 +265,24 @@ impl VoiceIntakeEngine {
     }
 
     /// Adds a new detected take to the pending queue.
+    /// If persisting fails the in-memory queue is restored (no phantom take).
     pub fn add_take(&mut self, take: IntakeTake) -> Result<(), VoiceIntakeError> {
         take.validate()?;
-        if let Some(pos) = self.pending_takes.iter().position(|t| t.id == take.id) {
-            self.pending_takes[pos] = take;
+        let previous = if let Some(pos) = self.pending_takes.iter().position(|t| t.id == take.id) {
+            Some((pos, std::mem::replace(&mut self.pending_takes[pos], take)))
         } else {
             self.pending_takes.push(take);
+            None
+        };
+        if let Err(error) = self.persist() {
+            match previous {
+                Some((pos, old)) => self.pending_takes[pos] = old,
+                None => {
+                    self.pending_takes.pop();
+                }
+            }
+            return Err(error);
         }
-        self.persist()?;
         Ok(())
     }
 
