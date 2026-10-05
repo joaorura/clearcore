@@ -941,3 +941,26 @@ fn unreadable_legacy_data_never_stops_the_daemon() {
         IpcStatus::Ok
     );
 }
+
+#[test]
+fn listing_exposes_the_selected_device_group() {
+    let temp = TempDir::new("enroll-selected-group");
+    let mut daemon = daemon(temp.path());
+    let empty = list(&mut daemon);
+    assert!(empty["selected_device_id_hash"].is_null());
+    assert!(empty["selected_device_label"].is_null());
+
+    add_sample(&mut daemon, 3.0, "hash-a");
+    add_sample(&mut daemon, 3.0, "hash-a");
+    std::thread::sleep(Duration::from_millis(3));
+    add_sample(&mut daemon, 3.0, "hash-b");
+    let listed = list(&mut daemon);
+    assert_eq!(listed["selected_device_id_hash"], "hash-b");
+    assert_eq!(listed["selected_device_label"], "Mic hash-b");
+    let items = listed["samples"].as_array().expect("samples");
+    let hashes: Vec<&str> = items
+        .iter()
+        .map(|i| i["device_id_hash"].as_str().expect("hash"))
+        .collect();
+    assert_eq!(hashes, vec!["hash-a", "hash-a", "hash-b"]);
+}

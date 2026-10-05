@@ -913,6 +913,7 @@ impl ServiceDaemon {
                     "timestamp": s.timestamp,
                     "speech_seconds": s.speech_seconds,
                     "device_label": s.device_label,
+                    "device_id_hash": s.device_id_hash,
                     "is_active": s.is_active,
                     "needs_reenroll": s.audio_path.is_none(),
                     "used_in_profile": in_group && s.is_active && s.audio_path.is_some(),
@@ -921,12 +922,26 @@ impl ServiceDaemon {
             })
             .collect();
         let budget = budget_for(samples, selected.as_deref().unwrap_or_default());
+        // Label of the most recent eligible sample of the selected group (same ordering as
+        // `selected_device_hash`), so the UI can warn before another microphone switches it.
+        let selected_label = selected.as_deref().and_then(|device| {
+            samples
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| {
+                    s.is_active && s.audio_path.is_some() && s.device_id_hash == device
+                })
+                .max_by_key(|(i, s)| (s.timestamp.parse::<u64>().unwrap_or(0), *i))
+                .map(|(_, s)| s.device_label.clone())
+        });
         IpcResponse::success(
             "list-voice-samples-resp",
             json!({
                 "samples": items,
                 "total_count": samples.len(),
                 "has_profile": self.stored_voice_profile_id.is_some(),
+                "selected_device_id_hash": selected,
+                "selected_device_label": selected_label,
                 "budget": {
                     "used_seconds": budget.used_seconds,
                     "max_seconds": budget.max_seconds,
