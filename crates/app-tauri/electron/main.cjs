@@ -135,29 +135,22 @@ function sendIpcRequest(command, payload = {}, timeoutMs = 3000) {
   });
 }
 
+const { pickDaemonBinary, shouldReplaceExistingDaemon } = require('./daemon-binary.cjs');
+
 // Sidecar Daemon Discovery & Supervision
 function findDaemonBinaryPath() {
   const binName = process.platform === 'win32' ? 'realtime-noise-service.exe' : 'realtime-noise-service';
-  const candidates = [
-    // 1. Packaged locations (resources/bin or resources/)
-    path.join(process.resourcesPath, 'bin', binName),
-    path.join(process.resourcesPath, binName),
-    // 2. Relative to application directory
-    path.resolve(__dirname, '..', 'bin', binName),
-    path.resolve(__dirname, '..', '..', '..', 'bin', binName),
-    // 3. Workspace / development target directories
-    path.resolve(__dirname, '..', '..', '..', 'target', 'release', binName),
-    path.resolve(process.cwd(), 'target', 'release', binName),
-    path.resolve(__dirname, '..', '..', '..', 'target', 'debug', binName),
-    path.resolve(process.cwd(), 'target', 'debug', binName),
-  ];
-
-  for (const c of candidates) {
-    if (fs.existsSync(c)) {
-      return c;
-    }
-  }
-  return null;
+  const isDev = process.argv.includes('--dev') || !app.isPackaged;
+  const { path: found, reason } = pickDaemonBinary({
+    binName,
+    env: process.env,
+    resourcesPath: process.resourcesPath,
+    appDir: __dirname,
+    cwd: process.cwd(),
+    isDev,
+  });
+  console.log(`[Clearcore Daemon] Binário escolhido: ${found || '(nenhum)'} (motivo: ${reason}, dev=${isDev})`);
+  return found;
 }
 
 async function isDaemonResponsive() {
@@ -170,8 +163,34 @@ async function isDaemonResponsive() {
 }
 
 async function ensureDaemonRunning() {
-  // If already running (e.g. system service or previous run), do nothing
-  if (await isDaemonResponsive()) {
+  // If already running (e.g. system service or previous run), adopt it
+  const alreadyResponsive = await isDaemonResponsive();
+  if (
+    shouldReplaceExistingDaemon({
+      env: process.env,
+      spawnedByApp: daemonSpawnedByApp,
+      responsive: alreadyResponsive,
+    })
+  ) {
+    // Somente dev.sh (CLEARCORE_DEV_OWN_DAEMON=1): o dev é dono do daemon.
+    console.warn('[Clearcore Daemon] Daemon anterior em execução; solicitando Shutdown para usar o binário de desenvolvimento.');
+    try {
+      await sendIpcRequest('Shutdown');
+    } catch {}
+    let down = false;
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      if (!(await isDaemonResponsive())) {
+        down = true;
+        break;
+      }
+    }
+    if (!down) {
+      console.error('[Clearcore Daemon] daemon anterior não encerrou; reaproveitando.');
+      return true;
+    }
+    console.log('[Clearcore Daemon] Daemon anterior encerrado.');
+  } else if (alreadyResponsive) {
     console.log('[Clearcore Daemon] Serviço já está em execução e comunicando via IPC.');
     return true;
   }

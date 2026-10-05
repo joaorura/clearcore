@@ -1,10 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="${HOME}/.cargo/bin:${PATH}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "=========================================================="
 echo " Clearcore Desktop - Starting Development Environment"
 echo "=========================================================="
+
+echo "🔧 Compilando o daemon (realtime-noise-service, debug)..."
+if ! (cd "${SCRIPT_DIR}" && cargo build -p realtime-noise-service); then
+    echo "❌ Falha ao compilar realtime-noise-service; abortando." >&2
+    exit 1
+fi
+
+# Em dev, este script é dono do daemon: o app usa o binário debug recém-compilado
+# e substitui qualquer daemon anterior.
+export CLEARCORE_DAEMON_BIN="${SCRIPT_DIR}/target/debug/realtime-noise-service"
+export CLEARCORE_DEV_OWN_DAEMON=1
+
+# Rede de segurança (crash do Electron): encerra só o daemon deste worktree.
+cleanup_daemon() {
+    pkill -f "${SCRIPT_DIR}/target/debug/realtime-noise-service --run" || true
+}
+trap cleanup_daemon EXIT INT TERM
 
 cd "${SCRIPT_DIR}/crates/app-tauri"
 if [[ ! -f "node_modules/.bin/electron" ]]; then
