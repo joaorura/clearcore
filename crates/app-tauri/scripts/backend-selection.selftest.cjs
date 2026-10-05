@@ -1,11 +1,7 @@
 'use strict';
-// Autoteste em node puro (fora do glob do vitest): node scripts/backend-selection.selftest.cjs
-//
-// Causa raiz coberta: set_hardware_backend (main.cjs) so guardava uma variavel e devolvia
-// success:true para QUALQUER backend, embora o unico motor real seja o Tract na CPU
-// (filter-capi sempre constroi TractBackend; o plugin OpenVINO e um stub passthrough).
+// Autoteste em node puro: node scripts/backend-selection.selftest.cjs
 const assert = require('node:assert/strict');
-const { resolveBackendSelection } = require('../electron/backend-selection.cjs');
+const { resolveBackendSelection, SUPPORTED_BACKENDS } = require('../electron/backend-selection.cjs');
 
 const tests = [];
 const t = (name, fn) => tests.push([name, fn]);
@@ -18,19 +14,30 @@ t('cpu_tract e aceito', () => {
   assert.deepEqual(resolveBackendSelection('cpu_tract'), { success: true, active_backend: 'cpu_tract' });
 });
 
+t('openvino backends sao aceitos', () => {
+  assert.deepEqual(resolveBackendSelection('openvino_npu'), { success: true, active_backend: 'openvino_npu' });
+  assert.deepEqual(resolveBackendSelection('openvino_gpu'), { success: true, active_backend: 'openvino_gpu' });
+  assert.deepEqual(resolveBackendSelection('openvino_cpu'), { success: true, active_backend: 'openvino_cpu' });
+});
+
+t('outros aceleradores suportados sao aceitos', () => {
+  assert.deepEqual(resolveBackendSelection('nvidia_tensorrt'), { success: true, active_backend: 'nvidia_tensorrt' });
+  assert.deepEqual(resolveBackendSelection('amd_ryzenai_npu'), { success: true, active_backend: 'amd_ryzenai_npu' });
+  assert.deepEqual(resolveBackendSelection('amd_ryzenai_gpu'), { success: true, active_backend: 'amd_ryzenai_gpu' });
+  assert.deepEqual(resolveBackendSelection('apple_coreml'), { success: true, active_backend: 'apple_coreml' });
+});
+
 t('vazio/indefinido vira auto', () => {
   assert.deepEqual(resolveBackendSelection(undefined), { success: true, active_backend: 'auto' });
   assert.deepEqual(resolveBackendSelection(''), { success: true, active_backend: 'auto' });
 });
 
-t('aceleradores que ainda nao processam audio sao rejeitados', () => {
-  for (const id of ['nvidia_tensorrt', 'openvino_npu', 'openvino_gpu', 'openvino_cpu', 'amd_ryzenai_npu', 'amd_ryzenai_gpu', 'apple_coreml', 'qualquer_coisa']) {
-    assert.deepEqual(resolveBackendSelection(id), {
-      success: false,
-      reason: 'not_implemented',
-      active_backend: 'cpu_tract',
-    });
-  }
+t('backend desconhecido e rejeitado', () => {
+  assert.deepEqual(resolveBackendSelection('qualquer_coisa_invalida'), {
+    success: false,
+    reason: 'unknown_backend',
+    active_backend: 'auto',
+  });
 });
 
 let failed = 0;

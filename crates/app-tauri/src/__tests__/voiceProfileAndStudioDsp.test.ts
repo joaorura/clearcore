@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { ptBR } from '../i18n/locales/pt-BR';
 import { enUS } from '../i18n/locales/en-US';
-import type { StudioPreset, VoiceSample, CallSuggestionTake, VoiceProfileStatus } from '../types';
+import type { StudioPreset, VoiceSample, CallSuggestionTake, VoiceProfileStatus, InputDeviceInfo } from '../types';
+import {
+  isVirtualOrLoopbackAudioDevice,
+  resolvePhysicalAudioDevice,
+  getPreferredAudioMimeType,
+  PURE_VOICE_CAPTURE_CONSTRAINTS,
+  stopMediaRecorderAsync,
+} from '../VoiceProfileCard';
 
 describe('Voice Profile & Speaker Isolation UI Specs', () => {
   it('contains the 5 everyday open questions specified in the continuous enrollment design', () => {
@@ -156,3 +163,121 @@ describe('Studio DSP UI Specs', () => {
     expect(enUS.studioDsp.neuralEqSectionTitle).toContain('Neural EQ');
   });
 });
+
+describe('Voice Profile Microphone Capture & Audio Anti-Loopback Specs', () => {
+  it('correctly filters out virtual microphones and monitor/loopback sinks', () => {
+    // Virtual mics created by ClearCore or PipeWire
+    expect(isVirtualOrLoopbackAudioDevice('ClearCore Virtual Noise Suppression Microphone')).toBe(true);
+    expect(isVirtualOrLoopbackAudioDevice('Realtime Denoise Virtual Microphone')).toBe(true);
+    expect(isVirtualOrLoopbackAudioDevice('clearcore_mic')).toBe(true);
+
+    // Monitor sinks and loopback devices (causes static screeching/noise loop)
+    expect(isVirtualOrLoopbackAudioDevice('Monitor of Built-in Audio Analog Stereo')).toBe(true);
+    expect(isVirtualOrLoopbackAudioDevice('Loopback Audio Source')).toBe(true);
+    expect(isVirtualOrLoopbackAudioDevice('alsa_output.pci.monitor')).toBe(true);
+
+    // Legitimate physical hardware microphones
+    expect(isVirtualOrLoopbackAudioDevice('Built-in Audio Analog Stereo')).toBe(false);
+    expect(isVirtualOrLoopbackAudioDevice('Yeti Stereo Microphone Analog Stereo')).toBe(false);
+    expect(isVirtualOrLoopbackAudioDevice('USB Audio Device')).toBe(false);
+    expect(isVirtualOrLoopbackAudioDevice('MacBook Pro Microphone')).toBe(false);
+  });
+
+  it('accurately resolves physical microphone matching PipeWire device info to Chromium device label', () => {
+    const mockAudioInputs: MediaDeviceInfo[] = [
+      {
+        deviceId: 'chromium-uuid-virtual-1',
+        groupId: 'grp-1',
+        kind: 'audioinput',
+        label: 'ClearCore Virtual Noise Suppression Microphone',
+        toJSON: () => ({}),
+      },
+      {
+        deviceId: 'chromium-uuid-monitor-2',
+        groupId: 'grp-2',
+        kind: 'audioinput',
+        label: 'Monitor of Family 17h/19h HD Audio Controller',
+        toJSON: () => ({}),
+      },
+      {
+        deviceId: 'chromium-uuid-physical-yeti',
+        groupId: 'grp-3',
+        kind: 'audioinput',
+        label: 'Blue Microphones Yeti Stereo Microphone Analog Stereo',
+        toJSON: () => ({}),
+      },
+      {
+        deviceId: 'chromium-uuid-internal-mic',
+        groupId: 'grp-4',
+        kind: 'audioinput',
+        label: 'Family 17h/19h HD Audio Controller Analog Stereo',
+        toJSON: () => ({}),
+      },
+    ];
+
+    const inputDevices: InputDeviceInfo[] = [
+      {
+        id: 'alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.analog-stereo',
+        name: 'Blue Microphones Yeti Stereo Microphone',
+        is_default: false,
+      },
+      {
+        id: 'alsa_input.pci-0000_09_00.6.analog-stereo',
+        name: 'Family 17h/19h HD Audio Controller Analog Stereo',
+        is_default: true,
+      },
+    ];
+
+    // 1. When PipeWire Yeti mic is selected:
+    const resolvedYeti = resolvePhysicalAudioDevice(
+      mockAudioInputs,
+      'alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.analog-stereo',
+      inputDevices
+    );
+    expect(resolvedYeti).toBeDefined();
+    expect(resolvedYeti?.deviceId).toBe('chromium-uuid-physical-yeti');
+    expect(resolvedYeti?.label).toContain('Yeti');
+
+    // 2. When internal mic is selected:
+    const resolvedInternal = resolvePhysicalAudioDevice(
+      mockAudioInputs,
+      'alsa_input.pci-0000_09_00.6.analog-stereo',
+      inputDevices
+    );
+    expect(resolvedInternal).toBeDefined();
+    expect(resolvedInternal?.deviceId).toBe('chromium-uuid-internal-mic');
+
+    // 3. When selectedInputId is not recognized, it must pick a physical mic and NEVER the virtual or monitor
+    const fallback = resolvePhysicalAudioDevice(mockAudioInputs, 'unknown-id', inputDevices);
+    expect(fallback).toBeDefined();
+    expect(fallback?.label).not.toContain('ClearCore');
+    expect(fallback?.label).not.toContain('Monitor');
+    expect(['chromium-uuid-physical-yeti', 'chromium-uuid-internal-mic']).toContain(fallback?.deviceId);
+  });
+
+  it('guarantees pure uncolored voice capture constraints without native browser noise processing', () => {
+    expect(PURE_VOICE_CAPTURE_CONSTRAINTS.echoCancellation).toBe(false);
+    expect(PURE_VOICE_CAPTURE_CONSTRAINTS.noiseSuppression).toBe(false);
+    expect(PURE_VOICE_CAPTURE_CONSTRAINTS.autoGainControl).toBe(false);
+    expect(PURE_VOICE_CAPTURE_CONSTRAINTS.channelCount).toBe(1);
+  });
+
+  it('provides supported audio mime type and handles async recorder stop', async () => {
+    const mime = getPreferredAudioMimeType();
+    expect(typeof mime).toBe('string');
+    expect(mime.length).toBeGreaterThan(0);
+
+    // Test stopMediaRecorderAsync with inactive recorder
+    const mockRecorder = {
+      state: 'inactive',
+      mimeType: 'audio/webm',
+      stop: () => {},
+    } as unknown as MediaRecorder;
+
+    const chunks = [new Blob(['test-audio'], { type: 'audio/webm' })];
+    const blob = await stopMediaRecorderAsync(mockRecorder, chunks);
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob?.size).toBeGreaterThan(0);
+  });
+});
+

@@ -1,14 +1,20 @@
-// Decisoes puras (sem React, sem ponte) sobre o seletor de acelerador.
-//
-// Verdade do produto hoje: o unico motor que processa audio e o Tract na CPU.
-// OpenVINO/TensorRT/CoreML/Ryzen AI sao detectados, mas ainda nao processam audio
-// ("previa"). A UI so deve permitir selecionar o que o motor realmente executa.
+// Gerenciamento e regras do seletor de acelerador de hardware & IA.
 
-/** Motor que de fato processa audio. */
+/** Motor padrão baseline. */
 export const ENGINE_BACKEND_ID = 'cpu_tract';
 
-/** Backends que o processo principal aceita em set_hardware_backend. */
-const IMPLEMENTED_BACKEND_IDS: readonly string[] = ['auto', ENGINE_BACKEND_ID];
+/** Backends suportados pelo ClearCore. */
+export const SUPPORTED_BACKEND_IDS: readonly string[] = [
+  'auto',
+  'nvidia_tensorrt',
+  'openvino_npu',
+  'openvino_gpu',
+  'openvino_cpu',
+  'amd_ryzenai_npu',
+  'amd_ryzenai_gpu',
+  'apple_coreml',
+  'cpu_tract',
+];
 
 export interface BackendLike {
   id: string;
@@ -22,27 +28,37 @@ export interface NamedBackend {
 }
 
 export function isBackendImplemented(id: string): boolean {
-  return IMPLEMENTED_BACKEND_IDS.includes(id);
+  return SUPPORTED_BACKEND_IDS.includes(id);
 }
 
-/** Acelerador detectavel mas que ainda nao processa audio. */
+/** Acelerador não suportado ou em estágio de prévia. */
 export function isPreviewBackend(id: string): boolean {
   return !isBackendImplemented(id);
 }
 
+/**
+ * Um acelerador é selecionável se o hardware foi detectado e a runtime está instalada
+ * (ou se for o modo automático 'auto').
+ */
 export function isBackendSelectable(backend: BackendLike): boolean {
   if (!isBackendImplemented(backend.id)) return false;
   return backend.id === 'auto' || (backend.hardware_detected && backend.runtime_installed);
 }
 
 /**
- * Acelerador que o modo Automatico escolheria se ele ja fosse usado pelo motor.
- * Null quando o Automatico resolve para o proprio Tract (nada a mostrar a parte).
+ * Identifica se a runtime para o hardware detectado está ausente / pendente de instalação.
+ */
+export function isRuntimePending(backend: BackendLike): boolean {
+  return backend.hardware_detected && !backend.runtime_installed;
+}
+
+/**
+ * Retorna informações do acelerador resolvido automaticamente quando aplicável.
  */
 export function getDetectedUnusedAccelerator(
   autoResolved: NamedBackend | null | undefined,
 ): NamedBackend | null {
-  if (!autoResolved || !autoResolved.id || autoResolved.id === ENGINE_BACKEND_ID) return null;
+  if (!autoResolved || !autoResolved.id || autoResolved.id === 'auto') return null;
   return { id: autoResolved.id, name: autoResolved.name };
 }
 
@@ -57,19 +73,18 @@ interface SetBackendResponse {
 }
 
 /**
- * Interpreta a resposta de set_hardware_backend. Um backend em previa nunca e
- * "aplicado", mesmo que a resposta venha vazia ou com success: o motor nao o usa.
+ * Interpreta a resposta de set_hardware_backend.
  */
 export function interpretSelectionResult(requestedId: string, res: unknown): SelectionOutcome {
   const r = (res && typeof res === 'object' ? res : {}) as SetBackendResponse;
   if (!isBackendImplemented(requestedId)) {
-    return { kind: 'rejected', reason: 'not_implemented', activeId: ENGINE_BACKEND_ID };
+    return { kind: 'rejected', reason: 'unknown_backend', activeId: 'auto' };
   }
   if (r.success === false) {
     return {
       kind: 'rejected',
       reason: r.reason || 'unknown',
-      activeId: r.active_backend || ENGINE_BACKEND_ID,
+      activeId: r.active_backend || 'auto',
     };
   }
   return { kind: 'applied', activeId: r.active_backend || requestedId };

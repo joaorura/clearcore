@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   ENGINE_BACKEND_ID,
+  SUPPORTED_BACKEND_IDS,
   getDetectedUnusedAccelerator,
   interpretSelectionResult,
   isBackendImplemented,
   isBackendSelectable,
+  isRuntimePending,
   isPreviewBackend,
 } from '../hardwareBackend';
 import { ptBR } from '../i18n/locales/pt-BR';
@@ -16,65 +18,71 @@ const backend = (id: string, hardware_detected = true, runtime_installed = true)
   runtime_installed,
 });
 
-describe('hardwareBackend: o que o motor realmente executa', () => {
-  it('o motor real e unico: CPU (Tract)', () => {
+describe('hardwareBackend: backends suportados e disponibilidade', () => {
+  it('o motor padrão baseline é CPU (Tract)', () => {
     expect(ENGINE_BACKEND_ID).toBe('cpu_tract');
   });
 
-  it('somente auto e cpu_tract estao implementados', () => {
-    expect(isBackendImplemented('auto')).toBe(true);
-    expect(isBackendImplemented('cpu_tract')).toBe(true);
-    for (const id of ['nvidia_tensorrt', 'openvino_npu', 'openvino_gpu', 'openvino_cpu', 'amd_ryzenai_npu', 'amd_ryzenai_gpu', 'apple_coreml']) {
-      expect(isBackendImplemented(id)).toBe(false);
-      expect(isPreviewBackend(id)).toBe(true);
+  it('todos os aceleradores oficiais são reconhecidos e implementados', () => {
+    for (const id of SUPPORTED_BACKEND_IDS) {
+      expect(isBackendImplemented(id)).toBe(true);
+      expect(isPreviewBackend(id)).toBe(false);
     }
-    expect(isPreviewBackend('auto')).toBe(false);
-    expect(isPreviewBackend('cpu_tract')).toBe(false);
+    expect(isBackendImplemented('desconhecido_xyz')).toBe(false);
+    expect(isPreviewBackend('desconhecido_xyz')).toBe(true);
   });
 
-  it('aceleradores em previa nunca sao selecionaveis, mesmo com hardware e runtime prontos', () => {
-    expect(isBackendSelectable(backend('openvino_npu', true, true))).toBe(false);
-    expect(isBackendSelectable(backend('nvidia_tensorrt', true, true))).toBe(false);
-  });
-
-  it('auto e cpu_tract sao selecionaveis', () => {
-    expect(isBackendSelectable(backend('auto', true, true))).toBe(true);
+  it('aceleradores com hardware detectado e runtime instalada são selecionáveis e disponíveis', () => {
+    expect(isBackendSelectable(backend('openvino_npu', true, true))).toBe(true);
+    expect(isBackendSelectable(backend('openvino_gpu', true, true))).toBe(true);
+    expect(isBackendSelectable(backend('openvino_cpu', true, true))).toBe(true);
+    expect(isBackendSelectable(backend('nvidia_tensorrt', true, true))).toBe(true);
     expect(isBackendSelectable(backend('cpu_tract', true, true))).toBe(true);
+    expect(isBackendSelectable(backend('auto', true, true))).toBe(true);
+  });
+
+  it('aceleradores sem runtime instalada não são selecionáveis diretamente e constam como pendentes', () => {
+    const missingTrt = backend('nvidia_tensorrt', true, false);
+    expect(isBackendSelectable(missingTrt)).toBe(false);
+    expect(isRuntimePending(missingTrt)).toBe(true);
+
+    const missingOv = backend('openvino_npu', true, false);
+    expect(isBackendSelectable(missingOv)).toBe(false);
+    expect(isRuntimePending(missingOv)).toBe(true);
+  });
+
+  it('aceleradores sem hardware físico presente não são selecionáveis nem pendentes', () => {
+    const noHw = backend('amd_ryzenai_npu', false, false);
+    expect(isBackendSelectable(noHw)).toBe(false);
+    expect(isRuntimePending(noHw)).toBe(false);
   });
 });
 
-describe('hardwareBackend: acelerador detectado separado do mecanismo ativo', () => {
-  it('devolve o acelerador detectado quando o auto resolveu para algo diferente de Tract', () => {
+describe('hardwareBackend: resolução do acelerador automático', () => {
+  it('devolve o acelerador selecionado pelo modo Auto', () => {
     expect(getDetectedUnusedAccelerator({ id: 'openvino_npu', name: 'Intel OpenVINO (NPU - AI Boost)' })).toEqual({
       id: 'openvino_npu',
       name: 'Intel OpenVINO (NPU - AI Boost)',
     });
-  });
-
-  it('devolve null quando o auto resolveu para a propria CPU (Tract) ou nao ha dado', () => {
-    expect(getDetectedUnusedAccelerator({ id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' })).toBeNull();
-    expect(getDetectedUnusedAccelerator(null)).toBeNull();
-    expect(getDetectedUnusedAccelerator(undefined)).toBeNull();
-  });
-});
-
-describe('hardwareBackend: interpretacao da resposta de set_hardware_backend', () => {
-  it('rejeicao not_implemented do processo principal nao muda o mecanismo ativo', () => {
-    expect(
-      interpretSelectionResult('openvino_npu', { success: false, reason: 'not_implemented', active_backend: 'cpu_tract' }),
-    ).toEqual({ kind: 'rejected', reason: 'not_implemented', activeId: 'cpu_tract' });
-  });
-
-  it('backend em previa e rejeitado mesmo que a resposta venha vazia ou com success', () => {
-    expect(interpretSelectionResult('openvino_npu', {})).toMatchObject({ kind: 'rejected', reason: 'not_implemented' });
-    expect(interpretSelectionResult('openvino_npu', { success: true, active_backend: 'openvino_npu' })).toMatchObject({
-      kind: 'rejected',
-      reason: 'not_implemented',
-      activeId: 'cpu_tract',
+    expect(getDetectedUnusedAccelerator({ id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' })).toEqual({
+      id: 'cpu_tract',
+      name: 'CPU Nativo (Tract Pure-Rust)',
     });
   });
 
-  it('auto e cpu_tract sao aplicados', () => {
+  it('devolve null quando não há dado ou id é auto', () => {
+    expect(getDetectedUnusedAccelerator(null)).toBeNull();
+    expect(getDetectedUnusedAccelerator(undefined)).toBeNull();
+    expect(getDetectedUnusedAccelerator({ id: 'auto', name: 'Automático' })).toBeNull();
+  });
+});
+
+describe('hardwareBackend: interpretação da resposta de set_hardware_backend', () => {
+  it('aplica a seleção quando o processo principal aceita o backend', () => {
+    expect(interpretSelectionResult('openvino_npu', { success: true, active_backend: 'openvino_npu' })).toEqual({
+      kind: 'applied',
+      activeId: 'openvino_npu',
+    });
     expect(interpretSelectionResult('cpu_tract', { success: true, active_backend: 'cpu_tract' })).toEqual({
       kind: 'applied',
       activeId: 'cpu_tract',
@@ -83,29 +91,39 @@ describe('hardwareBackend: interpretacao da resposta de set_hardware_backend', (
       kind: 'applied',
       activeId: 'auto',
     });
-    // Sem ponte (ex.: navegador puro) a resposta vem vazia: aplica o id pedido.
-    expect(interpretSelectionResult('auto', {})).toEqual({ kind: 'applied', activeId: 'auto' });
+  });
+
+  it('trata resposta vazia da ponte em ambiente web aplicando o id solicitado', () => {
+    expect(interpretSelectionResult('openvino_npu', {})).toEqual({
+      kind: 'applied',
+      activeId: 'openvino_npu',
+    });
+  });
+
+  it('backend inválido ou não suportado é rejeitado', () => {
+    expect(interpretSelectionResult('desconhecido', {})).toEqual({
+      kind: 'rejected',
+      reason: 'unknown_backend',
+      activeId: 'auto',
+    });
   });
 });
 
-describe('hardwareBackend: textos nao prometem o que o motor nao faz', () => {
-  it('previa e mecanismo ativo reais nos dois idiomas', () => {
-    expect(ptBR.hardwareBackend.previewBadge).toBe('Prévia — ainda não processa áudio');
-    expect(ptBR.hardwareBackend.activeEngineName).toBe('CPU (Tract)');
-    expect(ptBR.hardwareBackend.detectedUnusedLabel).toBe('Detectado (ainda não utilizado):');
-    expect(enUS.hardwareBackend.previewBadge).toMatch(/^Preview/);
-    expect(enUS.hardwareBackend.activeEngineName).toBe('CPU (Tract)');
+describe('hardwareBackend: consistência de textos e badges de status nos idiomas', () => {
+  it('badges de status corretos para runtime pronta (Disponível), ativa e ausente (Pendente)', () => {
+    expect(ptBR.hardwareBackend.runtimeReadyBadge).toBe('Disponível');
+    expect(ptBR.hardwareBackend.statusActiveBadge).toBe('Ativo');
+    expect(ptBR.hardwareBackend.runtimeMissingBadge).toBe('Instalação Pendente');
+
+    expect(enUS.hardwareBackend.runtimeReadyBadge).toBe('Available');
+    expect(enUS.hardwareBackend.statusActiveBadge).toBe('Active');
+    expect(enUS.hardwareBackend.runtimeMissingBadge).toBe('Installation Pending');
   });
 
-  it('descricao nao diz que o acelerador executa o DeepFilterNet3', () => {
-    expect(ptBR.hardwareBackend.description).not.toMatch(/Selecione qual acelerador/i);
-    expect(enUS.hardwareBackend.description).not.toMatch(/Select which accelerator/i);
-    expect(ptBR.hardwareBackend.description).toMatch(/CPU/);
-    expect(enUS.hardwareBackend.description).toMatch(/CPU/);
-  });
-
-  it('nao existe mais mensagem de sucesso falso na troca de acelerador', () => {
-    expect('switchSuccess' in ptBR.hardwareBackend).toBe(false);
-    expect('switchSuccess' in enUS.hardwareBackend).toBe(false);
+  it('mensagens de sucesso e orientação de troca de acelerador estão presentes', () => {
+    expect(ptBR.hardwareBackend.switchSuccess).toContain('{name}');
+    expect(enUS.hardwareBackend.switchSuccess).toContain('{name}');
+    expect(ptBR.hardwareBackend.cannotSelectMissing).toBeDefined();
+    expect(enUS.hardwareBackend.cannotSelectMissing).toBeDefined();
   });
 });

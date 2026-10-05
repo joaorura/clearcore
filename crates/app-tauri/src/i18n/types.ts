@@ -153,9 +153,13 @@ export interface Translations {
     description: string;
     activeLabel: string;
     activeEngineName: string;
+    autoResolvedActive: string;
     detectedUnusedLabel: string;
     previewBadge: string;
     previewNotSelectable: string;
+    switchSuccess: string;
+    cannotSelectMissing: string;
+    statusActiveBadge: string;
     detectionError: string;
     detectedBadge: string;
     notDetectedBadge: string;

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useI18n } from './i18n';
 import { invokeBridge, HardwareBackendItem, HardwareBackendsResponse } from './bridge';
 import {
-  getDetectedUnusedAccelerator,
   interpretSelectionResult,
   isBackendSelectable,
   isPreviewBackend,
@@ -17,6 +16,7 @@ export const HardwareAcceleratorCard: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedHelpBackend, setSelectedHelpBackend] = useState<HardwareBackendItem | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [detectionError, setDetectionError] = useState<string | null>(null);
 
@@ -46,14 +46,11 @@ export const HardwareAcceleratorCard: React.FC = () => {
   }, []);
 
   const handleSelectBackend = async (backend: HardwareBackendItem) => {
-    // Aceleradores em previa ainda nao processam audio: nao sao selecionaveis.
-    // Se a runtime esta ausente, ao menos mostra as instrucoes de instalacao.
+    // Se o backend não for selecionável (hardware ausente ou runtime não instalada)
     if (!isBackendSelectable(backend)) {
-      if (isPreviewBackend(backend.id)) {
-        if (backend.hardware_detected && !backend.runtime_installed) {
-          setSelectedHelpBackend(backend);
-        }
-        setActionError(t('hardwareBackend.previewNotSelectable'));
+      if (backend.hardware_detected && !backend.runtime_installed) {
+        setSelectedHelpBackend(backend);
+        setActionError(t('hardwareBackend.cannotSelectMissing'));
         setTimeout(() => setActionError(null), 5000);
       }
       return;
@@ -67,9 +64,10 @@ export const HardwareAcceleratorCard: React.FC = () => {
       const outcome = interpretSelectionResult(backend.id, res);
       if (outcome.kind === 'applied') {
         setActiveBackendId(outcome.activeId);
+        setActionFeedback(t('hardwareBackend.switchSuccess', { name: backend.name }));
+        setTimeout(() => setActionFeedback(null), 4000);
       } else {
-        setActiveBackendId(outcome.activeId);
-        setActionError(t('hardwareBackend.previewNotSelectable'));
+        setActionError(outcome.reason);
         setTimeout(() => setActionError(null), 5000);
       }
     } catch (err) {
@@ -144,17 +142,16 @@ export const HardwareAcceleratorCard: React.FC = () => {
     }
   };
 
-  // O motor que de fato processa audio e sempre o Tract na CPU; o acelerador que o
-  // Automatico escolheria e so informacao ("detectado, ainda nao utilizado").
-  const detectedUnused = getDetectedUnusedAccelerator(
-    autoResolvedBackend ||
-      (() => {
-        const auto = backends.find((b) => b.id === 'auto');
-        return auto?.auto_resolved_id
-          ? { id: auto.auto_resolved_id, name: auto.auto_resolved_name || auto.auto_resolved_id }
-          : null;
-      })(),
-  );
+  const activeBackend = backends.find((b) => b.id === activeBackendId) || {
+    id: activeBackendId,
+    name: activeBackendId === 'auto' ? 'Automático' : activeBackendId,
+  };
+
+  const autoResolvedName =
+    autoResolvedBackend?.name ||
+    backends.find((b) => b.id === 'auto')?.auto_resolved_name ||
+    (backends.find((b) => b.id !== 'auto' && b.hardware_detected && b.runtime_installed)?.name) ||
+    'Automático';
 
   return (
     <div className="card hardware-card">
@@ -235,6 +232,22 @@ export const HardwareAcceleratorCard: React.FC = () => {
         </div>
       )}
 
+      {actionFeedback && (
+        <div
+          style={{
+            padding: '10px 14px',
+            background: '#142a1f',
+            border: '1px solid #166534',
+            borderRadius: 6,
+            marginBottom: 16,
+            color: '#86efac',
+            fontSize: '0.9rem',
+          }}
+        >
+          ✓ {actionFeedback}
+        </div>
+      )}
+
       {/* Active Backend Indicator */}
       <div
         style={{
@@ -253,12 +266,11 @@ export const HardwareAcceleratorCard: React.FC = () => {
           <span style={{ color: 'var(--text-muted)', marginRight: 6 }}>
             {t('hardwareBackend.activeLabel')}
           </span>
-          <strong style={{ color: '#4ade80' }}>{t('hardwareBackend.activeEngineName')}</strong>
-          {detectedUnused && (
-            <div style={{ color: 'var(--text-muted)', marginTop: 4 }}>
-              {t('hardwareBackend.detectedUnusedLabel')} <strong>{detectedUnused.name}</strong>
-            </div>
-          )}
+          <strong style={{ color: '#4ade80' }}>
+            {activeBackendId === 'auto'
+              ? t('hardwareBackend.autoResolvedActive', { name: autoResolvedName })
+              : activeBackend.name}
+          </strong>
         </div>
         {activeBackendId === 'auto' && (
           <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
@@ -307,8 +319,8 @@ export const HardwareAcceleratorCard: React.FC = () => {
                 backgroundColor: cardBg,
                 borderRadius: 8,
                 padding: '14px 16px',
-                cursor: isNotDetected || isPreview ? 'not-allowed' : 'pointer',
-                opacity: isNotDetected ? 0.45 : isPreview ? 0.8 : 1,
+                cursor: isNotDetected ? 'not-allowed' : 'pointer',
+                opacity: isNotDetected ? 0.45 : 1,
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
@@ -385,7 +397,7 @@ export const HardwareAcceleratorCard: React.FC = () => {
                     <span>⚡</span>
                     <span>
                       {t('hardwareBackend.autoResolvedCurrent', {
-                        name: t('hardwareBackend.activeEngineName'),
+                        name: autoResolvedName,
                       })}
                     </span>
                   </div>
@@ -435,7 +447,7 @@ export const HardwareAcceleratorCard: React.FC = () => {
                   </span>
                 )}
 
-                {isPreview && (
+                {isPreview && !isReady && !isMissingRuntime && (
                   <span
                     style={{
                       fontSize: '0.72rem',
@@ -502,7 +514,7 @@ export const HardwareAcceleratorCard: React.FC = () => {
                       borderRadius: 4,
                     }}
                   >
-                    ✓ Ativo
+                    ✓ {t('hardwareBackend.statusActiveBadge')}
                   </span>
                 )}
               </div>

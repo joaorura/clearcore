@@ -1327,6 +1327,22 @@ function queryHardwareBackends() {
     if (isWin && fs.existsSync('C:\\Windows\\System32\\nvapi64.dll')) hasNvidiaGpu = true;
   } catch {}
 
+  // Probe for OpenVINO runtime on host in fallback
+  let hasOpenVinoRuntime = false;
+  try {
+    if (isLinux) {
+      const ldOut = require('child_process').execSync('ldconfig -p 2>/dev/null | grep -i libopenvino || true', { encoding: 'utf8' });
+      if (ldOut.includes('libopenvino')) hasOpenVinoRuntime = true;
+      if (!hasOpenVinoRuntime && (fs.existsSync('/usr/lib64/openvino') || fs.existsSync('/opt/intel/openvino'))) {
+        hasOpenVinoRuntime = true;
+      }
+    } else if (isWin) {
+      if (fs.existsSync('C:\\Program Files (x86)\\Intel\\openvino') || fs.existsSync('C:\\Intel\\openvino')) {
+        hasOpenVinoRuntime = true;
+      }
+    }
+  } catch {}
+
   // Resolve Auto backend
   let fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
   if (isMac && process.arch === 'arm64') {
@@ -1337,7 +1353,13 @@ function queryHardwareBackends() {
     // On AMD: never select OpenVINO! Prefer Pure-Rust CPU Tract (or Ryzen AI if configured)
     fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
   } else if (isIntel) {
-    fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
+    if (hasOpenVinoRuntime && /ultra/i.test(cpuModel)) {
+      fallbackAutoResolved = { id: 'openvino_npu', name: 'Intel OpenVINO (NPU - AI Boost)' };
+    } else if (hasOpenVinoRuntime) {
+      fallbackAutoResolved = { id: 'openvino_cpu', name: 'Intel OpenVINO (CPU - Otimizado)' };
+    } else {
+      fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
+    }
   }
 
   return {
@@ -1367,18 +1389,16 @@ function queryHardwareBackends() {
         runtime_installed: false,
         device_info: hasNvidiaGpu ? 'GPU Dedicada NVIDIA Detectada' : 'Nenhuma GPU dedicada NVIDIA detectada neste sistema.',
         runtime_name: isWin ? 'TensorRT (nvinfer.dll)' : 'TensorRT (libnvinfer.so)',
-        // Detected only: no inference path yet (mirrors DetectedHardware::runs_inference() in Rust),
-        // so there is nothing to install that would make the model faster.
-        install_script: '',
-        install_command: '',
-        install_instruction: 'GPU NVIDIA detectada; o caminho de inferência (TensorRT) ainda não está implementado, então não há nada para instalar.',
+        install_script: isWin ? '.\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
+        install_command: isWin ? 'powershell .\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
+        install_instruction: 'GPU NVIDIA detectada. Instale o CUDA Toolkit e o NVIDIA TensorRT para acelerar na GPU.',
       },
       {
         id: 'openvino_npu',
         name: 'Intel OpenVINO (NPU - AI Boost)',
         tier: 'Npu',
         hardware_detected: isIntel && /ultra/i.test(cpuModel),
-        runtime_installed: false,
+        runtime_installed: hasOpenVinoRuntime && isIntel,
         device_info: isIntel
           ? 'Intel(R) AI Boost (NPU Neural dedicada no SoC Core Ultra)'
           : `Incompatível: Processador AMD detectado (${cpuModel}). A NPU Intel AI Boost requer processador Intel Core Ultra.`,
@@ -1394,7 +1414,7 @@ function queryHardwareBackends() {
         name: 'Intel OpenVINO (iGPU - Intel Graphics)',
         tier: 'IntegratedGpu',
         hardware_detected: isIntel,
-        runtime_installed: false,
+        runtime_installed: hasOpenVinoRuntime && isIntel,
         device_info: isIntel
           ? 'GPU Integrada Intel Arc / Graphics'
           : `Incompatível: Processador AMD detectado (${cpuModel}). Requer GPU integrada Intel.`,
@@ -1410,7 +1430,7 @@ function queryHardwareBackends() {
         name: 'Intel OpenVINO (CPU - Otimizado)',
         tier: 'Cpu',
         hardware_detected: isIntel,
-        runtime_installed: false,
+        runtime_installed: hasOpenVinoRuntime && isIntel,
         device_info: isIntel
           ? `${cpuModel} (Aceleração vetorial Intel AVX2 / AMX / VNNI)`
           : `Incompatível: Processador AMD detectado (${cpuModel}). OpenVINO é exclusivo para Intel.`,

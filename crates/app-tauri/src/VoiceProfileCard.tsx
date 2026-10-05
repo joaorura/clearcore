@@ -1,12 +1,222 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useI18n } from './i18n';
 import { invokeBridge } from './bridge';
-import type { VoiceSample, CallSuggestionTake, VoiceProfileStatus } from './types';
+import type { VoiceSample, CallSuggestionTake, VoiceProfileStatus, InputDeviceInfo } from './types';
 
-interface VoiceProfileCardProps {
+export interface VoiceProfileCardProps {
   selectedInputId?: string;
   virtualMicPresent?: boolean;
+  inputDevices?: InputDeviceInfo[];
 }
+
+/**
+ * Detect if a media device label represents a virtual microphone, monitor sink, or loopback device.
+ */
+export const isVirtualOrLoopbackAudioDevice = (label: string): boolean => {
+  const l = (label || '').toLowerCase();
+  return (
+    l.includes('realtime') ||
+    l.includes('clearcore') ||
+    l.includes('virtual') ||
+    l.includes('monitor') ||
+    l.includes('loopback')
+  );
+};
+
+/**
+ * Resolves the true physical microphone device from enumerated MediaDeviceInfo list,
+ * matching against the PipeWire/system device info and filtering out virtual/loopback devices.
+ */
+export const resolvePhysicalAudioDevice = (
+  audioInputs: MediaDeviceInfo[],
+  selectedInputId?: string,
+  inputDevices?: InputDeviceInfo[]
+): MediaDeviceInfo | undefined => {
+  const physicalCandidates = audioInputs.filter(
+    (d) => !isVirtualOrLoopbackAudioDevice(d.label)
+  );
+
+  // 1. Direct match on Chromium deviceId (if it's not 'default' or 'communications')
+  if (selectedInputId && selectedInputId !== 'default' && selectedInputId !== 'communications') {
+    const directMatch = physicalCandidates.find((d) => d.deviceId === selectedInputId);
+    if (directMatch) return directMatch;
+  }
+
+  // 2. Match known physical device from inputDevices by name/label
+  const knownPhysical = inputDevices?.find((d) => d.id === selectedInputId);
+  if (knownPhysical?.name) {
+    const cleanKnownName = knownPhysical.name.toLowerCase().trim();
+    const nameMatch = physicalCandidates.find((d) => {
+      const devLabel = d.label.toLowerCase().trim();
+      return (
+        devLabel.length > 0 &&
+        (devLabel.includes(cleanKnownName) || cleanKnownName.includes(devLabel))
+      );
+    });
+    if (nameMatch) return nameMatch;
+  }
+
+  // 3. Fallback to any physical device that is NOT default or communications and has a label
+  const specificPhysical = physicalCandidates.find(
+    (d) =>
+      d.deviceId !== 'default' &&
+      d.deviceId !== 'communications' &&
+      d.label.length > 0
+  );
+  if (specificPhysical) return specificPhysical;
+
+  // 4. Any physical candidate with deviceId not default/communications
+  const nonDefault = physicalCandidates.find(
+    (d) => d.deviceId !== 'default' && d.deviceId !== 'communications'
+  );
+  if (nonDefault) return nonDefault;
+
+  // 5. Any candidate in physicalCandidates
+  if (physicalCandidates.length > 0) return physicalCandidates[0];
+
+  return undefined;
+};
+
+/**
+ * Identifies the best supported MediaRecorder MIME type for optimal audio fidelity.
+ */
+export const getPreferredAudioMimeType = (): string => {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return 'audio/webm';
+  }
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+  ];
+  for (const candidate of candidates) {
+    if (MediaRecorder.isTypeSupported(candidate)) {
+      return candidate;
+    }
+  }
+  return 'audio/webm';
+};
+
+/**
+ * Standard base audio constraints for voice profile capture.
+ * Browser native echo cancellation, noise suppression, and auto gain control are disabled
+ * to capture clean, uncolored, and un-clipped raw microphone input.
+ */
+export const PURE_VOICE_CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 1,
+};
+
+/**
+ * Cleanly acquires a physical microphone MediaStream without virtual loops or browser audio filtering.
+ */
+export const acquireCleanPhysicalStream = async (
+  selectedInputId?: string,
+  inputDevices?: InputDeviceInfo[]
+): Promise<MediaStream> => {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error('navigator.mediaDevices.getUserMedia is unavailable');
+  }
+
+  let devs: MediaDeviceInfo[] = [];
+  if (navigator.mediaDevices.enumerateDevices) {
+    try {
+      devs = await navigator.mediaDevices.enumerateDevices();
+      if (devs.length > 0 && devs.every((d) => !d.label)) {
+        try {
+          const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+          probe.getTracks().forEach((t) => t.stop());
+          devs = await navigator.mediaDevices.enumerateDevices();
+        } catch {}
+      }
+    } catch {}
+  }
+
+  const audioInputs = devs.filter((d) => d.kind === 'audioinput');
+  const physicalDev = resolvePhysicalAudioDevice(audioInputs, selectedInputId, inputDevices);
+
+  let stream: MediaStream | null = null;
+
+  if (physicalDev?.deviceId && physicalDev.deviceId !== 'default' && physicalDev.deviceId !== 'communications') {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: physicalDev.deviceId },
+          ...PURE_VOICE_CAPTURE_CONSTRAINTS,
+        },
+        video: false,
+      });
+    } catch (err) {
+      console.warn('Could not acquire microphone with deviceId.exact, trying ideal:', err);
+    }
+
+    if (!stream) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: physicalDev.deviceId,
+            ...PURE_VOICE_CAPTURE_CONSTRAINTS,
+          },
+          video: false,
+        });
+      } catch (err) {
+        console.warn('Could not acquire microphone with ideal deviceId:', err);
+      }
+    }
+  }
+
+  if (!stream) {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: PURE_VOICE_CAPTURE_CONSTRAINTS,
+      video: false,
+    });
+  }
+
+  return stream;
+};
+
+/**
+ * Safely stops a MediaRecorder and awaits the final onstop callback to assemble complete audio chunks.
+ */
+export const stopMediaRecorderAsync = (
+  recorder: MediaRecorder | null,
+  chunks: Blob[]
+): Promise<Blob | null> => {
+  return new Promise((resolve) => {
+    if (!recorder || recorder.state === 'inactive') {
+      if (chunks.length > 0) {
+        resolve(new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' }));
+      } else {
+        resolve(null);
+      }
+      return;
+    }
+
+    recorder.onstop = () => {
+      if (chunks.length > 0) {
+        resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+      } else {
+        resolve(null);
+      }
+    };
+
+    try {
+      if (typeof recorder.requestData === 'function') {
+        recorder.requestData();
+      }
+      recorder.stop();
+    } catch {
+      if (chunks.length > 0) {
+        resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+      } else {
+        resolve(null);
+      }
+    }
+  });
+};
 
 const MIN_RECORDING_SECONDS = 1.5;
 const MAX_RECORDING_SECONDS = 30;
@@ -35,6 +245,8 @@ const INITIAL_CALL_TAKES: CallSuggestionTake[] = [
 
 export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   selectedInputId,
+  virtualMicPresent: _virtualMicPresent,
+  inputDevices,
 }) => {
   const { t } = useI18n();
 
@@ -273,45 +485,44 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     let audioCtx: AudioContext | null = null;
 
     try {
-      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: selectedInputId ? { deviceId: { exact: selectedInputId } } : true,
-        });
-        mediaStreamRef.current = stream;
+      stream = await acquireCleanPhysicalStream(selectedInputId, inputDevices);
+      mediaStreamRef.current = stream;
 
-        audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-        audioContextRef.current = audioCtx;
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        analyserRef.current = analyser;
+      audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
 
-        const updateVuMeter = () => {
-          if (!analyserRef.current) return;
-          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-          analyserRef.current.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            sum += dataArray[i];
-          }
-          const avg = sum / dataArray.length;
-          const percent = Math.min(100, Math.round((avg / 128) * 100));
-          setLiveVoiceLevel(percent);
-          animationFrameRef.current = requestAnimationFrame(updateVuMeter);
-        };
-        updateVuMeter();
+      const updateVuMeter = () => {
+        if (!analyserRef.current) return;
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        const percent = Math.min(100, Math.round((avg / 128) * 100));
+        setLiveVoiceLevel(percent);
+        animationFrameRef.current = requestAnimationFrame(updateVuMeter);
+      };
+      updateVuMeter();
 
-        const recorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = recorder;
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            recordedChunksRef.current.push(e.data);
-          }
-        };
-        recorder.start(100);
-      }
-    } catch {
+      const preferredMime = getPreferredAudioMimeType();
+      const recorderOptions = preferredMime ? { mimeType: preferredMime } : undefined;
+      const recorder = new MediaRecorder(stream, recorderOptions);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          recordedChunksRef.current.push(e.data);
+        }
+      };
+      recorder.start(100);
+    } catch (err) {
+      console.warn('Could not acquire physical microphone, using simulated VU meter fallback:', err);
       // Fallback simulated VU meter for environments without mic permissions
       let simLevel = 35;
       const simInterval = setInterval(() => {
@@ -334,7 +545,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     timerRef.current = timer;
   };
 
-  const finishStepRecording = (stepNum: number) => {
+  const finishStepRecording = async (stepNum: number) => {
     const rawElapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
     const exactDuration = Math.min(
       MAX_RECORDING_SECONDS,
@@ -342,12 +553,9 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     );
 
     let finalUrl = '';
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-      const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-      if (blob.size > 0) {
-        finalUrl = URL.createObjectURL(blob);
-      }
+    const blob = await stopMediaRecorderAsync(mediaRecorderRef.current, recordedChunksRef.current);
+    if (blob && blob.size > 0) {
+      finalUrl = URL.createObjectURL(blob);
     }
     if (!finalUrl) {
       finalUrl = createSyntheticAudioUrl(exactDuration);
@@ -418,6 +626,9 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     setProfileStatus(newStatus);
 
     await invokeBridge('set_voice_profile', { profile: newStatus });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: newStatus }));
+    }
     setFeedbackMessage(t('voiceProfile.profileActivatedSuccess'));
     setTimeout(() => setFeedbackMessage(null), 5000);
   };
@@ -525,7 +736,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     setTimeout(() => setFeedbackMessage(null), 3000);
   };
 
-  const finishModalRecording = () => {
+  const finishModalRecording = async () => {
     const rawElapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
     const exactDuration = Math.min(
       MAX_RECORDING_SECONDS,
@@ -533,12 +744,13 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     );
 
     let finalUrl = '';
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-      const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-      if (blob.size > 0) finalUrl = URL.createObjectURL(blob);
+    const blob = await stopMediaRecorderAsync(mediaRecorderRef.current, recordedChunksRef.current);
+    if (blob && blob.size > 0) {
+      finalUrl = URL.createObjectURL(blob);
     }
-    if (!finalUrl) finalUrl = createSyntheticAudioUrl(exactDuration);
+    if (!finalUrl) {
+      finalUrl = createSyntheticAudioUrl(exactDuration);
+    }
 
     cleanupRecording();
     setModalRecordedUrl(finalUrl);
@@ -554,40 +766,39 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     recordingStartTimeRef.current = Date.now();
 
     try {
-      if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: selectedInputId ? { deviceId: { exact: selectedInputId } } : true,
-        });
-        mediaStreamRef.current = stream;
+      const stream = await acquireCleanPhysicalStream(selectedInputId, inputDevices);
+      mediaStreamRef.current = stream;
 
-        const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-        audioContextRef.current = audioCtx;
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        analyserRef.current = analyser;
+      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
 
-        const updateVuMeter = () => {
-          if (!analyserRef.current) return;
-          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-          analyserRef.current.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-          const avg = sum / dataArray.length;
-          setLiveVoiceLevel(Math.min(100, Math.round((avg / 128) * 100)));
-          animationFrameRef.current = requestAnimationFrame(updateVuMeter);
-        };
-        updateVuMeter();
+      const updateVuMeter = () => {
+        if (!analyserRef.current) return;
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const avg = sum / dataArray.length;
+        setLiveVoiceLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        animationFrameRef.current = requestAnimationFrame(updateVuMeter);
+      };
+      updateVuMeter();
 
-        const recorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = recorder;
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
-        };
-        recorder.start(100);
-      }
-    } catch {
+      const preferredMime = getPreferredAudioMimeType();
+      const recorderOptions = preferredMime ? { mimeType: preferredMime } : undefined;
+      const recorder = new MediaRecorder(stream, recorderOptions);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.start(100);
+    } catch (err) {
+      console.warn('Could not acquire physical microphone for modal recording, using simulated fallback:', err);
       let simLevel = 35;
       const simInterval = setInterval(() => {
         simLevel = Math.max(15, Math.min(95, simLevel + (Math.random() * 30 - 15)));

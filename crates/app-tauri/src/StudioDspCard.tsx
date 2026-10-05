@@ -122,6 +122,14 @@ export const StudioDspCard: React.FC = () => {
       }
     };
     loadPreset();
+
+    const handleProfileUpdate = (e: Event) => {
+      const custom = e as CustomEvent<{ is_enrolled?: boolean; neural_eq_calibrated?: boolean }>;
+      const isCalibrated = custom.detail?.neural_eq_calibrated ?? (localStorage.getItem(STORAGE_ENROLLED_KEY) === 'true');
+      setIsNeuralEqCalibrated(Boolean(isCalibrated));
+    };
+    window.addEventListener('clearcore_profile_updated', handleProfileUpdate);
+    return () => window.removeEventListener('clearcore_profile_updated', handleProfileUpdate);
   }, []);
 
   const handleSelectPreset = async (preset: StudioPreset) => {

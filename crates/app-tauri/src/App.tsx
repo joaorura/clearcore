@@ -528,6 +528,7 @@ export const App: React.FC = () => {
       <VoiceProfileCard
         selectedInputId={selectedDeviceId}
         virtualMicPresent={Boolean(virtualMic?.present)}
+        inputDevices={inputDevices}
       />
 
       {/* Processamento de Estúdio DSP */}
