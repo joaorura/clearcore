@@ -100,11 +100,7 @@ fn invalid_preset_is_rejected_without_reaching_the_handler() {
         assert_eq!(response.status, IpcStatus::InvalidCommand);
         let error = response.error.unwrap();
         assert_eq!(error.code, "JSON_PARSE_ERROR");
-        assert!(
-            error.message.contains("unknown variant"),
-            "unexpected message: {}",
-            error.message
-        );
+        assert_eq!(error.message, "malformed request");
     }
 }
 
