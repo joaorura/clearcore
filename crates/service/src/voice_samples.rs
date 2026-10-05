@@ -19,6 +19,7 @@ pub const VOICE_EMBEDDING_DIM: usize = 192;
 pub const PROFILE_BIN_BYTES: usize = 768; // 192 * 4 bytes (IEEE-754 Float32 little endian)
 pub const SAMPLES_FILE_NAME: &str = "voice_samples.json";
 pub const PROFILE_BIN_FILE_NAME: &str = "profile.bin";
+pub const SAMPLES_DIR_NAME: &str = "samples";
 pub const MANIFEST_VERSION: u32 = 1;
 
 #[derive(Debug)]
@@ -32,6 +33,7 @@ pub enum VoiceSampleError {
     InsecurePermissions(String),
     Io(std::io::Error),
     SampleNotFound(String),
+    InvalidSampleId(String),
 }
 
 impl fmt::Display for VoiceSampleError {
@@ -53,6 +55,12 @@ impl fmt::Display for VoiceSampleError {
             Self::InsecurePermissions(err) => write!(f, "insecure storage permissions: {err}"),
             Self::Io(err) => write!(f, "I/O error: {err}"),
             Self::SampleNotFound(id) => write!(f, "voice sample with id '{id}' not found"),
+            Self::InvalidSampleId(id) => {
+                write!(
+                    f,
+                    "invalid voice sample id '{id}' (expected [A-Za-z0-9_-]{{1,64}})"
+                )
+            }
         }
     }
 }
@@ -237,6 +245,75 @@ impl VoiceSampleManager {
         Ok(())
     }
 
+    /// Directory holding the sample WAV files (`<dir>/samples`).
+    #[must_use]
+    pub fn samples_dir(&self) -> PathBuf {
+        self.dir.join(SAMPLES_DIR_NAME)
+    }
+
+    /// Creates `samples/` with mode 0700 (tightening looser modes) and refuses a symlink.
+    pub fn ensure_samples_dir(&self) -> std::io::Result<()> {
+        let dir = self.samples_dir();
+        match fs::symlink_metadata(&dir) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("samples directory {} is a symlink", dir.display()),
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("{} is not a directory", dir.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let mut builder = fs::DirBuilder::new();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::DirBuilderExt;
+                    builder.mode(0o700);
+                }
+                builder.create(&dir)?;
+            }
+            Err(error) => return Err(error),
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&dir)?.permissions().mode();
+            if mode & 0o077 != 0 {
+                fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Atomically writes `<samples_dir>/<id>.wav` with mode 0600.
+    pub fn write_sample_wav(&self, id: &str, wav: &[u8]) -> Result<PathBuf, VoiceSampleError> {
+        let valid = (1..=64).contains(&id.len())
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        if !valid {
+            return Err(VoiceSampleError::InvalidSampleId(id.to_string()));
+        }
+        self.ensure_dir()?;
+        self.ensure_samples_dir()?;
+        let path = self.samples_dir().join(format!("{id}.wav"));
+        Self::write_secure_atomic(&path, wav)?;
+        Ok(path)
+    }
+
+    /// True when `path` resolves (canonicalized) inside `samples_dir()`.
+    fn is_inside_samples_dir(&self, path: &Path) -> bool {
+        match (fs::canonicalize(path), fs::canonicalize(self.samples_dir())) {
+            (Ok(file), Ok(root)) => file.starts_with(root),
+            _ => false,
+        }
+    }
+
     /// Loads samples from disk if `voice_samples.json` exists.
     pub fn load_from_disk(&mut self) -> Result<(), VoiceSampleError> {
         self.refuse_symlinked_dir()?;
@@ -377,7 +454,7 @@ impl VoiceSampleManager {
             let removed = self.samples.remove(pos);
             if delete_audio_file && let Some(ref audio_path_str) = removed.audio_path {
                 let audio_path = PathBuf::from(audio_path_str);
-                if audio_path.is_file() {
+                if audio_path.is_file() && self.is_inside_samples_dir(&audio_path) {
                     let _ = fs::remove_file(audio_path);
                 }
             }
@@ -643,11 +720,12 @@ mod tests {
     fn test_delete_sample_removes_audio_file() {
         let temp = tempfile::tempdir().expect("tempdir");
         let dir = temp.path().join("profiles");
-        let audio_path = temp.path().join("sample1.wav");
-        fs::write(&audio_path, b"RIFF dummy wav audio data").expect("write audio");
+        let mut mgr = VoiceSampleManager::new(&dir);
+        let audio_path = mgr
+            .write_sample_wav("sample1", b"RIFF dummy wav audio data")
+            .expect("write audio");
         assert!(audio_path.is_file());
 
-        let mut mgr = VoiceSampleManager::new(&dir);
         let sample = VoiceSample::new(
             "s_audio",
             "2026-10-05T00:00:00Z",
@@ -683,5 +761,93 @@ mod tests {
         assert!(s.validate().is_ok());
         s.embedding[3] = f32::NAN;
         assert!(s.validate().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_sample_wav_creates_private_dir_and_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let mgr = VoiceSampleManager::new(temp.path().join("profiles"));
+        let path = mgr.write_sample_wav("s-1_a", b"RIFFdata").unwrap();
+        assert_eq!(path, mgr.samples_dir().join("s-1_a.wav"));
+        let dir_mode = fs::metadata(mgr.samples_dir())
+            .unwrap()
+            .permissions()
+            .mode();
+        let file_mode = fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(dir_mode & 0o777, 0o700);
+        assert_eq!(file_mode & 0o777, 0o600);
+        assert_eq!(fs::read(&path).unwrap(), b"RIFFdata");
+    }
+
+    #[test]
+    fn write_sample_wav_rejects_bad_ids() {
+        let temp = tempfile::tempdir().unwrap();
+        let mgr = VoiceSampleManager::new(temp.path().join("profiles"));
+        for id in ["../x", "a/b", "", "a.b", &"a".repeat(65)] {
+            assert!(
+                matches!(
+                    mgr.write_sample_wav(id, b"x"),
+                    Err(VoiceSampleError::InvalidSampleId(_))
+                ),
+                "id {id:?} must be rejected"
+            );
+        }
+        assert!(!temp.path().join("x.wav").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_samples_dir_refuses_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("profiles");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("samples")).unwrap();
+        let mgr = VoiceSampleManager::new(&dir);
+        assert!(mgr.ensure_samples_dir().is_err());
+        assert!(mgr.write_sample_wav("s1", b"x").is_err());
+        assert!(!outside.join("s1.wav").exists());
+    }
+
+    #[test]
+    fn delete_sample_does_not_remove_audio_outside_samples_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = temp.path().join("precious.wav");
+        fs::write(&outside, b"keep me").unwrap();
+        let mut mgr = VoiceSampleManager::new(temp.path().join("profiles"));
+        mgr.write_sample_wav("inside", b"RIFF").unwrap();
+        let sample = VoiceSample::new(
+            "s_out",
+            "1",
+            "Out",
+            Some(outside.to_str().unwrap().to_string()),
+            vec![],
+        )
+        .unwrap();
+        mgr.add_sample(sample).unwrap();
+        assert!(mgr.delete_sample("s_out", true).unwrap());
+        assert!(outside.is_file(), "file outside samples_dir must survive");
+        assert!(mgr.get_sample("s_out").is_none());
+    }
+
+    #[test]
+    fn delete_sample_removes_audio_inside_samples_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut mgr = VoiceSampleManager::new(temp.path().join("profiles"));
+        let wav = mgr.write_sample_wav("in1", b"RIFF").unwrap();
+        let sample = VoiceSample::new(
+            "in1",
+            "1",
+            "In",
+            Some(wav.to_str().unwrap().to_string()),
+            vec![],
+        )
+        .unwrap();
+        mgr.add_sample(sample).unwrap();
+        mgr.delete_sample("in1", true).unwrap();
+        assert!(!wav.exists());
     }
 }
