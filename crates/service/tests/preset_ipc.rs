@@ -5,11 +5,10 @@ mod common;
 
 use common::{TempDir, send};
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
-use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus, StudioPreset};
+use realtime_noise_ipc::{IpcCommand, IpcResponse, IpcStatus, StudioPreset};
 use realtime_noise_service::ServiceDaemon;
 use realtime_noise_service::bootstrap::{ServiceBootstrap, ServiceConfig};
 use realtime_noise_service::settings::Settings;
-use serde_json::json;
 use std::io::Cursor;
 use studio_dsp::Preset;
 

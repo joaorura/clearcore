@@ -85,7 +85,11 @@ mkdir -p %{buildroot}/opt/clearcore
 cp -a %{_source_dir}/* %{buildroot}/opt/clearcore/
 
 mkdir -p %{buildroot}/usr/bin
-ln -sf /opt/clearcore/clearcore %{buildroot}/usr/bin/clearcore
+cat << 'WRAPPER' > %{buildroot}/usr/bin/clearcore
+#!/usr/bin/env bash
+exec /opt/clearcore/clearcore "$@"
+WRAPPER
+chmod 0755 %{buildroot}/usr/bin/clearcore
 
 mkdir -p %{buildroot}/usr/share/applications
 if [ -f "%{_source_dir}/clearcore.desktop" ]; then
