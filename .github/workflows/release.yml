@@ -601,3 +601,17 @@ jobs:
           body_path: ${{ env.NOTES_PATH }}
           draft: false
           prerelease: ${{ github.event.inputs.prerelease != 'false' }}
+
+      - name: Build DNF and APT Repository Metadata
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y createrepo-c dpkg-dev
+          chmod +x scripts/build-package-repos.sh
+          ./scripts/build-package-repos.sh release-assets repo-site
+
+      - name: Deploy DNF and APT Repositories to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: repo-site
+          branch: gh-pages

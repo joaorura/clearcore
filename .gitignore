@@ -29,3 +29,5 @@ scratch/
 build/
 .playwright-mcp/
 
+repo-site/
+release-assets/
