@@ -6,9 +6,22 @@ import { enrollmentErrorCode } from './enrollmentErrors';
 type JobStart = { jobId: string } | { errorCode: EnrollErrorCode };
 type GetJob = (id: string) => Promise<EnrollmentJob | { errorCode: EnrollErrorCode }>;
 
+export function logVoiceDebug(origin: string, message: string, data?: unknown) {
+  try {
+    console.log(`[${new Date().toISOString()}] [VoiceDebug] [${origin}] ${message}`, data !== undefined ? data : '');
+    const w = typeof window !== 'undefined' ? (window as unknown as { __TAURI_INTERNALS__?: { invoke: (c: string, a: unknown) => Promise<unknown> } }) : null;
+    if (w?.__TAURI_INTERNALS__?.invoke) {
+      void w.__TAURI_INTERNALS__.invoke('log_voice_debug', { origin, message, data });
+    }
+  } catch (_) {}
+}
+
 /** The Float32Array goes through as-is: the Electron main process does the base64 encoding. */
 export async function addSample(c: CapturedPcm, name: string): Promise<JobStart> {
-  return invokeBridge<JobStart>(CMD.addSample, { pcm: c.pcm, sampleRate: c.sampleRate, name, device: c.device });
+  logVoiceDebug('CLIENT', 'addSample called', { name, sampleRate: c.sampleRate, durationSec: c.durationSec, device: c.device });
+  const res = await invokeBridge<JobStart>(CMD.addSample, { pcm: c.pcm, sampleRate: c.sampleRate, name, device: c.device });
+  logVoiceDebug('CLIENT', 'addSample response received', res);
+  return res;
 }
 
 export async function buildProfile(name: string): Promise<JobStart> {
@@ -65,8 +78,12 @@ export async function waitForJob(
       }
     }
     if (job) {
+      logVoiceDebug('CLIENT', `waitForJob ${jobId} update: state=${job.state}, stage=${job.stage}, err=${job.errorCode}`);
       onUpdate?.(job);
-      if (job.state !== 'running') return job;
+      if (job.state !== 'running') {
+        logVoiceDebug('CLIENT', `waitForJob ${jobId} finished: state=${job.state}, sampleId=${job.sampleId}, error=${job.errorCode}`);
+        return job;
+      }
     }
     if (Date.now() + intervalMs > deadline) throw new Error('timeout');
     await abortableSleep(intervalMs, signal);

@@ -1659,6 +1659,10 @@ ipcMain.handle('get_voice_profile_status', () => readMergedVoiceProfile());
 
 // Voice enrollment channels (enrollment_add_sample, enrollment_list_samples, ...).
 enrollmentIpc.registerEnrollmentHandlers(ipcMain, { sendIpcRequest });
+ipcMain.handle('log_voice_debug', (_event, args) => {
+  enrollmentIpc.appendDebugLog(args?.origin || 'FRONTEND', args?.message || '', args?.data);
+  return { ok: true };
+});
 
 ipcMain.handle('get_call_takes', async () => {
   // Cache is only a fallback while the service is unreachable; the service is the source of truth.

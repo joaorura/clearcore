@@ -11,6 +11,7 @@ import {
 } from './guidedSteps';
 import type { EnrollmentRecorder } from './useEnrollmentRecorder';
 import type { Translate } from './voiceProfileLogic';
+import { logVoiceDebug } from '../enrollmentClient';
 
 /** UI preference only (open questions vs reading); no sample, take or profile data is stored locally. */
 const STORAGE_READING_MODE_KEY = 'clearcore_voice_reading_mode';
@@ -85,41 +86,48 @@ export function useGuidedSteps(opts: {
   }, [samples, t]);
 
   const finishStep = async (step: number) => {
+    logVoiceDebug('GUIDED_STEPS', `finishStep(${step}) called, isSubmitting=true`);
     setIsSubmitting(true);
     try {
       const captured = await recorder.stopCapture();
-      if (!captured) return;
+      if (!captured) {
+        logVoiceDebug('GUIDED_STEPS', `finishStep(${step}): recorder.stopCapture returned null`);
+        return;
+      }
 
       const previous = completedRef.current[step];
-      const { outcome, sampleId } = await recorder.submitSample(captured, t(STEP_QUESTIONS[step - 1].categoryKey), 'enroll');
+      const category = t(STEP_QUESTIONS[step - 1].categoryKey);
+      logVoiceDebug('GUIDED_STEPS', `Submitting sample for step ${step}, category=${category}...`);
+      const { outcome, sampleId } = await recorder.submitSample(captured, category, 'enroll');
+      logVoiceDebug('GUIDED_STEPS', `submitSample result for step ${step}:`, { outcome, sampleId });
       // A failed take keeps the step (and its sample in the service) as it was.
       if (outcome.kind !== 'done') {
+        logVoiceDebug('GUIDED_STEPS', `finishStep(${step}) NOT done:`, outcome);
         console.warn('[VoiceProfile] finishStep not done:', outcome);
         return;
       }
       hasExplicitlyResetRef.current = false;
       setCompletedSteps((prev) => {
         const take = stepAfterSubmit(prev[step], outcome, sampleId, captured);
+        logVoiceDebug('GUIDED_STEPS', `Step ${step} updated in completedSteps:`, take);
         return take ? { ...prev, [step]: take } : prev;
       });
-      flash(t('voiceProfile.sampleCompleted'), 3500);
-      if (step < GUIDED_STEP_COUNT) {
-        setCurrentStep(step + 1);
-      }
-      // Known limit: the new sample is added BEFORE the old one is deleted, so the old one still
-      // counts against the 90 s budget while the new one is checked. With the budget almost full,
-      // the new take is refused with ENROLL_BUDGET_EXCEEDED: safe (nothing is lost, the old sample
-      // stays) and the card opens the gallery so the user can free speech first.
+      flash(t('voiceProfile.sampleCompleted'), 4000);
+      logVoiceDebug('GUIDED_STEPS', `Step ${step} finished successfully! Remaining on step ${step} with [Refazer] and [Próximo Passo] buttons.`);
+
       const replaced = replacedSampleToDelete(previous, outcome, sampleId);
       if (replaced !== null) await deleteReplacedSample(replaced);
     } finally {
       setIsSubmitting(false);
+      logVoiceDebug('GUIDED_STEPS', `finishStep(${step}) finally block: isSubmitting=false`);
     }
   };
 
   // Up to MAX_RECORD_SECONDS with manual stop; the limit finishes the step by itself.
   const startStep = async (step: number) => {
+    logVoiceDebug('GUIDED_STEPS', `startStep(${step}) called, starting recorder...`);
     await recorder.startCapture(() => {
+      logVoiceDebug('GUIDED_STEPS', `Time limit reached for step ${step}, calling finishStep...`);
       void finishStep(step);
     });
   };

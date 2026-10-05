@@ -595,6 +595,21 @@ fn job_json(prefix: &str, info: &JobInfo, extra: Option<&JobExtra>) -> Value {
     })
 }
 
+fn debug_voice_file_log(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/clearcore-voice-debug.log")
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{now}] [DAEMON] {msg}");
+    }
+}
+
 impl ServiceDaemon {
     /// Replaces the enrollment seams (test-only): fake denoiser/model, explicit development
     /// asset and legacy directory. Call before `attach_profile_store` for the migration hook.
@@ -674,16 +689,29 @@ impl ServiceDaemon {
     ) -> IpcResponse {
         let spawned = self.enrollment.sample_jobs.spawn("denoise", move || {
             let mut pcm = pcm;
-            ingest_sample(denoiser.as_mut(), &mut pcm.0)
-                .map(|result| IngestOutcome { kind, result })
-                .map_err(|e| failure(e.code(), "denoise"))
+            match ingest_sample(denoiser.as_mut(), &mut pcm.0) {
+                Ok(result) => {
+                    debug_voice_file_log(&format!("ingest_sample SUCCESS: speech_secs={}, peak={}, rms_dbfs={}", result.speech_seconds, result.peak, result.rms_dbfs));
+                    Ok(IngestOutcome { kind, result })
+                }
+                Err(e) => {
+                    debug_voice_file_log(&format!("ingest_sample FAILED: error={e:?} (code={})", e.code()));
+                    Err(failure(e.code(), "denoise"))
+                }
+            }
         });
         match spawned {
-            Ok(job_id) => IpcResponse::success(
-                request_id,
-                json!({"success": true, "job_id": format!("{SAMPLE_JOB_PREFIX}{job_id}")}),
-            ),
-            Err(f) => busy_or_failed(request_id, f),
+            Ok(job_id) => {
+                debug_voice_file_log(&format!("spawn_ingest: spawned job_id={SAMPLE_JOB_PREFIX}{job_id}"));
+                IpcResponse::success(
+                    request_id,
+                    json!({"success": true, "job_id": format!("{SAMPLE_JOB_PREFIX}{job_id}")}),
+                )
+            }
+            Err(f) => {
+                debug_voice_file_log(&format!("spawn_ingest: FAILED spawning job (busy or error)"));
+                busy_or_failed(request_id, f)
+            }
         }
     }
 
@@ -697,24 +725,32 @@ impl ServiceDaemon {
         device_id_hash: &str,
     ) -> IpcResponse {
         const REQUEST_ID: &str = "add-voice-sample-resp";
+        debug_voice_file_log(&format!("add_voice_sample received: name={name}, rate={sample_rate}, label={device_label}, hash={device_id_hash}, b64_len={}", pcm_f32_le_b64.len()));
         if !valid_metadata(name, false)
             || !valid_metadata(device_label, true)
             || !valid_metadata(device_id_hash, true)
         {
+            debug_voice_file_log("add_voice_sample: FAILED invalid_metadata");
             return IpcResponse::invalid_command(REQUEST_ID, "invalid sample metadata");
         }
         // An empty hash would form a group "" mixing every unidentified microphone (D7).
         if device_id_hash.trim().is_empty() {
+            debug_voice_file_log("add_voice_sample: FAILED empty device_id_hash");
             return enroll_error(REQUEST_ID, &EnrollError::InvalidAudio);
         }
         // Fail closed BEFORE decoding anything: without the base denoiser nothing is stored.
         let Some(denoiser) = self.make_denoiser() else {
+            debug_voice_file_log("add_voice_sample: FAILED make_denoiser is None (ModelNotConfigured)");
             return enroll_error(REQUEST_ID, &EnrollError::ModelNotConfigured);
         };
         let pcm = match decode_pcm(pcm_f32_le_b64, sample_rate) {
             Ok(pcm) => pcm,
-            Err(e) => return enroll_error(REQUEST_ID, &e),
+            Err(e) => {
+                debug_voice_file_log(&format!("add_voice_sample: FAILED decode_pcm error: {e:?}"));
+                return enroll_error(REQUEST_ID, &e);
+            }
         };
+        debug_voice_file_log("add_voice_sample: PCM decoded, spawning ingest job...");
         self.spawn_ingest(
             REQUEST_ID,
             denoiser,
@@ -764,6 +800,7 @@ impl ServiceDaemon {
     fn store_ingested(&mut self, job_id: &str, outcome: &IngestOutcome) {
         let external = format!("{SAMPLE_JOB_PREFIX}{job_id}");
         let r = &outcome.result;
+        debug_voice_file_log(&format!("store_ingested called: external={external}, speech_secs={}, peak={}, rms={}", r.speech_seconds, r.peak, r.rms_dbfs));
         let quality = Quality {
             peak: r.peak,
             rms_dbfs: r.rms_dbfs,
@@ -778,6 +815,7 @@ impl ServiceDaemon {
             } => {
                 let budget = budget_for(self.voice_samples.list_samples(), device_id_hash);
                 if !fits_manual(&budget, r.speech_seconds) {
+                    debug_voice_file_log(&format!("store_ingested: budget exceeded (used={}, max={}, needed={})", budget.used_seconds, budget.max_seconds, r.speech_seconds));
                     self.enrollment.sample_jobs.mark_failed(
                         job_id,
                         JobFailure {
@@ -793,6 +831,7 @@ impl ServiceDaemon {
                     .voice_samples
                     .write_sample_wav(&sample_id, &r.wav_bytes)
                 else {
+                    debug_voice_file_log("store_ingested: write_sample_wav FAILED");
                     self.fail_sample_job(job_id);
                     return;
                 };
@@ -810,10 +849,12 @@ impl ServiceDaemon {
                     speech_seconds: r.speech_seconds,
                 };
                 if self.voice_samples.add_sample(sample).is_err() {
+                    debug_voice_file_log("store_ingested: add_sample to db FAILED");
                     let _ = std::fs::remove_file(&path);
                     self.fail_sample_job(job_id);
                     return;
                 }
+                debug_voice_file_log(&format!("store_ingested: sample {sample_id} successfully saved to disk!"));
                 self.enrollment.bump_generation();
                 self.enrollment.extras.insert(
                     external,

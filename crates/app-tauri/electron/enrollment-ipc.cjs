@@ -4,6 +4,21 @@
 // Raw PCM is never written to disk or logged; handlers never log names or error texts.
 
 const os = require('node:os');
+const fs = require('node:fs');
+
+const DEBUG_LOG_PATH = '/tmp/clearcore-voice-debug.log';
+
+function appendDebugLog(origin, message, data) {
+  try {
+    const timestamp = new Date().toISOString();
+    let detail = '';
+    if (data !== undefined) {
+      detail = ' ' + (typeof data === 'string' ? data : JSON.stringify(data));
+    }
+    const line = `[${timestamp}] [${origin}] ${message}${detail}\n`;
+    fs.appendFileSync(DEBUG_LOG_PATH, line);
+  } catch (_) {}
+}
 
 const MAX_SPEECH_SECONDS = 90;
 const RATE = 48000;
@@ -204,6 +219,7 @@ function registerEnrollmentHandlers(ipcMain, { sendIpcRequest }) {
         return await fn(args || {});
       } catch (err) {
         const code = classify(err);
+        appendDebugLog('ELECTRON_IPC', `Handler ${channel} threw error:`, { code, message: err?.message });
         console.error(`[Clearcore Voice IPC] ${channel} failed:`, code);
         return { errorCode: code };
       }
@@ -212,25 +228,64 @@ function registerEnrollmentHandlers(ipcMain, { sendIpcRequest }) {
 
   const jobIdOf = (res) => {
     if (!res || typeof res.job_id !== 'string' || !JOB_ID_RE.test(res.job_id)) {
-      const err = new Error('malformed job id');
+      const err = new Error('malformed job id: ' + JSON.stringify(res));
       err.code = 'ENROLL_FAILED';
       throw err;
     }
     return { jobId: res.job_id };
   };
   wrap('enrollment_add_sample', async (a) => {
+    appendDebugLog('ELECTRON_IPC', 'enrollment_add_sample invoked', {
+      name: a?.name,
+      sampleRate: a?.sampleRate,
+      device: a?.device,
+      pcmLength: a?.pcm ? (a.pcm.length || a.pcm.byteLength) : null,
+    });
     try {
       const cmd = buildAddVoiceSampleCommand(a);
-      return jobIdOf(await sendIpcRequest(cmd, {}, 60000));
+      appendDebugLog('ELECTRON_IPC', 'Sending AddVoiceSample command to daemon socket...');
+      const rawRes = await sendIpcRequest(cmd, {}, 60000);
+      appendDebugLog('ELECTRON_IPC', 'Daemon responded to AddVoiceSample:', rawRes);
+      const res = jobIdOf(rawRes);
+      appendDebugLog('ELECTRON_IPC', 'jobId successfully extracted:', res);
+      return res;
+    } catch (err) {
+      appendDebugLog('ELECTRON_IPC', 'AddVoiceSample failed:', { message: err?.message, code: err?.code });
+      throw err;
     } finally {
       wipePcm(a.pcm);
     }
   }, classifyStartError);
-  wrap('enrollment_build_profile', async (a) => jobIdOf(await sendIpcRequest(buildBuildProfileCommand(a), {}, 5000)), classifyStartError);
-  wrap('enrollment_get_job', async (a) => mapJob(await sendIpcRequest(buildGetJobCommand(a), {}, 5000)));
-  wrap('enrollment_list_samples', async () => mapSampleList(await sendIpcRequest('ListVoiceSamples', {}, 5000)));
+  wrap('enrollment_build_profile', async (a) => {
+    appendDebugLog('ELECTRON_IPC', 'enrollment_build_profile invoked', { name: a?.name });
+    const res = jobIdOf(await sendIpcRequest(buildBuildProfileCommand(a), {}, 5000));
+    appendDebugLog('ELECTRON_IPC', 'enrollment_build_profile jobId:', res);
+    return res;
+  }, classifyStartError);
+  wrap('enrollment_get_job', async (a) => {
+    const rawRes = await sendIpcRequest(buildGetJobCommand(a), {}, 5000);
+    const res = mapJob(rawRes);
+    appendDebugLog('ELECTRON_IPC', `GetJob ${a?.jobId}:`, {
+      state: res?.state,
+      stage: res?.stage,
+      errorCode: res?.errorCode,
+      sampleId: res?.sampleId,
+    });
+    return res;
+  });
+  wrap('enrollment_list_samples', async () => {
+    const rawRes = await sendIpcRequest('ListVoiceSamples', {}, 5000);
+    const res = mapSampleList(rawRes);
+    appendDebugLog('ELECTRON_IPC', 'ListVoiceSamples result:', {
+      samplesCount: res?.samples?.length,
+      selectedGroup: res?.selectedDeviceIdHash,
+      selectedLabel: res?.selectedDeviceLabel,
+    });
+    return res;
+  });
   wrap('enrollment_delete_sample', async (a) => {
     if (typeof a.id !== 'string' || a.id.length === 0) throw new Error('invalid sample id');
+    appendDebugLog('ELECTRON_IPC', 'DeleteVoiceSample invoked for id:', a.id);
     await sendIpcRequest({ DeleteVoiceSample: { id: a.id } }, {}, 5000);
     return { success: true };
   });
@@ -247,4 +302,5 @@ module.exports = {
   classifyEnrollError,
   classifyStartError,
   registerEnrollmentHandlers,
+  appendDebugLog,
 };

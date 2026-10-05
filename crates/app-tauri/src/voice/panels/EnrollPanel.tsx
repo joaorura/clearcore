@@ -129,6 +129,13 @@ export function EnrollPanel(p: EnrollPanelProps) {
             </div>
           )}
 
+          {!isRecording && !isProcessing && currentTake && (
+            <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#4ade80', background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '8px 14px', borderRadius: 6, marginBottom: 14, fontSize: '0.9rem', fontWeight: 600 }}>
+              <span>✓</span>
+              <span>{t('voiceProfile.sampleCompleted')}</span>
+            </div>
+          )}
+
           <div className="stepper-action-row">
             {isRecording ? (
               <RecordingIndicator t={t} locale={p.locale} elapsed={p.recordingElapsedSeconds} onStop={() => p.onFinishStep(currentStep)} showHint />
@@ -138,14 +145,13 @@ export function EnrollPanel(p: EnrollPanelProps) {
                 <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{t('voiceProfile.sendingSample')}</span>
               </div>
             ) : currentTake ? (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                {/* No "Ouvir": the raw take was zeroed once sent to the service. */}
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button className="action-btn" disabled={isProcessing || p.isStarting} onClick={() => p.onRedoStep(currentStep)}>
                   {t('voiceProfile.redoSample')}
                 </button>
                 {currentStep < GUIDED_STEP_COUNT && (
-                  <button className="action-btn primary-next-btn" disabled={isProcessing} onClick={p.onNextStep}>
-                    {t('voiceProfile.nextStep')}
+                  <button className="action-btn primary-next-btn" style={{ fontWeight: 700, padding: '10px 24px', fontSize: '0.95rem' }} disabled={isProcessing} onClick={p.onNextStep}>
+                    {t('voiceProfile.nextStep')} ➔
                   </button>
                 )}
               </div>
