@@ -23,6 +23,10 @@ export class JobAbortScope {
     for (const c of this.live) c.abort();
     this.live.clear();
   }
+
+  isClosed(): boolean {
+    return this.closed;
+  }
 }
 
 /** waitForJob rejects with Error('aborted') when its signal fires. */

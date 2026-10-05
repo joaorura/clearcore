@@ -83,9 +83,14 @@ export function useEnrollmentRecorder(opts: {
 
   // Every job poller started here stops when the card unmounts.
   const jobScopeRef = useRef<JobAbortScope | null>(null);
-  if (jobScopeRef.current === null) jobScopeRef.current = new JobAbortScope();
-  const jobScope = jobScopeRef.current;
-  useEffect(() => () => jobScope.abortAll(), [jobScope]);
+  if (jobScopeRef.current === null || jobScopeRef.current.isClosed()) {
+    jobScopeRef.current = new JobAbortScope();
+  }
+  useEffect(() => {
+    return () => {
+      jobScopeRef.current?.abortAll();
+    };
+  }, []);
 
   /**
    * Opens the raw physical microphone and starts the PCM recorder. Single-flight: a second call
@@ -184,7 +189,11 @@ export function useEnrollmentRecorder(opts: {
           : { kind: 'show-error', code: startError ?? 'ENROLL_FAILED' };
       } else {
         captured.pcm.fill(0); // sent: drop the raw audio from memory
-        const signal = jobScope.signal();
+        if (!jobScopeRef.current || jobScopeRef.current.isClosed()) {
+          jobScopeRef.current = new JobAbortScope();
+        }
+        const activeScope = jobScopeRef.current;
+        const signal = activeScope.signal();
         try {
           logVoiceDebug('RECORDER', 'waitForJob starting for jobId:', start.jobId);
           const job = await waitForJob(start.jobId, { onUpdate: jobs.setCurrentJob, signal });
@@ -194,7 +203,7 @@ export function useEnrollmentRecorder(opts: {
           logVoiceDebug('RECORDER', 'waitForJob completed:', { state: job.state, outcome, sampleId });
           console.log('[VoiceRecorder] waitForJob completed:', job.state, outcome);
         } finally {
-          jobScope.release(signal);
+          activeScope.release(signal);
         }
       }
       jobs.applyOutcome(outcome);
