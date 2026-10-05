@@ -94,7 +94,9 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
     "is_voice_profile_active": true,
     "voice_profile_error": null,
     "voice_profile_supported": true,
-    "neural_eq_calibrated": true
+    "neural_eq_calibrated": true,
+    "dev_base_model": "base",
+    "dev_base_model_error": null
   }
   ```
   (The payload also carries preset, backend and voice-sample fields, omitted here.)
@@ -110,6 +112,8 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
   | `voice_profile_error` | Generic, constant reason the stored profile is not applied (backend rejected it, file missing/unreadable, rollback failed), or `null`. Never carries profile data or backend error text. |
   | `voice_profile_supported` | `true` when the active backend can apply a voice profile at all. `false` on backends that reject every profile (OpenVINO NPU/GPU/CPU, DirectML, RyzenAI, TensorRT, Vulkan, CoreML, the mock tract) and on tract when the loaded model has no `FiLM` (`gamma`/`beta`) inputs, which is the case of the approved base DFNet3; `false` without a backend. While `false`, `BuildVoiceProfile` answers `ENROLL_BACKEND_UNSUPPORTED` immediately. Clients that do not find the field must treat support as unknown. |
   | `neural_eq_calibrated` | `true` when the **applied** profile (`active_voice_profile_id`) carries a microphone EQ; `false` without an applied profile or when it has no EQ. |
+  | `dev_base_model` | Development only. `"pdfnet3-dev"` while the live backend runs the unsigned development pDFNet3 (FiLM) loaded through `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256` (§3.1.7); `"base"` otherwise (the default model, or no model). The pDFNet3 is the M2 checkpoint judged NO-GO: it lets the runtime accept a voice profile, it is not an approved model and no isolation benefit is claimed. |
+  | `dev_base_model_error` | Fixed code when the development pDFNet3 was configured but is not in use, else `null`: `DEV_MODEL_CONFIG_INCOMPLETE` (only one of the two variables), `DEV_MODEL_CONFIG_INVALID` (relative or non-UTF-8 path, hash not 64 lowercase hex), `DEV_MODEL_ASSET_UNREADABLE`, `DEV_MODEL_ASSET_TOO_LARGE` (over 64 MiB), `DEV_MODEL_HASH_MISMATCH`, `DEV_MODEL_ARCHIVE_INVALID` (members other than exactly the four expected), `DEV_MODEL_LOAD_FAILED`, `DEV_MODEL_NO_FILM`. Never a path. The daemon then keeps the default model selection. |
 
   Scope: "applied" means applied on the **service's own** backend. The packaged audio path
   (`filter-capi` / helper / virtual microphone) does not use the profile yet (stage 2). The
@@ -286,6 +290,15 @@ The enrollment model is loaded only when both environment variables are set for 
 | `CLEARCORE_DEV_ENROLLMENT_SHA256` | Expected SHA-256 of the **entire file**: 64 lowercase hex characters. |
 
 The hash is checked over the whole file and only an allowlisted archive member (`enrollment.onnx`) is read. Without a valid configuration (variables unset, archive missing, unreadable or oversized, or a hash mismatch), `BuildVoiceProfile` jobs fail with `ENROLL_MODEL_NOT_CONFIGURED`; sample ingestion does not need the enrollment model (it needs only the base denoiser). The asset is not pinned in the registry, not signed and not distributed. Denoising uses the approved base DFNet3. Scope: development-integrated; the packaged virtual microphone does not apply the profile yet, and no improvement of voice isolation is claimed.
+
+**Development isolation model (pDFNet3 with FiLM).** The approved base DFNet3 has no FiLM inputs, so no backend can apply a built profile with it (`voice_profile_supported: false`, `ENROLL_BACKEND_UNSUPPORTED`). For development, the service can load the pDFNet3 produced by the training repository (M3 `pdfnet3-release-asset-v1.tar.gz`) when both variables are set:
+
+| Variable | Value |
+| :--- | :--- |
+| `CLEARCORE_DEV_PDFNET3_ASSET` | Absolute path of the pDFNet3 archive. |
+| `CLEARCORE_DEV_PDFNET3_SHA256` | Expected SHA-256 of the **entire file**: 64 lowercase hex characters (no surrounding spaces, no uppercase). |
+
+Both or neither: one alone, a relative path or a malformed hash is reported as `dev_base_model_error`. The service checks the size (at most 64 MiB) and the whole-file hash **before decompressing**, then requires exactly the four flat members `enc.onnx`, `erb_dec.onnx`, `df_dec.onnx`, `config.ini` (regular files, no directories or paths, no duplicates, bounded sizes), loads them in tract and requires the FiLM inputs. While loaded, **every backend selection (startup `auto`, `--backend`, `SetBackend`) installs `tract` with this model**: `GetStatus` shows `active_backend: "tract"`, `dev_base_model: "pdfnet3-dev"` and `voice_profile_supported: true`, while `requested_backend` keeps what was asked. These graphs are not stateful, so OpenVINO/NPU cannot run them. If verification or loading fails, the service logs a fixed line with the code, keeps the default selection and reports `dev_base_model_error`; it never switches models silently. The archive is not pinned in the model registry, not signed and not distributed; it does not go through the signed governance path. Sample ingestion keeps denoising with the approved base DFNet3 (neutral, decision D2); the pDFNet3 is only the runtime backend that receives the profile. This model is the M2 NO-GO checkpoint: accepting a profile is not a claim of better isolation.
 
 #### 3.1.8 Privacy
 - Raw PCM exists only in memory and is zeroed after denoising; **the service never writes raw audio to disk**. The stored WAV is the **denoised** one.

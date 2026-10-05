@@ -32,6 +32,20 @@ else
     echo "    Veja a seção de desenvolvimento do AGENTS.md para defini-las."
 fi
 
+# Modelo de isolamento pDFNet3 com FiLM (só desenvolvimento; checkpoint NO-GO do M2). Com as
+# duas variáveis o daemon força o backend tract com esse modelo e o perfil de voz é aplicado;
+# sem elas usa o modelo base (que não aplica perfil). Uma só é erro reportado no GetStatus.
+if [[ -n "${CLEARCORE_DEV_PDFNET3_ASSET:-}" && -n "${CLEARCORE_DEV_PDFNET3_SHA256:-}" ]]; then
+    export CLEARCORE_DEV_PDFNET3_ASSET CLEARCORE_DEV_PDFNET3_SHA256
+    echo "🧪 Modelo de isolamento (dev, pDFNet3 NO-GO do M2): ${CLEARCORE_DEV_PDFNET3_ASSET}"
+elif [[ -n "${CLEARCORE_DEV_PDFNET3_ASSET:-}" || -n "${CLEARCORE_DEV_PDFNET3_SHA256:-}" ]]; then
+    export CLEARCORE_DEV_PDFNET3_ASSET CLEARCORE_DEV_PDFNET3_SHA256
+    echo "⚠️  Só uma de CLEARCORE_DEV_PDFNET3_ASSET/_SHA256 definida: o daemon usará o modelo base (DEV_MODEL_CONFIG_INCOMPLETE)."
+else
+    echo "ℹ️  CLEARCORE_DEV_PDFNET3_ASSET/_SHA256 não definidas: modelo base, o perfil de voz não será aplicado."
+    echo "    Veja a seção de desenvolvimento do AGENTS.md para defini-las."
+fi
+
 # Core dump desligado neste shell e em tudo que ele inicia (Electron e o daemon, que
 # segura PCM cru em memória durante o cadastro de voz). O Electron também aplica
 # RLIMIT_CORE=0 ao iniciar o daemon.
