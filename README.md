@@ -101,14 +101,55 @@ flowchart LR
 
 ---
 
+---
+
+## Package Managers & Turnkey Installation 📦
+
+ClearCore is distributed officially across the major package managers:
+
+### 🔵 Fedora / RHEL / CentOS (`dnf`)
+Install directly via the official Fedora Copr repository:
+```bash
+sudo dnf copr enable joaorura/clearcore
+sudo dnf install -y clearcore
+```
+
+### 🪟 Windows 10 & 11 (`winget`)
+Install using Microsoft Windows Package Manager:
+```powershell
+winget install joaorura.Clearcore
+```
+
+### 🟠 Debian / Ubuntu / Linux Mint / Pop!_OS (`apt`)
+
+#### Method 1: Official GitHub Release One-Liner (Recommended)
+Direct native `.deb` install with automatic dependency resolution:
+```bash
+# x86_64 / amd64:
+curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
+
+# ARM64:
+curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_arm64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
+```
+
+#### Method 2: Modular APT Repository via GitHub Pages (Solution A)
+Native APT repository split into modular packages (`clearcore` GUI + `clearcore-daemon`):
+```bash
+echo "deb [trusted=yes] https://joaorura.github.io/clearcore/apt stable main" | sudo tee /etc/apt/sources.list.d/clearcore.list
+sudo apt update && sudo apt install -y clearcore
+```
+
+---
+
 ## Quickstart
 
 ClearCore offers three installation pathways on each platform:
 
 | Platform | Turnkey Package Installer | Portable Zero-Install | Build from Source |
 |---|---|---|---|
-| **Linux** (PipeWire) | `cd release/Clearcore-linux-x64 && ./install.sh` | `./release/Clearcore-linux-x64/clearcore` | `./package.sh` |
-| **Windows** (WaveRT) | Run `Clearcore-Setup.exe` | `.\release\Clearcore-win32-x64\Clearcore.exe` | `.\package.ps1` |
+| **Fedora / RHEL** (DNF) | `sudo dnf copr enable joaorura/clearcore && sudo dnf install clearcore` | `./release/Clearcore-linux-x64/clearcore` | `./package.sh` |
+| **Ubuntu / Debian** (APT) | `curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb` | `./release/Clearcore-linux-x64/clearcore` | `./package.sh` |
+| **Windows** (WinGet / WaveRT) | `winget install joaorura.Clearcore` (or run `Clearcore-Setup.exe`) | `.\release\Clearcore-win32-x64\Clearcore.exe` | `.\package.ps1` |
 | **macOS** (CoreAudio) | `cd release/Clearcore-darwin-x64 && ./install.sh` | `open ./release/Clearcore-darwin-x64/Clearcore.app` | `./package.sh` |
 
 👉 **For comprehensive step-by-step instructions, system prerequisites, and desktop setup, see [INSTALL.md](INSTALL.md).**

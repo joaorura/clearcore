@@ -3,6 +3,17 @@
 ## Overview
 First-party realtime noise-suppression virtual microphone powered by DeepFilterNet3 ONNX, PipeWire C bridge (Linux), WaveRT PortCls driver (Windows), CoreAudio HAL (macOS), and Rust supervisor daemon.
 
+## Package Managers & Distribution
+- **Fedora / RHEL (DNF via Copr):**
+  `sudo dnf copr enable joaorura/clearcore && sudo dnf install -y clearcore`
+- **Windows (WinGet):**
+  `winget install joaorura.Clearcore`
+- **Ubuntu / Debian (APT):**
+  - *Method 1 (Official One-Liner - Recommended):*  
+    `curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb`
+  - *Method 2 (Modular GitHub Pages APT - Solution A):*  
+    `echo "deb [trusted=yes] https://joaorura.github.io/clearcore/apt stable main" | sudo tee /etc/apt/sources.list.d/clearcore.list && sudo apt update && sudo apt install -y clearcore`
+
 ## Standalone Application & Packaging (Turnkey Distribution)
 
 The desktop application is completely self-contained. When launched, the application automatically starts its companion daemon (`realtime-noise-service`) in the background if not already running, verifies/creates the virtual microphone, and minimizes to the system tray. Exiting via the tray cleanly stops the daemon.

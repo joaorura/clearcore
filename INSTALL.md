@@ -55,6 +55,36 @@ ClearCore provides three flexible installation methods on every supported platfo
 
 ClearCore integrates natively with **PipeWire** on Linux, creating an isolated `realtime-noise-source` node (`Audio/Source`) with zero heap allocations in the real-time processing callback.
 
+### Package Managers (Recommended)
+
+#### 🔵 Fedora / RHEL / CentOS (DNF via Copr)
+Enable the official Copr repository and install with automatic updates:
+```bash
+sudo dnf copr enable joaorura/clearcore
+sudo dnf install -y clearcore
+```
+
+#### 🟠 Debian / Ubuntu / Linux Mint / Pop!_OS (APT)
+
+##### Method 1: Official GitHub Release One-Liner (Recommended)
+Download and install the official native `.deb` with full desktop and PipeWire integration:
+```bash
+# For x86_64 (Intel / AMD 64-bit):
+curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
+
+# For ARM64 (Raspberry Pi 5 / ARM64 SBCs):
+curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-0.1.0-beta.3_arm64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb && rm /tmp/clearcore.deb
+```
+
+##### Method 2: Modular APT Repository via GitHub Pages (Solution A)
+Installs via standard APT repository using modular subpackages (`clearcore` GUI + `clearcore-daemon`):
+```bash
+echo "deb [trusted=yes] https://joaorura.github.io/clearcore/apt stable main" | sudo tee /etc/apt/sources.list.d/clearcore.list
+sudo apt update && sudo apt install -y clearcore
+```
+
+---
+
 ### Linux Path A: Turnkey Binary Installer
 
 Download or unpack the official release archive `Clearcore-linux-x64.tar.gz`:
@@ -224,6 +254,15 @@ The output `Clearcore.app` is placed in `release/Clearcore-darwin-x64/`.
 ## Windows Installation
 
 On Windows, ClearCore integrates via a high-performance **WaveRT PortCls virtual audio streaming driver** (`RealtimeNoise.inf`), providing sub-millisecond audio streaming compatible with WASAPI exclusive and shared modes.
+
+### Windows Package Manager (WinGet - Recommended) 🪟
+
+Install with a single command from PowerShell or Windows Terminal:
+```powershell
+winget install joaorura.Clearcore
+```
+
+---
 
 ### Windows Path A: Portable Standalone Execution (Recommended for Beta)
 
