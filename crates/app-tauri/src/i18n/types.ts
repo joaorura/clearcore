@@ -339,6 +339,7 @@ export interface Translations {
         ENROLL_BUSY: string;
         ENROLL_FAILED: string;
         SERVICE_UNAVAILABLE: string;
+        SERVICE_OUTDATED: string;
         UNKNOWN: string;
       };
     };

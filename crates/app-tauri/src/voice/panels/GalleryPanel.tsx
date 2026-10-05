@@ -40,7 +40,13 @@ export function GalleryPanel(p: GalleryPanelProps) {
 
       <JobFeedbackBlock feedback={p.feedback} labels={labels} t={t} locale={p.locale} />
 
-      {sampleList && (
+      {sampleList && sampleList.serviceOutdated && (
+        <div role="alert" style={{ color: '#fbbf24', fontSize: 13, marginBottom: 12 }}>
+          {labels.errors.SERVICE_OUTDATED}
+        </div>
+      )}
+
+      {sampleList && !sampleList.serviceOutdated && (
         <div style={{ marginBottom: 12 }}>
           <VoiceBudgetMeter budget={sampleList.budget} labels={labels} lang={p.locale} />
         </div>

@@ -3,7 +3,7 @@ import type { EnrollErrorCode, EnrollmentLabels } from './enrollmentTypes';
 const KNOWN: ReadonlySet<string> = new Set<EnrollErrorCode>([
   'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE',
-  'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE',
+  'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'SERVICE_OUTDATED',
 ]);
 
 /** Reads `{ errorCode }` (or a failed job's errorCode). Unknown codes/text collapse to ENROLL_FAILED. */

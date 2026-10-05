@@ -2,7 +2,7 @@ import { it, expect } from 'vitest';
 import { enrollmentErrorCode, isBudgetError, errorLabel } from '../enrollmentErrors';
 import type { EnrollmentLabels, EnrollErrorCode } from '../enrollmentTypes';
 
-const codes: Array<EnrollErrorCode | 'UNKNOWN'> = ['ENROLL_CLIPPING','ENROLL_TOO_QUIET','ENROLL_TOO_LITTLE_SPEECH','ENROLL_MODEL_NOT_CONFIGURED','ENROLL_BUDGET_EXCEEDED','ENROLL_INVALID_AUDIO','ENROLL_PAYLOAD_TOO_LARGE','ENROLL_JOB_NOT_FOUND','ENROLL_BUSY','ENROLL_FAILED','SERVICE_UNAVAILABLE','UNKNOWN'];
+const codes: Array<EnrollErrorCode | 'UNKNOWN'> = ['ENROLL_CLIPPING','ENROLL_TOO_QUIET','ENROLL_TOO_LITTLE_SPEECH','ENROLL_MODEL_NOT_CONFIGURED','ENROLL_BUDGET_EXCEEDED','ENROLL_INVALID_AUDIO','ENROLL_PAYLOAD_TOO_LARGE','ENROLL_JOB_NOT_FOUND','ENROLL_BUSY','ENROLL_FAILED','SERVICE_UNAVAILABLE','SERVICE_OUTDATED','UNKNOWN'];
 const labels = { errors: Object.fromEntries(codes.map((c) => [c, `label:${c}`])) } as unknown as EnrollmentLabels;
 
 it('unknown service codes never leak as text', () => {

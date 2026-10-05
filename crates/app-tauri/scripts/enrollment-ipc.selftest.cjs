@@ -177,3 +177,43 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
   assert.strictEqual(timedOut.errorCode, 'ENROLL_FAILED');
   console.log('enrollment-ipc round-1 selftest passed.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// --- I3: older daemon (no budget / parse errors) => SERVICE_OUTDATED, never "0 s remaining" ---
+{
+  const old = m.mapSampleList({ samples: [{ id: 's', name: 'n' }] });
+  assert.strictEqual(old.serviceOutdated, true);
+  assert.notStrictEqual(old.budget.remainingSeconds, 0);
+  for (const b of [null, 'x', 5, []]) assert.strictEqual(m.mapSampleList({ samples: [], budget: b }).serviceOutdated, true);
+  const cur = m.mapSampleList({ samples: [], budget: { used_seconds: 90, max_seconds: 90, remaining_seconds: 0 } });
+  assert.strictEqual(cur.serviceOutdated, false);
+  assert.strictEqual(cur.budget.remainingSeconds, 0);
+}
+(async () => {
+  const hs = {}; let err = null;
+  m.registerEnrollmentHandlers({ handle: (ch, fn) => { hs[ch] = fn; } }, { sendIpcRequest: async () => { if (err) throw err; return { job_id: 'sample-job-1' }; } });
+  const dev = { label: 'M', idHash: hash };
+  const add = () => hs.enrollment_add_sample({}, { pcm: new Float32Array([0.1]), sampleRate: 48000, name: 'n', device: dev });
+  const build = () => hs.enrollment_build_profile({}, { name: 'n' });
+  const outdated = [
+    Object.assign(new Error('unknown field `pcm_f32_le_b64`, expected `sample_json`'), { code: 'JSON_PARSE_ERROR' }),
+    Object.assign(new Error('malformed request'), { code: 'JSON_PARSE_ERROR' }),
+    Object.assign(new Error('unknown variant `BuildVoiceProfile`'), { code: 'INVALID_COMMAND' }),
+    new Error('unknown field `device_id_hash`'),
+  ];
+  for (const e of outdated) {
+    err = e;
+    assert.deepStrictEqual(await add(), { errorCode: 'SERVICE_OUTDATED' }, e.message);
+    assert.deepStrictEqual(await build(), { errorCode: 'SERVICE_OUTDATED' }, e.message);
+  }
+  // A current service's own fixed refusals stay what they are.
+  err = Object.assign(new Error('invalid sample metadata'), { code: 'INVALID_COMMAND' });
+  assert.deepStrictEqual(await add(), { errorCode: 'ENROLL_FAILED' });
+  err = Object.assign(new Error('invalid profile name'), { code: 'INVALID_COMMAND' });
+  assert.deepStrictEqual(await build(), { errorCode: 'ENROLL_FAILED' });
+  err = Object.assign(new Error('x'), { code: 'ENROLL_BUSY' });
+  assert.deepStrictEqual(await build(), { errorCode: 'ENROLL_BUSY' });
+  // Other channels keep the generic classification.
+  err = Object.assign(new Error('malformed request'), { code: 'JSON_PARSE_ERROR' });
+  assert.deepStrictEqual(await hs.enrollment_get_job({}, { jobId: 'sample-job-1' }), { errorCode: 'ENROLL_FAILED' });
+  console.log('enrollment-ipc service-outdated selftest passed.');
+})().catch((e) => { console.error(e); process.exit(1); });

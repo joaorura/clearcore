@@ -140,8 +140,12 @@ const hashOrNull = (v) => (typeof v === 'string' && HASH_RE.test(v) ? v : null);
 
 function mapSampleList(s) {
   const src = s && typeof s === 'object' ? s : {};
-  const b = src.budget && typeof src.budget === 'object' ? src.budget : {};
+  // A daemon from before the speech budget does not send `budget`: that is an outdated service,
+  // not "0 s remaining". The budget below is then neutral and the UI shows the notice instead.
+  const hasBudget = src.budget !== null && typeof src.budget === 'object' && !Array.isArray(src.budget);
+  const b = hasBudget ? src.budget : {};
   return {
+    serviceOutdated: !hasBudget,
     samples: (Array.isArray(src.samples) ? src.samples : [])
       .filter((x) => x && typeof x === 'object' && typeof x.id === 'string')
       .map((x) => ({
@@ -161,7 +165,7 @@ function mapSampleList(s) {
     budget: {
       usedSeconds: num(b.used_seconds),
       maxSeconds: num(b.max_seconds, MAX_SPEECH_SECONDS),
-      remainingSeconds: num(b.remaining_seconds),
+      remainingSeconds: num(b.remaining_seconds, hasBudget ? 0 : MAX_SPEECH_SECONDS),
     },
   };
 }
@@ -175,13 +179,31 @@ function classifyEnrollError(err) {
   return 'ENROLL_FAILED';
 }
 
+// The current service's own fixed INVALID_COMMAND refusals for these requests.
+const CURRENT_INVALID_COMMAND_MESSAGES = new Set(['invalid sample metadata', 'invalid profile name']);
+
+/**
+ * AddVoiceSample / BuildVoiceProfile refused because the daemon does not know the request shape
+ * (it predates the enrollment pipeline): JSON_PARSE_ERROR, an INVALID_COMMAND that is not one of
+ * the current service's fixed refusals, or a serde "unknown field/variant". The user must restart
+ * ClearCore, which ENROLL_FAILED would not say.
+ */
+function classifyStartError(err) {
+  const code = err && typeof err.code === 'string' ? err.code : '';
+  const msg = err && typeof err.message === 'string' ? err.message : '';
+  if (code === 'JSON_PARSE_ERROR') return 'SERVICE_OUTDATED';
+  if (code === 'INVALID_COMMAND' && !CURRENT_INVALID_COMMAND_MESSAGES.has(msg)) return 'SERVICE_OUTDATED';
+  if ((code === '' || code === 'INVALID_COMMAND') && /unknown (field|variant)/.test(msg)) return 'SERVICE_OUTDATED';
+  return classifyEnrollError(err);
+}
+
 function registerEnrollmentHandlers(ipcMain, { sendIpcRequest }) {
-  const wrap = (channel, fn) => {
+  const wrap = (channel, fn, classify = classifyEnrollError) => {
     ipcMain.handle(channel, async (_event, args) => {
       try {
         return await fn(args || {});
       } catch (err) {
-        return { errorCode: classifyEnrollError(err) };
+        return { errorCode: classify(err) };
       }
     });
   };
@@ -201,8 +223,8 @@ function registerEnrollmentHandlers(ipcMain, { sendIpcRequest }) {
     } finally {
       wipePcm(a.pcm);
     }
-  });
-  wrap('enrollment_build_profile', async (a) => jobIdOf(await sendIpcRequest(buildBuildProfileCommand(a), {}, 5000)));
+  }, classifyStartError);
+  wrap('enrollment_build_profile', async (a) => jobIdOf(await sendIpcRequest(buildBuildProfileCommand(a), {}, 5000)), classifyStartError);
   wrap('enrollment_get_job', async (a) => mapJob(await sendIpcRequest(buildGetJobCommand(a), {}, 5000)));
   wrap('enrollment_list_samples', async () => mapSampleList(await sendIpcRequest('ListVoiceSamples', {}, 5000)));
   wrap('enrollment_delete_sample', async (a) => {
@@ -221,5 +243,6 @@ module.exports = {
   mapJob,
   mapSampleList,
   classifyEnrollError,
+  classifyStartError,
   registerEnrollmentHandlers,
 };

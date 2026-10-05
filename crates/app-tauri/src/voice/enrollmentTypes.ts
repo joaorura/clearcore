@@ -7,7 +7,9 @@ export const MIN_RECORD_SECONDS = 1.5;
 export type EnrollErrorCode =
   | 'ENROLL_CLIPPING' | 'ENROLL_TOO_QUIET' | 'ENROLL_TOO_LITTLE_SPEECH' | 'ENROLL_MODEL_NOT_CONFIGURED'
   | 'ENROLL_BUDGET_EXCEEDED' | 'ENROLL_INVALID_AUDIO' | 'ENROLL_PAYLOAD_TOO_LARGE'
-  | 'ENROLL_JOB_NOT_FOUND' | 'ENROLL_BUSY' | 'ENROLL_FAILED' | 'SERVICE_UNAVAILABLE';
+  | 'ENROLL_JOB_NOT_FOUND' | 'ENROLL_BUSY' | 'ENROLL_FAILED' | 'SERVICE_UNAVAILABLE'
+  /** Local code: the running daemon predates the enrollment pipeline (restart ClearCore). */
+  | 'SERVICE_OUTDATED';
 
 export interface DeviceInfo { label: string; idHash: string }          // idHash: 64 lowercase hex
 export interface CapturedPcm {
@@ -25,6 +27,8 @@ export interface SampleList {
   samples: ServiceSample[]; budget: SpeechBudget;
   /** Current device group (spec D7); null/absent when the service does not report it. */
   selectedDeviceIdHash?: string | null; selectedDeviceLabel?: string;
+  /** The daemon sent no `budget` (it predates the pipeline): the budget is unknown, not 0. */
+  serviceOutdated?: boolean;
 }
 export type JobState = 'running' | 'done' | 'failed';
 /** 'timeout': failed by the service watchdog (10 min); only on a failed job. */

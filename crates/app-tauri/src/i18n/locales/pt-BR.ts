@@ -341,6 +341,7 @@ export const ptBR: Translations = {
         ENROLL_BUSY: 'O serviço está ocupado processando outro áudio. Aguarde alguns segundos e tente de novo.',
         ENROLL_FAILED: 'O serviço não conseguiu processar o áudio.',
         SERVICE_UNAVAILABLE: 'O serviço não está acessível.',
+        SERVICE_OUTDATED: 'Serviço desatualizado — reinicie o ClearCore para usar o cadastro de voz.',
         UNKNOWN: 'Erro desconhecido.',
       },
     },

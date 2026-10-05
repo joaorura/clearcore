@@ -341,6 +341,7 @@ export const enUS: Translations = {
         ENROLL_BUSY: 'The service is busy with another recording. Wait a few seconds and try again.',
         ENROLL_FAILED: 'The service could not process the audio.',
         SERVICE_UNAVAILABLE: 'The service is not reachable.',
+        SERVICE_OUTDATED: 'The service is out of date — restart ClearCore to use voice enrollment.',
         UNKNOWN: 'Unknown error.',
       },
     },
