@@ -17,7 +17,7 @@
     "electron": "electron electron/main.cjs",
     "electron:tray": "electron electron/main.cjs --tray",
     "test": "vitest run",
-    "test:electron-state": "node scripts/clearcore-state.selftest.cjs && node scripts/voice-profile-merge.selftest.cjs && node scripts/daemon-binary.selftest.cjs",
+    "test:electron-state": "node scripts/clearcore-state.selftest.cjs && node scripts/voice-profile-merge.selftest.cjs && node scripts/daemon-binary.selftest.cjs && node scripts/enrollment-ipc.selftest.cjs && node scripts/voice-profile-ipc.selftest.cjs",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
     "package": "node scripts/package-app.mjs",
     "test:smoke": "npm run build && npm run prepare:sidecar && npm run tauri build -- --no-bundle",

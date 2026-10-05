@@ -1621,14 +1621,10 @@ ipcMain.handle('set_voice_profile', async (_event, args) => {
     // Forward to daemon if running
     if (await isDaemonResponsive()) {
       try {
-        if (updated.is_enrolled === false) {
+        // The local status is never sent as profile_json: the service owns the profile state
+        // (built through the enrollment_* channels). Only an explicit un-enroll is forwarded.
+        if (rawProfile.is_enrolled === false) {
           await sendIpcRequest('ClearVoiceProfile');
-        } else {
-          await sendIpcRequest({
-            SetVoiceProfile: {
-              profile_json: JSON.stringify(updated),
-            },
-          });
         }
       } catch (e) {
         forwardError = voiceProfileMerge.classifyForwardError(e);
@@ -1658,92 +1654,24 @@ ipcMain.handle('get_voice_profile', () => readMergedVoiceProfile());
 
 ipcMain.handle('get_voice_profile_status', () => readMergedVoiceProfile());
 
-ipcMain.handle('get_voice_samples', async () => {
-  let samples = voiceProfileStore.readVoiceSamples();
-  if (samples.length === 0 && (await isDaemonResponsive())) {
-    try {
-      const daemonResp = await sendIpcRequest('ListVoiceSamples');
-      if (daemonResp && Array.isArray(daemonResp.samples) && daemonResp.samples.length > 0) {
-        samples = daemonResp.samples.map((s) => ({
-          id: s.id,
-          title: s.name || s.id,
-          timestamp: s.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          durationSec: 5.0,
-          isInitialStep: false,
-        }));
-        voiceProfileStore.writeVoiceSamples(samples);
-      }
-    } catch (e) {
-      console.log('[Clearcore IPC] ListVoiceSamples query skipped:', e.message);
-    }
-  }
-  return { success: true, samples, total_count: samples.length };
-});
-
-ipcMain.handle('add_voice_sample', async (_event, args) => {
-  try {
-    const rawSample = (args && typeof args === 'object' && args.sample) ? args.sample : args;
-    const result = voiceProfileStore.addVoiceSample(rawSample);
-
-    if (await isDaemonResponsive()) {
-      try {
-        await sendIpcRequest({
-          AddVoiceSample: {
-            sample_json: JSON.stringify({
-              id: result.sample.id,
-              timestamp: result.sample.timestamp,
-              name: result.sample.title,
-              audio_path: result.sample.audioUrl || null,
-              embedding: new Array(192).fill(0.01),
-              is_active: true,
-            }),
-          },
-        });
-      } catch (e) {
-        console.log('[Clearcore IPC] AddVoiceSample forward skipped:', e.message);
-      }
-    }
-
-    return { success: true, ...result };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('delete_voice_sample', async (_event, args) => {
-  try {
-    const sampleId = typeof args === 'string' ? args : (args && args.id ? args.id : '');
-    const result = voiceProfileStore.deleteVoiceSample(sampleId);
-
-    if (await isDaemonResponsive()) {
-      try {
-        await sendIpcRequest({
-          DeleteVoiceSample: { id: sampleId },
-        });
-      } catch (e) {
-        console.log('[Clearcore IPC] DeleteVoiceSample forward skipped:', e.message);
-      }
-    }
-
-    return { success: true, ...result };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
+// Voice enrollment channels (enrollment_add_sample, enrollment_list_samples, ...).
+require('./enrollment-ipc.cjs').registerEnrollmentHandlers(ipcMain, { sendIpcRequest });
 
 ipcMain.handle('get_call_takes', async () => {
+  // Cache is only a fallback while the service is unreachable; the service is the source of truth.
   let takes = voiceProfileStore.readCallTakes();
-  if (takes.length === 0 && (await isDaemonResponsive())) {
+  if (await isDaemonResponsive()) {
     try {
       const daemonResp = await sendIpcRequest('ListIntakeSuggestions');
-      if (daemonResp && Array.isArray(daemonResp.suggestions) && daemonResp.suggestions.length > 0) {
+      if (daemonResp && Array.isArray(daemonResp.suggestions)) {
         takes = daemonResp.suggestions.map((s) => ({
           id: s.id,
-          title: `Sugestão SNR ${Math.round(s.snr || 24)}dB`,
-          timestamp: s.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          durationSec: s.duration_secs || 5.0,
-          snrDb: s.snr || 24.0,
+          timestamp: s.timestamp,
+          durationSec: s.duration_secs,
+          snrDb: s.snr,
           audioUrl: s.audio_path || undefined,
+          speech_seconds: s.speech_seconds,
+          device_label: s.device_label,
         }));
         voiceProfileStore.writeCallTakes(takes);
       }
@@ -1755,26 +1683,15 @@ ipcMain.handle('get_call_takes', async () => {
 });
 
 ipcMain.handle('approve_call_take', async (_event, args) => {
+  const id = args && args.id ? args.id : (typeof args === 'string' ? args : '');
+  const name = args && args.name ? args.name : null;
   try {
-    const id = args && args.id ? args.id : (typeof args === 'string' ? args : '');
-    const name = args && args.name ? args.name : (args && args.take && args.take.title ? args.take.title : undefined);
-    const take = args && args.take ? args.take : undefined;
-    const result = voiceProfileStore.approveCallTake(id, name, take);
-
-    if (await isDaemonResponsive()) {
-      try {
-        await sendIpcRequest({
-          ApproveIntakeSuggestion: { id, name: name || null },
-        });
-      } catch (e) {
-        console.log('[Clearcore IPC] ApproveIntakeSuggestion forward skipped:', e.message);
-      }
-    }
-
-    return { success: true, ...result };
-  } catch (err) {
-    return { success: false, error: err.message };
+    // No free-form message is returned: the renderer maps errorCode to its own label.
+    await sendIpcRequest({ ApproveIntakeSuggestion: { id, name } }, {}, 60000);
+  } catch (e) {
+    return { errorCode: require('./enrollment-ipc.cjs').classifyEnrollError(e) };
   }
+  return { success: true, ...voiceProfileStore.approveCallTake(id) };
 });
 
 ipcMain.handle('dismiss_call_take', async (_event, args) => {
@@ -1798,7 +1715,6 @@ ipcMain.handle('dismiss_call_take', async (_event, args) => {
   }
 });
 
-// Diagnostics Export Handler
 ipcMain.handle('export_diagnostics', async () => {
   try {
     let diag = null;

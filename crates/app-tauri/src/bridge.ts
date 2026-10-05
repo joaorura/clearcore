@@ -224,13 +224,10 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
   }
   if (cmd === 'get_voice_profile' || cmd === 'get_voice_profile_status') {
     const enrolled = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_profile_enrolled') === 'true' : false;
-    const count = typeof localStorage !== 'undefined' ? Number(localStorage.getItem('clearcore_voice_sample_count') || (enrolled ? '5' : '0')) : 0;
+    const count = typeof localStorage !== 'undefined' ? Number(localStorage.getItem('clearcore_voice_sample_count') || '0') : 0;
     const profile: VoiceProfileStatus = {
       is_enrolled: enrolled,
       active_samples_count: count,
-      embedding_dim: 192,
-      neural_eq_calibrated: enrolled,
-      gain_boost_db: 1.8,
     };
     return { success: true, profile, ...profile } as unknown as T;
   }
@@ -242,10 +239,7 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     }
     const profile: VoiceProfileStatus = {
       is_enrolled: enrolled,
-      active_samples_count: p?.active_samples_count ?? 5,
-      embedding_dim: 192,
-      neural_eq_calibrated: enrolled,
-      gain_boost_db: 1.8,
+      active_samples_count: p?.active_samples_count ?? 0,
     };
     return { success: true, profile, ...profile } as unknown as T;
   }
