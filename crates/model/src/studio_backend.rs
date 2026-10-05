@@ -140,6 +140,18 @@ mod tests {
     /// Returns the input unchanged, or fails when `fail` is set.
     struct FakeBackend {
         fail: bool,
+        fail_profile: bool,
+        profile_calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl FakeBackend {
+        fn new(fail: bool) -> Self {
+            Self {
+                fail,
+                fail_profile: false,
+                profile_calls: Arc::default(),
+            }
+        }
     }
 
     impl InferenceBackend for FakeBackend {
@@ -164,7 +176,12 @@ mod tests {
             &mut self,
             profile: Option<&VoiceProfile>,
         ) -> Result<(), InferenceError> {
-            crate::reject_unsupported_voice_profile(profile)
+            self.profile_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail_profile {
+                return crate::reject_unsupported_voice_profile(profile);
+            }
+            Ok(())
         }
     }
 
@@ -179,7 +196,7 @@ mod tests {
 
     fn backend_with(preset: Preset) -> (StudioBackend<FakeBackend>, Arc<StudioControl>) {
         let control = Arc::new(StudioControl::new(preset));
-        let backend = StudioBackend::new(FakeBackend { fail: false }, Arc::clone(&control));
+        let backend = StudioBackend::new(FakeBackend::new(false), Arc::clone(&control));
         (backend, control)
     }
 
@@ -212,7 +229,7 @@ mod tests {
     #[test]
     fn inner_error_is_propagated() {
         let control = Arc::new(StudioControl::new(Preset::Off));
-        let mut backend = StudioBackend::new(FakeBackend { fail: true }, control);
+        let mut backend = StudioBackend::new(FakeBackend::new(true), control);
         assert!(matches!(
             backend.process(&tone(0)),
             Err(InferenceError::UnsupportedCpuProfile(_))
@@ -267,9 +284,35 @@ mod tests {
     }
 
     #[test]
+    fn studio_backend_delegates_profile_to_inner() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let inner = FakeBackend {
+            profile_calls: Arc::clone(&calls),
+            ..FakeBackend::new(false)
+        };
+        let mut s = StudioBackend::new(inner, Arc::new(StudioControl::new(Preset::Off)));
+        let p = VoiceProfile::identity("id", "n", "2026-10-05T00:00:00Z").unwrap();
+        s.set_voice_profile(Some(&p)).unwrap();
+        s.set_voice_profile(None).unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn studio_backend_propagates_inner_profile_error() {
+        let inner = FakeBackend {
+            fail_profile: true,
+            ..FakeBackend::new(false)
+        };
+        let mut s = StudioBackend::new(inner, Arc::new(StudioControl::new(Preset::Off)));
+        let p = VoiceProfile::identity("id", "n", "2026-10-05T00:00:00Z").unwrap();
+        let err = s.set_voice_profile(Some(&p)).unwrap_err();
+        assert!(matches!(err, InferenceError::UnsupportedFeature(_)));
+    }
+
+    #[test]
     fn boxed_dyn_backend_can_be_wrapped() {
         let control = Arc::new(StudioControl::new(Preset::Off));
-        let boxed: Box<dyn InferenceBackend> = Box::new(FakeBackend { fail: false });
+        let boxed: Box<dyn InferenceBackend> = Box::new(FakeBackend::new(false));
         let mut backend = StudioBackend::new(boxed, control);
         assert_eq!(backend.algorithmic_latency_samples(), INNER_LATENCY + 96);
         let output = backend.process(&tone(0)).map(|frame| frame.samples);
