@@ -41,7 +41,6 @@ use std::sync::Arc;
 
 pub struct ServiceDaemon {
     supervisor: EngineSupervisor,
-    server: IpcServer,
     shutdown: bool,
     served_client_count: usize,
     profile_store: Option<ProfileStore>,
@@ -90,7 +89,6 @@ impl ServiceDaemon {
         let voice_intake = VoiceIntakeEngine::new(Some(default_dir));
         Self {
             supervisor,
-            server: IpcServer::new(),
             shutdown: false,
             served_client_count: 0,
             profile_store: None,
@@ -117,7 +115,6 @@ impl ServiceDaemon {
         };
         Self {
             supervisor,
-            server: IpcServer::new(),
             shutdown: false,
             served_client_count: 0,
             profile_store: None,
@@ -309,7 +306,7 @@ impl ServiceDaemon {
         while reader.read_line(&mut line)? > 0 {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
-                let resp_str = self.server.handle_line(trimmed, |cmd, _payload| match cmd {
+                let resp_str = IpcServer::new().handle_line(trimmed, |cmd, _payload| match cmd {
                     IpcCommand::GetStatus => {
                         let status = self.supervisor.status();
                         let mode_ipc = convert_engine_mode_to_ipc(status.active_mode);
@@ -446,13 +443,9 @@ impl ServiceDaemon {
                             }),
                         )
                     }
-                    IpcCommand::SetVoiceProfile { profile_json } => set_voice_profile(
-                        &mut self.supervisor,
-                        self.profile_store.as_ref(),
-                        &mut self.stored_voice_profile_id,
-                        &mut self.voice_profile_error,
-                        profile_json,
-                    ),
+                    IpcCommand::SetVoiceProfile { profile_json } => {
+                        self.set_voice_profile_json(profile_json)
+                    }
                     IpcCommand::ClearVoiceProfile => clear_voice_profile(
                         &mut self.supervisor,
                         self.profile_store.as_ref(),
@@ -644,46 +637,78 @@ impl ServiceDaemon {
     }
 }
 
-/// Transaction: verify, apply to the engine, persist; if persisting fails the engine goes back
-/// to the previous profile, so the applied state never diverges from what survives a restart.
-fn set_voice_profile(
-    supervisor: &mut EngineSupervisor,
-    store: Option<&ProfileStore>,
-    stored_id: &mut Option<String>,
-    error: &mut Option<String>,
-    profile_json: &str,
-) -> IpcResponse {
-    const REQUEST_ID: &str = "set-voice-profile-resp";
-    let Some(store) = store else {
-        return IpcResponse::error(
-            REQUEST_ID,
-            IpcStatus::InternalError,
-            "NO_PROFILE_STORE",
-            NO_PROFILE_STORE_MESSAGE,
-        );
-    };
-    let Ok(profile) = VoiceProfile::from_json(profile_json) else {
-        return IpcResponse::invalid_command(REQUEST_ID, INVALID_PROFILE_MESSAGE);
-    };
-    let previous = supervisor.active_voice_profile().cloned();
-    if supervisor.set_voice_profile(Some(&profile)).is_err() {
-        return IpcResponse::error(
-            REQUEST_ID,
-            IpcStatus::InternalError,
-            "VOICE_PROFILE_NOT_APPLICABLE",
-            APPLY_FAILED_MESSAGE,
-        );
+/// Why [`ServiceDaemon::apply_profile`] refused a profile; carries no payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApplyError {
+    /// No `ProfileStore` is attached, so nothing could survive a restart.
+    NoStore,
+    /// The active backend rejected the profile; engine and disk are unchanged.
+    NotApplicable,
+    /// Persisting failed; the engine was put back on the previous profile.
+    PersistFailed,
+}
+
+impl ServiceDaemon {
+    /// Transaction: apply to the engine, persist; if persisting fails the engine goes back to the
+    /// previous profile, so the applied state never diverges from what survives a restart. Used by
+    /// `SetVoiceProfile` (after `from_json`) and by the drained `BuildVoiceProfile` jobs.
+    pub(crate) fn apply_profile(&mut self, profile: &VoiceProfile) -> Result<(), ApplyError> {
+        let Some(store) = self.profile_store.as_ref() else {
+            return Err(ApplyError::NoStore);
+        };
+        let previous = self.supervisor.active_voice_profile().cloned();
+        if self.supervisor.set_voice_profile(Some(profile)).is_err() {
+            return Err(ApplyError::NotApplicable);
+        }
+        if store.save_active(profile).is_err() {
+            restore_previous(
+                &mut self.supervisor,
+                previous.as_ref(),
+                &mut self.voice_profile_error,
+            );
+            return Err(ApplyError::PersistFailed);
+        }
+        self.stored_voice_profile_id = Some(profile.id.clone());
+        self.voice_profile_error = None;
+        Ok(())
     }
-    if store.save_active(&profile).is_err() {
-        restore_previous(supervisor, previous.as_ref(), error);
-        return IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE);
+
+    /// JSON entry point of the transaction (`SetVoiceProfile`).
+    fn set_voice_profile_json(&mut self, profile_json: &str) -> IpcResponse {
+        const REQUEST_ID: &str = "set-voice-profile-resp";
+        if self.profile_store.is_none() {
+            return IpcResponse::error(
+                REQUEST_ID,
+                IpcStatus::InternalError,
+                "NO_PROFILE_STORE",
+                NO_PROFILE_STORE_MESSAGE,
+            );
+        }
+        let Ok(profile) = VoiceProfile::from_json(profile_json) else {
+            return IpcResponse::invalid_command(REQUEST_ID, INVALID_PROFILE_MESSAGE);
+        };
+        match self.apply_profile(&profile) {
+            Ok(()) => IpcResponse::success(
+                REQUEST_ID,
+                json!({"active_voice_profile_id": self.supervisor.active_voice_profile_id()}),
+            ),
+            Err(ApplyError::NoStore) => IpcResponse::error(
+                REQUEST_ID,
+                IpcStatus::InternalError,
+                "NO_PROFILE_STORE",
+                NO_PROFILE_STORE_MESSAGE,
+            ),
+            Err(ApplyError::NotApplicable) => IpcResponse::error(
+                REQUEST_ID,
+                IpcStatus::InternalError,
+                "VOICE_PROFILE_NOT_APPLICABLE",
+                APPLY_FAILED_MESSAGE,
+            ),
+            Err(ApplyError::PersistFailed) => {
+                IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE)
+            }
+        }
     }
-    *stored_id = Some(profile.id.clone());
-    *error = None;
-    IpcResponse::success(
-        REQUEST_ID,
-        json!({"active_voice_profile_id": supervisor.active_voice_profile_id()}),
-    )
 }
 
 fn clear_voice_profile(
