@@ -17,11 +17,10 @@ if [ ! -d "${MANIFEST_SRC}" ]; then
     exit 1
 fi
 
-TEMP_FORK="$(mktemp -d /tmp/winget-pkgs.XXXXXX)"
-cleanup() {
-    rm -rf "${TEMP_FORK}"
-}
-trap cleanup EXIT
+WORK_DIR="${HOME}/.cache/winget-work"
+mkdir -p "${WORK_DIR}"
+TEMP_FORK="${WORK_DIR}/winget-pkgs-${VERSION}"
+rm -rf "${TEMP_FORK}"
 
 echo "1. Checking GitHub authentication..."
 gh auth status
@@ -30,10 +29,12 @@ echo "2. Forking or cloning microsoft/winget-pkgs..."
 gh repo fork microsoft/winget-pkgs --clone=false 2>/dev/null || true
 
 MY_USER="$(gh api user --jq '.login')"
-git clone --depth 1 "https://github.com/${MY_USER}/winget-pkgs.git" "${TEMP_FORK}"
+git clone --filter=blob:none --no-checkout --depth 1 "https://github.com/${MY_USER}/winget-pkgs.git" "${TEMP_FORK}"
 
 BRANCH_NAME="clearcore-${VERSION}"
 cd "${TEMP_FORK}"
+git sparse-checkout init --cone
+git sparse-checkout set manifests/j/joaorura
 git checkout -b "${BRANCH_NAME}"
 
 TARGET_DIR="manifests/j/joaorura/Clearcore/${VERSION}"
