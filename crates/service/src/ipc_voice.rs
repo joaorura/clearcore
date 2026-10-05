@@ -681,6 +681,10 @@ impl ServiceDaemon {
         {
             return IpcResponse::invalid_command(REQUEST_ID, "invalid sample metadata");
         }
+        // An empty hash would form a group "" mixing every unidentified microphone (D7).
+        if device_id_hash.trim().is_empty() {
+            return enroll_error(REQUEST_ID, &EnrollError::InvalidAudio);
+        }
         // Fail closed BEFORE decoding anything: without the base denoiser nothing is stored.
         let Some(denoiser) = self.make_denoiser() else {
             return enroll_error(REQUEST_ID, &EnrollError::ModelNotConfigured);
@@ -715,6 +719,9 @@ impl ServiceDaemon {
                 .is_some_and(|n| !valid_metadata(n, false))
         {
             return IpcResponse::invalid_command(REQUEST_ID, "Invalid intake suggestion payload");
+        }
+        if request.device_id_hash.trim().is_empty() {
+            return enroll_error(REQUEST_ID, &EnrollError::InvalidAudio);
         }
         let Some(denoiser) = self.make_denoiser() else {
             return enroll_error(REQUEST_ID, &EnrollError::ModelNotConfigured);

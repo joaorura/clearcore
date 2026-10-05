@@ -1220,3 +1220,19 @@ fn a_failed_manifest_write_leaves_no_phantom_sample_or_take() {
     assert_eq!(pending.payload["count"], 0, "no phantom take in memory");
     assert_eq!(wavs, 1, "the freshly written WAVs were removed");
 }
+
+#[test]
+fn an_empty_device_hash_is_refused_synchronously() {
+    let temp = TempDir::new("enroll-empty-hash");
+    let mut daemon = daemon(temp.path());
+    for cmd in [
+        add_cmd(&speech_pcm(2.0, 0.3), ""),
+        take_cmd(&speech_pcm(2.0, 0.3), ""),
+        add_cmd(&speech_pcm(2.0, 0.3), "   "),
+    ] {
+        let resp = send(&mut daemon, cmd);
+        assert_eq!(error_code(&resp), ENROLL_INVALID_AUDIO, "{resp:?}");
+        assert!(resp.payload.get("job_id").is_none());
+    }
+    assert_eq!(list(&mut daemon)["total_count"], 0);
+}
