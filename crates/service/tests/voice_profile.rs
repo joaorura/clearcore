@@ -22,6 +22,14 @@ type Calls = Arc<Mutex<Vec<Option<String>>>>;
 struct ProfileBackend {
     supports: bool,
     calls: Calls,
+    knobs: Knobs,
+}
+
+/// Failure injection shared with the test: reject neutral, and/or reject one specific id.
+#[derive(Clone, Default)]
+struct Knobs {
+    fail_none: Arc<std::sync::atomic::AtomicBool>,
+    fail_id: Arc<Mutex<Option<String>>>,
 }
 
 impl InferenceBackend for ProfileBackend {
@@ -50,6 +58,18 @@ impl InferenceBackend for ProfileBackend {
             .lock()
             .unwrap()
             .push(p.map(|profile| profile.id.clone()));
+        let injected = match p {
+            None => self
+                .knobs
+                .fail_none
+                .load(std::sync::atomic::Ordering::SeqCst),
+            Some(profile) => {
+                self.knobs.fail_id.lock().unwrap().as_deref() == Some(profile.id.as_str())
+            }
+        };
+        if injected {
+            return Err(InferenceError::UnsupportedFeature("injected".into()));
+        }
         if self.supports {
             Ok(())
         } else {
@@ -58,23 +78,30 @@ impl InferenceBackend for ProfileBackend {
     }
 }
 
-fn supervisor_with(supports: bool) -> (EngineSupervisor, Calls) {
+fn supervisor_with(supports: bool) -> (EngineSupervisor, Calls, Knobs) {
     let calls = Calls::default();
+    let knobs = Knobs::default();
     let mut supervisor = EngineSupervisor::default();
     supervisor.set_backend(
         Box::new(ProfileBackend {
             supports,
             calls: Arc::clone(&calls),
+            knobs: knobs.clone(),
         }),
         "fake",
     );
-    (supervisor, calls)
+    (supervisor, calls, knobs)
+}
+
+fn daemon_with_knobs(dir: &Path, supports: bool) -> (ServiceDaemon, Calls, Knobs) {
+    let (supervisor, calls, knobs) = supervisor_with(supports);
+    let mut daemon = ServiceDaemon::with_supervisor(supervisor);
+    daemon.attach_profile_store(ProfileStore::new(dir));
+    (daemon, calls, knobs)
 }
 
 fn daemon_with(dir: &Path, supports: bool) -> (ServiceDaemon, Calls) {
-    let (supervisor, calls) = supervisor_with(supports);
-    let mut daemon = ServiceDaemon::with_supervisor(supervisor);
-    daemon.attach_profile_store(ProfileStore::new(dir));
+    let (daemon, calls, _) = daemon_with_knobs(dir, supports);
     (daemon, calls)
 }
 
@@ -439,8 +466,19 @@ fn persistence_failure_rolls_back_to_previous_backend_profile() {
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("chmod back");
 
     assert_eq!(response.status, IpcStatus::InternalError);
-    let recorded = calls.lock().unwrap().clone();
-    assert_eq!(recorded.last(), Some(&Some("a".to_owned())));
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![
+            Some("a".to_owned()),
+            Some("b".to_owned()),
+            Some("a".to_owned())
+        ]
+    );
+    let on_disk = ProfileStore::new(&dir)
+        .load_active()
+        .expect("load")
+        .expect("some");
+    assert_eq!(on_disk.id, "a");
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["active_voice_profile_id"], "a");
     assert_eq!(status.payload["stored_voice_profile_id"], "a");
@@ -496,5 +534,100 @@ fn restart_with_supporting_backend_restores_active() {
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["is_voice_profile_active"], true);
     assert_eq!(status.payload["active_voice_profile_id"], "spk-9");
+    assert_eq!(status.payload["voice_profile_error"], json!(null));
+}
+
+#[test]
+fn clear_failing_to_go_neutral_keeps_disk_and_state() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _, knobs) = daemon_with_knobs(&dir, true);
+    set_profile(&mut daemon, &profile_json("a"));
+    knobs
+        .fail_none
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let response = send(&mut daemon, IpcCommand::ClearVoiceProfile);
+
+    assert_eq!(response.status, IpcStatus::InternalError);
+    assert!(dir.join(ACTIVE_PROFILE_FILE_NAME).exists());
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["active_voice_profile_id"], "a");
+    assert_eq!(status.payload["stored_voice_profile_id"], "a");
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_rollback_is_reported_in_voice_profile_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _, knobs) = daemon_with_knobs(&dir, true);
+    set_profile(&mut daemon, &profile_json("a"));
+    *knobs.fail_id.lock().unwrap() = Some("a".to_owned());
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).expect("chmod");
+    let (_, response) = set_profile(&mut daemon, &profile_json("b"));
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("chmod back");
+
+    assert_eq!(response.status, IpcStatus::InternalError);
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert!(status.payload["voice_profile_error"].is_string());
+    assert_eq!(status.payload["stored_voice_profile_id"], "a");
+}
+
+#[test]
+fn startup_load_failure_is_reported_and_keeps_the_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let store = ProfileStore::new(&dir);
+    store
+        .save_active(&test_profile("spk-1", "Alice"))
+        .expect("save");
+    let path = store.active_profile_path();
+    let tampered = std::fs::read_to_string(&path)
+        .expect("read")
+        .replace("Alice", "Imposter");
+    std::fs::write(&path, tampered).expect("write");
+
+    let (mut daemon, _) = daemon_with(&dir, true);
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert!(status.payload["voice_profile_error"].is_string());
+    assert_eq!(status.payload["is_voice_profile_active"], false);
+    assert!(path.exists(), "file is not deleted");
+}
+
+#[test]
+fn backend_swap_reapplies_the_stored_profile() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _) = daemon_with(&dir, true);
+    set_profile(&mut daemon, &profile_json("a"));
+
+    daemon.install_backend(
+        Box::new(ProfileBackend {
+            supports: false,
+            calls: Calls::default(),
+            knobs: Knobs::default(),
+        }),
+        "no-support",
+    );
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["active_voice_profile_id"], json!(null));
+    assert_eq!(status.payload["stored_voice_profile_id"], "a");
+    assert!(status.payload["voice_profile_error"].is_string());
+
+    daemon.install_backend(
+        Box::new(ProfileBackend {
+            supports: true,
+            calls: Calls::default(),
+            knobs: Knobs::default(),
+        }),
+        "support",
+    );
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["active_voice_profile_id"], "a");
+    assert_eq!(status.payload["is_voice_profile_active"], true);
     assert_eq!(status.payload["voice_profile_error"], json!(null));
 }

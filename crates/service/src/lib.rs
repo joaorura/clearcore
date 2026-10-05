@@ -51,6 +51,11 @@ pub struct ServiceDaemon {
 const INVALID_PROFILE_MESSAGE: &str = "Invalid voice profile";
 const PERSIST_FAILED_MESSAGE: &str = "Failed to persist voice profile";
 const NOT_APPLIED_MESSAGE: &str = "The backend could not apply the stored voice profile";
+const LOAD_FAILED_MESSAGE: &str =
+    "The stored voice profile failed validation or has insecure permissions";
+const RESTORE_FAILED_MESSAGE: &str =
+    "The previous voice profile could not be restored on the backend";
+const CLEAR_FAILED_MESSAGE: &str = "The active backend could not return to the neutral voice";
 const APPLY_FAILED_MESSAGE: &str = "The active backend cannot apply this voice profile";
 const NO_PROFILE_STORE_MESSAGE: &str = "Voice profile storage is not configured";
 
@@ -162,6 +167,7 @@ impl ServiceDaemon {
                 eprintln!(
                     "Stored voice profile was not loaded: it failed validation or has insecure permissions"
                 );
+                self.voice_profile_error = Some(LOAD_FAILED_MESSAGE.to_owned());
             }
         }
         let dir = store.dir().to_path_buf();
@@ -223,6 +229,28 @@ impl ServiceDaemon {
     #[must_use]
     pub const fn served_client_count(&self) -> usize {
         self.served_client_count
+    }
+
+    /// Installs an already-built backend (test and embedding seam) and re-applies the stored
+    /// voice profile to it, exactly like a `SetBackend` request does.
+    pub fn install_backend(
+        &mut self,
+        backend: Box<dyn realtime_noise_model::InferenceBackend>,
+        name: &str,
+    ) {
+        self.supervisor.set_backend(backend, name);
+        self.reapply_stored_profile();
+    }
+
+    /// After a backend swap the supervisor only carries over the profile it had applied. Retry the
+    /// stored one (a previous backend may have rejected it) and refresh the diagnostic.
+    fn reapply_stored_profile(&mut self) {
+        reapply_stored_profile(
+            &mut self.supervisor,
+            self.profile_store.as_ref(),
+            self.stored_voice_profile_id.as_deref(),
+            &mut self.voice_profile_error,
+        );
     }
 
     pub fn select_backend(&mut self, request: &str) -> BackendResolutionInfo {
@@ -314,6 +342,12 @@ impl ServiceDaemon {
                             req_name,
                             self.model_dir.as_deref(),
                             self.repo_root.as_deref(),
+                        );
+                        reapply_stored_profile(
+                            &mut self.supervisor,
+                            self.profile_store.as_ref(),
+                            self.stored_voice_profile_id.as_deref(),
+                            &mut self.voice_profile_error,
                         );
                         IpcResponse::success(
                             "set-backend-resp",
@@ -640,7 +674,7 @@ fn set_voice_profile(
         );
     }
     if store.save_active(&profile).is_err() {
-        let _ = supervisor.set_voice_profile(previous.as_ref());
+        restore_previous(supervisor, previous.as_ref(), error);
         return IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE);
     }
     *stored_id = Some(profile.id.clone());
@@ -659,15 +693,60 @@ fn clear_voice_profile(
 ) -> IpcResponse {
     const REQUEST_ID: &str = "clear-voice-profile-resp";
     let previous = supervisor.active_voice_profile().cloned();
-    // Going neutral must work on every backend; if it somehow fails there is nothing to undo.
-    let _ = supervisor.set_voice_profile(None);
+    if supervisor.set_voice_profile(None).is_err() {
+        // The engine keeps the profile: leave disk and reported state untouched.
+        return IpcResponse::error(
+            REQUEST_ID,
+            IpcStatus::InternalError,
+            "VOICE_PROFILE_CLEAR_FAILED",
+            CLEAR_FAILED_MESSAGE,
+        );
+    }
     if let Some(store) = store
         && store.clear_active().is_err()
     {
-        let _ = supervisor.set_voice_profile(previous.as_ref());
+        restore_previous(supervisor, previous.as_ref(), error);
         return IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE);
     }
     *stored_id = None;
     *error = None;
     IpcResponse::success(REQUEST_ID, json!({"active_voice_profile_id": null}))
+}
+
+/// Puts the engine back on `previous` after a failed persist. A failed restore leaves the engine
+/// and the disk disagreeing, so it is surfaced in the status instead of being swallowed.
+fn restore_previous(
+    supervisor: &mut EngineSupervisor,
+    previous: Option<&VoiceProfile>,
+    error: &mut Option<String>,
+) {
+    if supervisor.set_voice_profile(previous).is_err() {
+        eprintln!("Previous voice profile could not be restored on the backend");
+        *error = Some(RESTORE_FAILED_MESSAGE.to_owned());
+    }
+}
+
+fn reapply_stored_profile(
+    supervisor: &mut EngineSupervisor,
+    store: Option<&ProfileStore>,
+    stored_id: Option<&str>,
+    error: &mut Option<String>,
+) {
+    let (Some(store), Some(stored_id)) = (store, stored_id) else {
+        return;
+    };
+    if supervisor.active_voice_profile_id() == Some(stored_id) {
+        *error = None;
+        return;
+    }
+    match store.load_active() {
+        Ok(Some(profile)) => {
+            *error = supervisor
+                .set_voice_profile(Some(&profile))
+                .err()
+                .map(|_| NOT_APPLIED_MESSAGE.to_owned());
+        }
+        Ok(None) => {}
+        Err(_) => *error = Some(LOAD_FAILED_MESSAGE.to_owned()),
+    }
 }
