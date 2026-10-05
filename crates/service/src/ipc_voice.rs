@@ -153,12 +153,20 @@ struct JobExtra {
 /// Enrollment state owned by the daemon thread.
 pub struct EnrollmentState {
     sample_jobs: JobTable<IngestOutcome>,
-    profile_jobs: JobTable<VoiceProfile>,
+    /// Build results carry the `profile_generation` captured at spawn.
+    profile_jobs: JobTable<(u64, VoiceProfile)>,
     extras: HashMap<String, JobExtra>,
     denoiser_factory: Option<DenoiserFactory>,
     model_factory: SharedModelFactory,
     pub(crate) legacy_samples_dir: Option<PathBuf>,
     id_counter: u64,
+    /// Bumped by every change that makes a running build stale (profile set/cleared, a sample
+    /// added, deleted or approved, a new build). A build result whose captured generation differs
+    /// is discarded, so a profile is never built from deleted audio, never revives a cleared
+    /// profile and never overrides a newer one.
+    profile_generation: u64,
+    /// The single build allowed to run at a time.
+    running_build: Option<String>,
 }
 
 impl EnrollmentState {
@@ -185,7 +193,20 @@ impl EnrollmentState {
             model_factory,
             legacy_samples_dir,
             id_counter: 0,
+            profile_generation: 0,
+            running_build: None,
         }
+    }
+
+    pub(crate) const fn bump_generation(&mut self) {
+        self.profile_generation = self.profile_generation.wrapping_add(1);
+    }
+
+    fn build_running(&self) -> bool {
+        self.running_build
+            .as_deref()
+            .and_then(|id| self.profile_jobs.info(id))
+            .is_some_and(|info| info.state == JobState::Running)
     }
 
     fn next_id(&mut self, prefix: &str) -> String {
@@ -574,8 +595,15 @@ impl ServiceDaemon {
         for (job_id, outcome) in self.enrollment.sample_jobs.drain() {
             self.store_ingested(&job_id, &outcome);
         }
-        for (job_id, profile) in self.enrollment.profile_jobs.drain() {
-            self.apply_built_profile(&job_id, &profile);
+        for (job_id, (generation, profile)) in self.enrollment.profile_jobs.drain() {
+            if generation == self.enrollment.profile_generation {
+                self.apply_built_profile(&job_id, &profile);
+            } else {
+                // Stale: the gallery or the profile changed while it was being built.
+                self.enrollment
+                    .profile_jobs
+                    .mark_failed(&job_id, failure(codes::ENROLL_FAILED, "apply"));
+            }
         }
         let state = &mut self.enrollment;
         state.extras.retain(|external, _| {
@@ -731,6 +759,7 @@ impl ServiceDaemon {
                     self.fail_sample_job(job_id);
                     return;
                 }
+                self.enrollment.bump_generation();
                 self.enrollment.extras.insert(
                     external,
                     JobExtra {
@@ -826,6 +855,9 @@ impl ServiceDaemon {
         if !valid_metadata(name, false) {
             return IpcResponse::invalid_command(REQUEST_ID, "invalid profile name");
         }
+        if self.enrollment.build_running() {
+            return enroll_error(REQUEST_ID, &EnrollError::Busy);
+        }
         let samples = self.voice_samples.list_samples();
         let Some(device) = selected_device_hash(samples) else {
             return enroll_error(REQUEST_ID, &EnrollError::TooLittleSpeech);
@@ -853,20 +885,24 @@ impl ServiceDaemon {
             .map(|(_, _, s)| samples_dir.join(format!("{}.wav", s.id)))
             .collect();
         let metadata = ProfileMetadata {
-            id: format!("p-{}", epoch_millis()),
+            id: self.enrollment.next_id("p"),
             name: name.to_owned(),
             created_at_utc: utc_now_rfc3339(),
         };
         let factory = Arc::clone(&self.enrollment.model_factory);
-        let spawned = self
-            .enrollment
-            .profile_jobs
-            .spawn("trim", move || run_build(&paths, &factory, &metadata));
+        self.enrollment.bump_generation();
+        let generation = self.enrollment.profile_generation;
+        let spawned = self.enrollment.profile_jobs.spawn("trim", move || {
+            run_build(&paths, &factory, &metadata).map(|profile| (generation, profile))
+        });
         match spawned {
-            Ok(job_id) => IpcResponse::success(
-                REQUEST_ID,
-                json!({"success": true, "job_id": format!("{PROFILE_JOB_PREFIX}{job_id}")}),
-            ),
+            Ok(job_id) => {
+                self.enrollment.running_build = Some(job_id.clone());
+                IpcResponse::success(
+                    REQUEST_ID,
+                    json!({"success": true, "job_id": format!("{PROFILE_JOB_PREFIX}{job_id}")}),
+                )
+            }
             Err(f) => busy_or_failed(REQUEST_ID, f),
         }
     }
@@ -975,15 +1011,18 @@ impl ServiceDaemon {
             .voice_intake
             .approve_take(id, &mut self.voice_samples, name)
         {
-            Ok(sample) => IpcResponse::success(
-                REQUEST_ID,
-                json!({
-                    "success": true,
-                    "approved": true,
-                    "sample_id": sample.id,
-                    "has_profile": self.stored_voice_profile_id.is_some(),
-                }),
-            ),
+            Ok(sample) => {
+                self.enrollment.bump_generation();
+                IpcResponse::success(
+                    REQUEST_ID,
+                    json!({
+                        "success": true,
+                        "approved": true,
+                        "sample_id": sample.id,
+                        "has_profile": self.stored_voice_profile_id.is_some(),
+                    }),
+                )
+            }
             Err(VoiceIntakeError::TakeNotFound(_)) => IpcResponse::error(
                 REQUEST_ID,
                 IpcStatus::InvalidCommand,

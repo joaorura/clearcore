@@ -38,8 +38,11 @@ use std::time::{Duration, Instant};
 
 // ---------------------------------------------------------------- test doubles
 
-/// Backend that accepts every profile (as in `tests/voice_profile.rs`).
-struct ProfileBackend;
+/// Backend that accepts every profile (as in `tests/voice_profile.rs`), except ids starting with
+/// `reject_prefix` when set.
+struct ProfileBackend {
+    reject_prefix: Option<&'static str>,
+}
 
 impl InferenceBackend for ProfileBackend {
     fn descriptor(&self) -> BackendDescriptor {
@@ -62,8 +65,13 @@ impl InferenceBackend for ProfileBackend {
         1_440
     }
 
-    fn set_voice_profile(&mut self, _p: Option<&VoiceProfile>) -> Result<(), InferenceError> {
-        Ok(())
+    fn set_voice_profile(&mut self, p: Option<&VoiceProfile>) -> Result<(), InferenceError> {
+        match (p, self.reject_prefix) {
+            (Some(profile), Some(prefix)) if profile.id.starts_with(prefix) => {
+                Err(InferenceError::UnsupportedFeature("injected".into()))
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -108,6 +116,8 @@ struct Setup {
     /// `None` = production loader without a development asset (not configured).
     model_delay: Option<Duration>,
     legacy: Option<PathBuf>,
+    /// Backend rejects built profiles (ids `p-...`).
+    reject_built: bool,
 }
 
 impl Default for Setup {
@@ -117,6 +127,7 @@ impl Default for Setup {
             denoise_gain: Some(0.5),
             model_delay: Some(Duration::ZERO),
             legacy: None,
+            reject_built: false,
         }
     }
 }
@@ -148,7 +159,12 @@ fn daemon_with(dir: &Path, setup: Setup) -> (ServiceDaemon, Arc<Mutex<Option<f32
         legacy_samples_dir: setup.legacy,
     };
     let mut supervisor = EngineSupervisor::default();
-    supervisor.set_backend(Box::new(ProfileBackend), "fake");
+    supervisor.set_backend(
+        Box::new(ProfileBackend {
+            reject_prefix: setup.reject_built.then_some("p-"),
+        }),
+        "fake",
+    );
     let mut daemon = ServiceDaemon::with_supervisor(supervisor).with_enrollment_hooks(hooks);
     daemon.attach_profile_store(ProfileStore::new(dir));
     (daemon, seen_peak)
@@ -1015,4 +1031,99 @@ fn without_a_usable_denoiser_samples_and_takes_fail_synchronously() {
     );
     assert_eq!(list(&mut daemon)["total_count"], 0);
     assert!(!temp.path().join("samples").exists());
+}
+
+// ---------------------------------------------------------------- stale build results
+
+fn slow_build_daemon(label: &str) -> (TempDir, ServiceDaemon) {
+    let temp = TempDir::new(label);
+    let (mut daemon, _) = daemon_with(
+        temp.path(),
+        Setup {
+            model_delay: Some(Duration::from_millis(300)),
+            ..Setup::default()
+        },
+    );
+    add_sample(&mut daemon, 4.0, "mic-a");
+    add_sample(&mut daemon, 4.0, "mic-a");
+    (temp, daemon)
+}
+
+#[test]
+fn clearing_the_profile_during_a_build_discards_its_result() {
+    let (_temp, mut daemon) = slow_build_daemon("enroll-stale-clear");
+    let id = job_id(&build(&mut daemon));
+    assert_eq!(
+        send(&mut daemon, IpcCommand::ClearVoiceProfile).status,
+        IpcStatus::Ok
+    );
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "failed", "{job}");
+    assert_eq!(job["error_code"], "ENROLL_FAILED");
+    assert_eq!(job["stage"], "apply");
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert!(status.payload["active_voice_profile_id"].is_null());
+    assert!(status.payload["stored_voice_profile_id"].is_null());
+}
+
+#[test]
+fn deleting_a_group_sample_during_a_build_discards_its_result() {
+    let (_temp, mut daemon) = slow_build_daemon("enroll-stale-delete");
+    let first = list(&mut daemon)["samples"][0]["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    let id = job_id(&build(&mut daemon));
+    let deleted = send(&mut daemon, IpcCommand::DeleteVoiceSample { id: first });
+    assert_eq!(deleted.payload["deleted"], true);
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "failed", "{job}");
+    assert_eq!(job["error_code"], "ENROLL_FAILED");
+    // "apply" when the WAVs were read before the delete (stale result), "trim" when the
+    // worker found the WAV already gone; either way nothing is applied.
+    assert!(job["stage"] == "apply" || job["stage"] == "trim", "{job}");
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert!(status.payload["active_voice_profile_id"].is_null());
+}
+
+#[test]
+fn only_one_build_runs_at_a_time() {
+    let (_temp, mut daemon) = slow_build_daemon("enroll-one-build");
+    let first = job_id(&build(&mut daemon));
+    let second = build(&mut daemon);
+    assert_eq!(error_code(&second), ENROLL_BUSY, "{second:?}");
+    let job = wait_job(&mut daemon, &first);
+    assert_eq!(job["state"], "done", "{job}");
+    assert_eq!(build(&mut daemon).status, IpcStatus::Ok, "free again");
+}
+
+#[test]
+fn a_profile_the_backend_rejects_fails_the_job_and_keeps_the_previous_one() {
+    let temp = TempDir::new("enroll-apply-fails");
+    let (mut daemon, _) = daemon_with(
+        temp.path(),
+        Setup {
+            reject_built: true,
+            ..Setup::default()
+        },
+    );
+    let set = send(
+        &mut daemon,
+        IpcCommand::SetVoiceProfile {
+            profile_json: test_profile("previous").to_json().expect("json"),
+        },
+    );
+    assert_eq!(set.status, IpcStatus::Ok);
+    add_sample(&mut daemon, 4.0, "mic-a");
+    add_sample(&mut daemon, 4.0, "mic-a");
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "failed", "{job}");
+    assert_eq!(job["error_code"], "ENROLL_FAILED");
+    assert_eq!(job["stage"], "apply");
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["active_voice_profile_id"], "previous");
+    assert_eq!(status.payload["stored_voice_profile_id"], "previous");
+    let stored = ProfileStore::new(temp.path()).load_active().expect("load");
+    assert_eq!(stored.expect("stored").id, "previous");
 }

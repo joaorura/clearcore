@@ -502,14 +502,20 @@ impl ServiceDaemon {
                 )
             }
             IpcCommand::SetVoiceProfile { profile_json } => {
+                // A running build must not override a profile chosen after it started.
+                self.enrollment.bump_generation();
                 self.set_voice_profile_json(profile_json)
             }
-            IpcCommand::ClearVoiceProfile => clear_voice_profile(
-                &mut self.supervisor,
-                self.profile_store.as_ref(),
-                &mut self.stored_voice_profile_id,
-                &mut self.voice_profile_error,
-            ),
+            IpcCommand::ClearVoiceProfile => {
+                // A running build must not revive a cleared profile.
+                self.enrollment.bump_generation();
+                clear_voice_profile(
+                    &mut self.supervisor,
+                    self.profile_store.as_ref(),
+                    &mut self.stored_voice_profile_id,
+                    &mut self.voice_profile_error,
+                )
+            }
             IpcCommand::ListVoiceSamples => self.list_voice_samples(),
             IpcCommand::AddVoiceSample {
                 name,
@@ -529,14 +535,20 @@ impl ServiceDaemon {
             IpcCommand::DeleteVoiceSample { id } => {
                 match self.voice_samples.delete_sample(id, true) {
                     // The WAV goes with the sample (confined to `samples/`); the client rebuilds.
-                    Ok(deleted) => IpcResponse::success(
-                        "delete-voice-sample-resp",
-                        json!({
-                            "success": true,
-                            "deleted": deleted,
-                            "has_profile": self.stored_voice_profile_id.is_some(),
-                        }),
-                    ),
+                    // A build that may have read the deleted audio is made stale.
+                    Ok(deleted) => {
+                        if deleted {
+                            self.enrollment.bump_generation();
+                        }
+                        IpcResponse::success(
+                            "delete-voice-sample-resp",
+                            json!({
+                                "success": true,
+                                "deleted": deleted,
+                                "has_profile": self.stored_voice_profile_id.is_some(),
+                            }),
+                        )
+                    }
                     Err(_) => IpcResponse::internal_error(
                         "delete-voice-sample-resp",
                         "Failed to delete voice sample",
