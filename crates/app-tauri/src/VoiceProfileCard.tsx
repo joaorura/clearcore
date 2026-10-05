@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useI18n } from './i18n';
 import { invokeBridge } from './bridge';
 import type { VoiceSample, CallSuggestionTake, VoiceProfileStatus, InputDeviceInfo } from './types';
+import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels, Quality } from './voice/enrollmentTypes';
+import { enrollmentErrorCode, isBudgetError } from './voice/enrollmentErrors';
+import { formatSeconds } from './voice/speechBudget';
 
 export interface VoiceProfileCardProps {
   selectedInputId?: string;
@@ -374,6 +377,68 @@ export function voiceProfileErrorKey(code: unknown): VoiceProfileErrorKey {
   return Object.prototype.hasOwnProperty.call(VOICE_PROFILE_ERROR_KEYS, code)
     ? VOICE_PROFILE_ERROR_KEYS[code]
     : 'errorUnknown';
+}
+
+const ENROLLMENT_LABEL_KEYS = [
+  'budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', 'budgetExceededTitle', 'budgetExceededBody',
+  'deleteAction', 'deleting', 'otherMicrophone', 'needsReenroll', 'usedInProfile', 'notUsed',
+  'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply',
+  'jobDone', 'jobFailed', 'devModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech',
+] as const satisfies ReadonlyArray<Exclude<keyof EnrollmentLabels, 'errors'>>;
+
+const ENROLLMENT_ERROR_KEYS = [
+  'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
+  'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE',
+  'ENROLL_JOB_NOT_FOUND', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'UNKNOWN',
+] as const satisfies ReadonlyArray<keyof EnrollmentLabels['errors']>;
+
+/** Fills every EnrollmentLabels field from i18n (`voiceProfile.enrollment.*`). */
+export function buildEnrollmentLabels(t: (path: string) => string): EnrollmentLabels {
+  const labels = {} as Omit<EnrollmentLabels, 'errors'>;
+  for (const key of ENROLLMENT_LABEL_KEYS) labels[key] = t(`voiceProfile.enrollment.${key}`);
+  const errors = {} as EnrollmentLabels['errors'];
+  for (const code of ENROLLMENT_ERROR_KEYS) errors[code] = t(`voiceProfile.enrollment.errors.${code}`);
+  return { ...labels, errors };
+}
+
+export type JobOutcome =
+  | { kind: 'done'; quality: Quality | null }
+  | { kind: 'show-budget-error'; remainingSeconds: number | null }
+  | { kind: 'show-error'; code: EnrollErrorCode };
+
+/** What the card does once a sample/profile job has finished. */
+export function nextStepAfterJob(job: EnrollmentJob): JobOutcome {
+  if (job.state === 'done') return { kind: 'done', quality: job.quality };
+  if (isBudgetError(job.errorCode)) return { kind: 'show-budget-error', remainingSeconds: job.remainingSeconds };
+  return { kind: 'show-error', code: job.errorCode ?? 'ENROLL_FAILED' };
+}
+
+/** Only the budget error asks the user to free speech by deleting samples (spec §4.4). */
+export function shouldOpenGalleryOnError(code: EnrollErrorCode | null): boolean {
+  return isBudgetError(code);
+}
+
+/**
+ * A dynamic take that the service did not record for lack of margin shows no error (spec §4.4);
+ * an explicit user action (approve) that fails shows its error.
+ */
+export function shouldShowTakeError(res: unknown): boolean {
+  if (typeof res !== 'object' || res === null) return false;
+  const r = res as { recorded?: unknown; reason?: unknown };
+  if (r.recorded === false && r.reason === 'budget') return false;
+  return enrollmentErrorCode(res) !== null;
+}
+
+/** formatSeconds() always uses a point; pt-BR shows a decimal comma. */
+export function formatSecondsForLocale(seconds: number, locale: string): string {
+  const s = formatSeconds(seconds);
+  return locale.toLowerCase().startsWith('pt') ? s.replace('.', ',') : s;
+}
+
+/** Interpolates `{remaining}` with the localized figure; leaves the template alone when unknown. */
+export function interpolateBudgetBody(template: string, remainingSeconds: number | null, locale: string): string {
+  if (remainingSeconds === null) return template;
+  return template.split('{remaining}').join(formatSecondsForLocale(remainingSeconds, locale));
 }
 
 export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({

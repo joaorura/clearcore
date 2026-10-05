@@ -61,12 +61,13 @@ describe('Voice Profile & Speaker Isolation UI Specs', () => {
     expect(ptBR.voiceProfile.approveTake).toContain('Aprovar');
     expect(ptBR.voiceProfile.dismissTake).toContain('Descartar');
     expect(ptBR.voiceProfile.addNewSampleBtn).toContain('Adicionar');
-    expect(ptBR.voiceProfile.activateProfileBtn).toContain('Ativar Microfone Personalizado');
+    // Honest wording (spec §9): the packaged virtual microphone does not use the profile yet.
+    expect(ptBR.voiceProfile.activateProfileBtn).toContain('Gerar perfil no serviço');
 
     expect(enUS.voiceProfile.approveTake).toContain('Approve');
     expect(enUS.voiceProfile.dismissTake).toContain('Dismiss');
     expect(enUS.voiceProfile.addNewSampleBtn).toContain('Add Voice Sample');
-    expect(enUS.voiceProfile.activateProfileBtn).toContain('Activate Custom Microphone');
+    expect(enUS.voiceProfile.activateProfileBtn).toContain('Build profile in the service');
   });
 
   it('provides dynamic recording UX strings and supports flexible durations without rigid 5s limit', () => {

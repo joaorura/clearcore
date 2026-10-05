@@ -58,8 +58,10 @@ export interface CallSuggestionTake {
 export interface VoiceProfileStatus {
   is_enrolled: boolean;
   active_samples_count: number;
-  embedding_dim: number;
-  neural_eq_calibrated: boolean;
+  /** Service-reported only; never invented by the renderer. */
+  embedding_dim?: number;
+  /** Service-reported only; never invented by the renderer. */
+  neural_eq_calibrated?: boolean;
   gain_boost_db?: number;
   is_voice_profile_active?: boolean;
   stored_voice_profile_id?: string | null;
