@@ -222,10 +222,10 @@ impl EngineSupervisor {
     /// Re-applies the stored profile to a freshly installed backend. If the new backend does not
     /// confirm it, the profile is dropped so an unconfirmed profile is never reported.
     fn reapply_voice_profile(&mut self) {
-        if let Some(profile) = self.active_profile.take() {
-            if self.set_voice_profile(Some(&profile)).is_err() {
-                self.active_profile = None;
-            }
+        if let Some(profile) = self.active_profile.take()
+            && self.set_voice_profile(Some(&profile)).is_err()
+        {
+            self.active_profile = None;
         }
     }
 
