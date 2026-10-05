@@ -152,7 +152,8 @@ impl Denoiser for TractDenoiser {
     clippy::panic,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::float_cmp
 )]
 mod tests {
     use super::*;
@@ -283,7 +284,7 @@ mod tests {
         // Frames whose level sits within +-0.1 dB of the -30 dB relative threshold, so PCM16
         // quantization can flip them; the reported figures must come from the stored signal.
         let loud = 0.5_f32;
-        let thr = loud * 10f32.powf(-30.0 / 20.0 * 0.0) * 10f32.powf(-1.5);
+        let thr = loud * 10f32.powf(-1.5);
         let mut pcm = Vec::new();
         for f in 0..300_usize {
             let offset_db = -0.1 + 0.2 * (f % 50) as f32 / 49.0;
@@ -326,11 +327,9 @@ mod tests {
         for lag in -480_i32..=480 {
             let mut acc = 0.0_f32;
             for (i, a) in input.iter().enumerate() {
-                let j = i as i64 + i64::from(lag);
-                if j >= 0 {
-                    if let Some(b) = out.get(j as usize) {
-                        acc += a * b;
-                    }
+                let j = i64::try_from(i).unwrap() + i64::from(lag);
+                if let Some(b) = usize::try_from(j).ok().and_then(|j| out.get(j)) {
+                    acc += a * b;
                 }
             }
             if acc > best.1 {

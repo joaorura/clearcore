@@ -181,10 +181,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let legacy_dir = temp.path().join("legacy");
         legacy_with_two(&legacy_dir);
-        for (mode, body) in [
-            (0o644, br#"[]"#.as_slice()),
-            (0o600, b"{not json".as_slice()),
-        ] {
+        for (mode, body) in [(0o644, br"[]".as_slice()), (0o600, b"{not json".as_slice())] {
             let dir = temp.path().join(format!("t{mode:o}"));
             fs::create_dir_all(&dir).unwrap();
             let file = dir.join("voice_samples.json");
