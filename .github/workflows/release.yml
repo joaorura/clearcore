@@ -330,6 +330,8 @@ jobs:
           "CC=clang" | Out-File -FilePath $env:GITHUB_ENV -Append
           "CXX=clang++" | Out-File -FilePath $env:GITHUB_ENV -Append
           "AR=llvm-ar" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CFLAGS=-target aarch64-pc-windows-msvc" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TRACT_NO_ARM64_SIMD=1" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build Native Rust Binaries for Windows ARM64
         shell: powershell

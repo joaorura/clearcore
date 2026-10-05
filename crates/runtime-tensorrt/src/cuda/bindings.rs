@@ -159,7 +159,7 @@ impl CudaDriver {
         }
         #[cfg(target_os = "windows")]
         {
-            use windows_sys::Win32::System::LibraryLoader::FreeLibrary;
+            use windows_sys::Win32::Foundation::FreeLibrary;
             // SAFETY: FreeLibrary on a non-null module handle.
             unsafe { FreeLibrary(handle.cast()) };
         }

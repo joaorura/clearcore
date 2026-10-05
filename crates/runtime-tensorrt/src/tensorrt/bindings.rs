@@ -181,7 +181,7 @@ impl TensorRtLibrary {
         }
         #[cfg(target_os = "windows")]
         {
-            use windows_sys::Win32::System::LibraryLoader::FreeLibrary;
+            use windows_sys::Win32::Foundation::FreeLibrary;
             // SAFETY: FreeLibrary on valid module handle.
             unsafe { FreeLibrary(handle.cast()) };
         }
