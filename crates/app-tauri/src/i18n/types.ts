@@ -286,6 +286,7 @@ export interface Translations {
     stepTitle: string;
     takeSpeech: string;
     recordedDuration: string;
+    defaultProfileName: string;
     enrollment: {
       budgetTitle: string;
       budgetUsed: string;

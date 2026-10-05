@@ -288,6 +288,7 @@ export const enUS: Translations = {
     stepTitle: 'Step {n}',
     takeSpeech: 'Speech: {sec} s',
     recordedDuration: 'Recorded: {sec} s',
+    defaultProfileName: 'My voice profile',
     enrollment: {
       budgetTitle: 'Speech used in the profile',
       budgetUsed: 'Used',

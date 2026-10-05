@@ -288,6 +288,7 @@ export const ptBR: Translations = {
     stepTitle: 'Etapa {n}',
     takeSpeech: 'Fala: {sec} s',
     recordedDuration: 'Gravado: {sec} s',
+    defaultProfileName: 'Meu perfil de voz',
     enrollment: {
       budgetTitle: 'Fala usada no perfil',
       budgetUsed: 'Usado',

@@ -4,7 +4,8 @@ import { invokeBridge } from './bridge';
 import type { CallSuggestionTake, VoiceProfileStatus, InputDeviceInfo } from './types';
 import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels, Quality, SampleList } from './voice/enrollmentTypes';
 import { enrollmentErrorCode, errorLabel, isBudgetError } from './voice/enrollmentErrors';
-import { addSample, deleteSample, listSamples, waitForJob } from './voice/enrollmentClient';
+import { addSample, buildProfile, deleteSample, listSamples, waitForJob } from './voice/enrollmentClient';
+import { DevModelNotice } from './voice/DevModelNotice';
 import { VoiceBudgetMeter } from './voice/VoiceBudgetMeter';
 import { VoiceSampleGallery } from './voice/VoiceSampleGallery';
 import { BudgetErrorBanner } from './voice/BudgetErrorBanner';
@@ -232,13 +233,10 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 }) => {
   const { t, locale } = useI18n();
 
-  // Profile Status
+  // Profile Status: neutral until the service reports it (no invented EQ, gain or embedding).
   const [profileStatus, setProfileStatus] = useState<VoiceProfileStatus>({
     is_enrolled: false,
     active_samples_count: 0,
-    embedding_dim: 192,
-    neural_eq_calibrated: false,
-    gain_boost_db: 1.8,
   });
 
   // Guided Multi-Sampling State (5 Steps)
@@ -369,9 +367,6 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       let initialProfile: VoiceProfileStatus = {
         is_enrolled: false,
         active_samples_count: list?.samples.length ?? 0,
-        embedding_dim: 192,
-        neural_eq_calibrated: false,
-        gain_boost_db: 1.8,
       };
       try {
         const profileRes = await invokeBridge<unknown>('get_voice_profile');
@@ -604,24 +599,51 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     } catch {}
   };
 
-  // Activate Profile (Once 5/5 are complete)
-  const handleActivateProfile = async () => {
-    const newStatus: VoiceProfileStatus = {
-      is_enrolled: true,
-      active_samples_count: samples.length,
-      embedding_dim: 192,
-      neural_eq_calibrated: true,
-      gain_boost_db: 1.8,
-    };
-    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, undefined));
-
-    const setRes = await invokeBridge<unknown>('set_voice_profile', { profile: stripServiceVoiceProfileKeys(newStatus) }).catch(() => undefined);
-    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, setRes));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: newStatus }));
+  /**
+   * Builds the profile in the service (after the guided flow or from "Refazer perfil") and follows
+   * the job. The status shown afterwards is the merged service status, never a local guess.
+   */
+  const handleBuildProfile = async () => {
+    setBudgetError(null);
+    setEnrollErrorText(null);
+    setCurrentJob(null);
+    setJobBusy(true);
+    let done = false;
+    try {
+      const start = await buildProfile(t('voiceProfile.defaultProfileName'));
+      const startError = enrollmentErrorCode(start);
+      if (startError !== null || !('jobId' in start)) {
+        setEnrollErrorText(errorLabel(startError ?? 'ENROLL_FAILED', labels));
+      } else {
+        const job = await waitForJob(start.jobId, { onUpdate: setCurrentJob });
+        setCurrentJob(job);
+        const outcome = nextStepAfterJob(job);
+        if (outcome.kind === 'done') done = true;
+        else applyJobOutcome(outcome);
+      }
+    } catch (err) {
+      setCurrentJob(null);
+      setEnrollErrorText(err instanceof Error && err.message === 'timeout' ? t('voiceProfile.jobTimeout') : errorLabel('SERVICE_UNAVAILABLE', labels));
+    } finally {
+      setJobBusy(false);
     }
-    setFeedbackMessage(t('voiceProfile.profileActivatedSuccess'));
-    setTimeout(() => setFeedbackMessage(null), 5000);
+
+    const list = await refreshSamples();
+    let serviceStatus: VoiceProfileStatus | null = null;
+    try {
+      const res = await invokeBridge<unknown>('get_voice_profile');
+      serviceStatus = normalizeVoiceProfileStatus(res);
+      setProfileStatus((prev) => mergeVoiceProfileStatus(prev, res, list?.samples.length ?? 0));
+    } catch {
+      // the status keeps what the service last reported
+    }
+    if (done) {
+      if (typeof window !== 'undefined' && serviceStatus) {
+        window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: serviceStatus }));
+      }
+      setFeedbackMessage(t('voiceProfile.profileActivatedSuccess'));
+      setTimeout(() => setFeedbackMessage(null), 5000);
+    }
   };
 
   // Full Re-enrollment reset
@@ -780,6 +802,16 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {samples.length > 0 && (
+            <button
+              className="action-btn"
+              disabled={jobBusy || isRecording}
+              onClick={() => void handleBuildProfile()}
+              style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+            >
+              {t('voiceProfile.rebuildProfileBtn')}
+            </button>
+          )}
           {profileStatus.is_enrolled && (
             <button
               className="action-btn"
@@ -790,6 +822,10 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             </button>
           )}
         </div>
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <DevModelNotice labels={labels} />
       </div>
 
       {feedbackMessage && (
@@ -998,7 +1034,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             {isAllStepsCompleted && (
               <button
                 className="activate-profile-master-btn"
-                onClick={handleActivateProfile}
+                disabled={jobBusy || isRecording}
+                onClick={() => void handleBuildProfile()}
               >
                 {t('voiceProfile.activateProfileBtn')}
               </button>
