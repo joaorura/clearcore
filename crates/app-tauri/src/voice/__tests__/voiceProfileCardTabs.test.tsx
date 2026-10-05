@@ -31,4 +31,14 @@ describe('VoiceProfileCard tabs', () => {
     withStoredTab('samples');
     expect(render()).toContain('id="voice-profile-panel-enroll"');
   });
+  it('shows the development model notice exactly once, above the tabs, on every tab', () => {
+    const notice = 'Modelo de enrollment de desenvolvimento, ainda não aprovado';
+    for (const tab of ['enroll', 'gallery', 'calls', 'profile']) {
+      withStoredTab(tab);
+      const m = render();
+      expect(m.split(notice).length - 1, tab).toBe(1);
+      expect(m.indexOf(notice), tab).toBeLessThan(m.indexOf('role="tablist"'));
+      expect(m, tab).toContain(`id="voice-profile-panel-${tab}"`);
+    }
+  });
 });

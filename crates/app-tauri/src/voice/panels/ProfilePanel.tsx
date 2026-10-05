@@ -1,6 +1,5 @@
 import type { VoiceProfileStatus } from '../../types';
 import type { EnrollmentLabels } from '../enrollmentTypes';
-import { DevModelNotice } from '../DevModelNotice';
 import { voiceProfileErrorKey, type Translate } from '../hooks/voiceProfileLogic';
 import { profileStatusLabel } from './profileStatusLabel';
 import { JobFeedbackBlock, type JobFeedbackView } from './shared';
@@ -21,16 +20,15 @@ export interface ProfilePanelProps {
   onBuildProfile: () => void;
 }
 
-/** Profile status as the service reports it, the build/rebuild action and its job stage. */
+/**
+ * Profile status as the service reports it, the build/rebuild action and its job stage.
+ * The development model notice is shown by the card above the tabs (spec §9).
+ */
 export function ProfilePanel(p: ProfilePanelProps) {
   const { t, profileStatus } = p;
   const status = profileStatusLabel(profileStatus, t);
   return (
     <div>
-      <div style={{ marginBottom: 12 }}>
-        <DevModelNotice labels={p.labels} />
-      </div>
-
       <div className="profile-overview-box">
         <div className="overview-metric">
           <div className="overview-label">{t('voiceProfile.statusTitle')}</div>

@@ -8,6 +8,7 @@ import { CallsPanel, type CallsPanelProps } from '../panels/CallsPanel';
 import { ProfilePanel, type ProfilePanelProps } from '../panels/ProfilePanel';
 import { AddSampleModal, type AddSampleModalProps } from '../panels/AddSampleModal';
 import { profileStatusLabel } from '../panels/profileStatusLabel';
+import { jobFeedbackFor } from '../panels/voiceTabs';
 
 /** Returns the key plus its params (k=v), so the markup shows exactly what was asked for. */
 const t = (path: string, params?: Record<string, string | number>) =>
@@ -131,8 +132,8 @@ const profileProps = (over: Partial<ProfilePanelProps> = {}): ProfilePanelProps 
 });
 
 describe('ProfilePanel', () => {
-  it('always shows the development model notice', () => {
-    expect(html(<ProfilePanel {...profileProps()} />)).toContain('devModelNotice');
+  it('leaves the development model notice to the card header (no duplicate)', () => {
+    expect(html(<ProfilePanel {...profileProps()} />)).not.toContain('devModelNotice');
   });
   it('active only when the service confirms, with the applied-in-service note', () => {
     const active: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, is_voice_profile_active: true };
@@ -190,5 +191,36 @@ describe('AddSampleModal', () => {
     const onSave = vi.fn();
     const m = html(<AddSampleModal {...props({ onSave, captureError: 'no-mic', feedback: { jobBusy: true, currentJob: null, enrollErrorText: null } })} />);
     expect(m).toContain('no-mic'); expect(m).toContain('voiceProfile.sendingSample');
+  });
+});
+
+describe('profile build feedback follows the tab that started it', () => {
+  const failed: EnrollmentJob = { ...runningJob, state: 'failed', stage: 'enroll', errorCode: 'ENROLL_TOO_LITTLE_SPEECH' };
+  const view = { jobBusy: false, currentJob: failed, enrollErrorText: 'err:ENROLL_FAILED' };
+  const running = { jobBusy: true, currentJob: { ...runningJob, stage: 'enroll' as const }, enrollErrorText: null };
+  it('started on Enrollment: Enrollment shows the stage and the errors', () => {
+    const src = { origin: 'enroll', kind: 'build' } as const;
+    expect(html(<EnrollPanel {...enrollProps({ feedback: jobFeedbackFor('enroll', src, running) })} />)).toContain('stageEnroll');
+    const m = html(<EnrollPanel {...enrollProps({ feedback: jobFeedbackFor('enroll', src, view) })} />);
+    expect(m).toContain('err:ENROLL_TOO_LITTLE_SPEECH'); expect(m).toContain('err:ENROLL_FAILED');
+  });
+  it('started on Enrollment: Profile shows them too', () => {
+    const src = { origin: 'enroll', kind: 'build' } as const;
+    const m = html(<ProfilePanel {...profileProps({ feedback: jobFeedbackFor('profile', src, view) })} />);
+    expect(m).toContain('err:ENROLL_TOO_LITTLE_SPEECH'); expect(m).toContain('err:ENROLL_FAILED');
+  });
+  it('started on Profile: Profile shows the stage', () => {
+    const src = { origin: 'profile', kind: 'build' } as const;
+    expect(html(<ProfilePanel {...profileProps({ feedback: jobFeedbackFor('profile', src, running) })} />)).toContain('stageEnroll');
+  });
+});
+
+describe('EnrollPanel stepper', () => {
+  it('segments are labelled buttons, disabled while recording', () => {
+    const idle = html(<EnrollPanel {...enrollProps()} />);
+    expect((idle.match(/<button[^>]*class="stepper-segment[^"]*"[^>]*aria-label="voiceProfile.stepTitle\(n=\d\)"/g) ?? []).length).toBe(5);
+    const rec = html(<EnrollPanel {...enrollProps({ isRecording: true })} />);
+    expect((rec.match(/<button[^>]*class="stepper-segment[^"]*"[^>]*disabled=""/g) ?? []).length).toBe(5);
+    expect((idle.match(/<button[^>]*class="stepper-segment[^"]*"[^>]*disabled=""/g) ?? []).length).toBe(0);
   });
 });

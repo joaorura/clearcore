@@ -50,3 +50,9 @@ export function replacedSampleToDelete(
   if (typeof old !== 'string' || old.length === 0 || old === newSampleId) return null;
   return old;
 }
+
+/** Clicking a stepper segment: ignored while recording (the take belongs to the current step). */
+export function stepAfterSelect(current: number, requested: number, isRecording: boolean): number {
+  if (isRecording) return current;
+  return Number.isInteger(requested) && requested >= 1 && requested <= GUIDED_STEP_COUNT ? requested : current;
+}

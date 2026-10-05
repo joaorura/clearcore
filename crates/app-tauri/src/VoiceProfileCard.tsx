@@ -3,6 +3,8 @@ import { useI18n } from './i18n';
 import type { CallSuggestionTake, InputDeviceInfo } from './types';
 import { errorLabel } from './voice/enrollmentErrors';
 import { buildEnrollmentLabels } from './voice/hooks/voiceProfileLogic';
+import { stepAfterSelect } from './voice/hooks/guidedSteps';
+import { DevModelNotice } from './voice/DevModelNotice';
 import { useJobFeedback } from './voice/hooks/useJobFeedback';
 import { useVoiceSamples } from './voice/hooks/useVoiceSamples';
 import { useEnrollmentRecorder } from './voice/hooks/useEnrollmentRecorder';
@@ -204,7 +206,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             jobBusy={jobBusy}
             playingAudioId={playingAudioId}
             feedback={isModalOpen ? null : feedbackFor('enroll')}
-            onSelectStep={setCurrentStep}
+            onSelectStep={(step) => setCurrentStep(stepAfterSelect(currentStep, step, isRecording))}
             onToggleReadingMode={steps.toggleReadingMode}
             onStartStep={(step) => void steps.startStep(step)}
             onFinishStep={(step) => void steps.finishStep(step)}
@@ -232,6 +234,11 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6, lineHeight: 1.45 }}>
           {t('voiceProfile.description')}
         </p>
+      </div>
+
+      {/* Always visible, whatever the tab, while the enrollment model is the development asset (spec §9). */}
+      <div style={{ marginBottom: 12 }}>
+        <DevModelNotice labels={labels} />
       </div>
 
       {feedbackMessage && <div className="feedback-banner success-banner">{feedbackMessage}</div>}

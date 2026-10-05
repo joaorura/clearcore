@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { replacedSampleToDelete, stepAfterSubmit } from '../hooks/guidedSteps';
+import { replacedSampleToDelete, stepAfterSelect, stepAfterSubmit } from '../hooks/guidedSteps';
 
 const captured = { pcm: new Float32Array(4), sampleRate: 48_000 as const, durationSec: 3, peak: 0.4, rmsDbfs: -20, device: { label: 'Yeti', idHash: 'a'.repeat(64) } };
 
@@ -36,5 +36,19 @@ describe('stepAfterSubmit', () => {
     const prev = { duration: 4, sampleId: 'old' };
     expect(stepAfterSubmit(prev, { kind: 'show-error', code: 'ENROLL_FAILED' }, null, captured)).toBe(prev);
     expect(stepAfterSubmit(undefined, { kind: 'show-error', code: 'ENROLL_FAILED' }, null, captured)).toBeUndefined();
+  });
+});
+
+describe('stepAfterSelect', () => {
+  it('moves to the chosen step when idle', () => {
+    expect(stepAfterSelect(1, 4, false)).toBe(4);
+  });
+  it('keeps the current step while recording', () => {
+    expect(stepAfterSelect(2, 4, true)).toBe(2);
+  });
+  it('ignores steps outside 1..5', () => {
+    expect(stepAfterSelect(3, 0, false)).toBe(3);
+    expect(stepAfterSelect(3, 6, false)).toBe(3);
+    expect(stepAfterSelect(3, 2.5, false)).toBe(3);
   });
 });

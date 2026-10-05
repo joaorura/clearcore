@@ -77,15 +77,20 @@ export function EnrollPanel(p: EnrollPanelProps) {
               const isDone = Boolean(completedSteps[step]);
               const isCur = currentStep === step;
               return (
-                <div
+                <button
+                  type="button"
                   key={step}
                   className={`stepper-segment ${isDone ? 'done' : isCur ? 'current' : 'pending'}`}
+                  aria-label={t('voiceProfile.stepTitle', { n: String(step) })}
+                  aria-current={isCur ? 'step' : undefined}
+                  disabled={isRecording}
                   onClick={() => p.onSelectStep(step)}
                   title={t('voiceProfile.stepTitle', { n: String(step) })}
+                  style={{ background: 'transparent', border: 'none', padding: 0, font: 'inherit', color: 'inherit' }}
                 >
-                  <div className="segment-number">{isDone ? '✓' : step}</div>
-                  <div className="segment-fill" />
-                </div>
+                  <span className="segment-number">{isDone ? '✓' : step}</span>
+                  <span className="segment-fill" style={{ display: 'block' }} />
+                </button>
               );
             })}
           </div>
