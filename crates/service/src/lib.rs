@@ -16,6 +16,7 @@ mod enrollment_error;
 mod enrollment_ingest;
 mod enrollment_jobs;
 mod ipc_voice;
+mod pdfnet3_dev_config;
 mod voice_budget;
 mod voice_storage_migration;
 
@@ -89,6 +90,10 @@ impl ServiceDaemon {
         let model_dir = find_stateful_model_dir();
         let repo_root = find_repo_root();
         let mut supervisor = EngineSupervisor::default();
+        configure_dev_base_model(
+            &mut supervisor,
+            pdfnet3_dev_config::PdfNet3DevConfig::from_env(),
+        );
         let _ = supervisor.select_backend("auto", model_dir.as_deref(), repo_root.as_deref());
         let default_dir = VoiceSampleManager::default_dir();
         let voice_samples = VoiceSampleManager::load(&default_dir)
@@ -422,6 +427,11 @@ impl ServiceDaemon {
                         "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
                         "backend_runtime": desc.as_ref().map(|d| d.runtime),
                         "backend_device": self.supervisor.active_backend_device(),
+                        // Development only: "pdfnet3-dev" while the unsigned pDFNet3 (FiLM, M2
+                        // NO-GO checkpoint) drives the live backend, "base" otherwise. The error
+                        // is a fixed code (never a path) when the configured model is not in use.
+                        "dev_base_model": self.supervisor.dev_base_model(),
+                        "dev_base_model_error": self.supervisor.dev_base_model_error(),
                     }),
                 )
             }
@@ -777,6 +787,37 @@ fn clear_voice_profile(
 
 /// Puts the engine back on `previous` after a failed persist. A failed restore leaves the engine
 /// and the disk disagreeing, so it is surfaced in the status instead of being swallowed.
+/// Loads the development pDFNet3 named by `CLEARCORE_DEV_PDFNET3_*` (if any) into the supervisor.
+/// Any failure is logged with a fixed code and recorded for `GetStatus`; the daemon then keeps the
+/// default model instead of silently loading something else.
+fn configure_dev_base_model(
+    supervisor: &mut EngineSupervisor,
+    config: Result<Option<pdfnet3_dev_config::PdfNet3DevConfig>, &'static str>,
+) {
+    let loaded = match config {
+        Ok(None) => return,
+        Ok(Some(config)) => realtime_noise_model::PdfNet3DevArchive::read(
+            &config.archive_path,
+            &config.expected_sha256,
+        )
+        .map_err(realtime_noise_model::PdfNet3DevError::code),
+        Err(code) => Err(code),
+    };
+    match loaded {
+        Ok(archive) => {
+            eprintln!(
+                "DEVELOPMENT MODEL: the unsigned pDFNet3 (M2 NO-GO checkpoint) is the isolation \
+                 model; the tract backend is forced"
+            );
+            supervisor.set_dev_base_model(Some(archive));
+        }
+        Err(code) => {
+            eprintln!("Development pDFNet3 model was not loaded ({code}); using the default model");
+            supervisor.set_dev_base_model_error(Some(code));
+        }
+    }
+}
+
 fn restore_previous(
     supervisor: &mut EngineSupervisor,
     previous: Option<&VoiceProfile>,
@@ -866,5 +907,58 @@ mod tests {
             panic!("variant changed");
         };
         assert!(take_json.is_empty());
+    }
+
+    fn dev_status(
+        config: Result<Option<pdfnet3_dev_config::PdfNet3DevConfig>, &'static str>,
+    ) -> serde_json::Value {
+        let mut supervisor = EngineSupervisor::default();
+        configure_dev_base_model(&mut supervisor, config);
+        let _ = supervisor.select_backend("tract", None, None);
+        let mut daemon = ServiceDaemon::with_supervisor(supervisor);
+        daemon.handle_command(&IpcCommand::GetStatus).payload
+    }
+
+    #[test]
+    fn without_dev_variables_the_status_reports_the_base_model() {
+        let status = dev_status(Ok(None));
+        assert_eq!(status["dev_base_model"], "base");
+        assert_eq!(status["dev_base_model_error"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn a_bad_dev_configuration_keeps_the_default_model_and_reports_a_code() {
+        let status = dev_status(Err(pdfnet3_dev_config::CONFIG_INCOMPLETE));
+        assert_eq!(status["dev_base_model"], "base");
+        assert_eq!(
+            status["dev_base_model_error"],
+            "DEV_MODEL_CONFIG_INCOMPLETE"
+        );
+    }
+
+    #[test]
+    fn a_missing_or_tampered_dev_archive_is_reported_without_its_path() {
+        let missing = dev_status(Ok(Some(pdfnet3_dev_config::PdfNet3DevConfig {
+            archive_path: PathBuf::from("/nonexistent/clearcore-secret/pdfnet3.tar.gz"),
+            expected_sha256: "ab".repeat(32),
+        })));
+        assert_eq!(missing["dev_base_model"], "base");
+        assert_eq!(
+            missing["dev_base_model_error"],
+            "DEV_MODEL_ASSET_UNREADABLE"
+        );
+        assert!(!missing.to_string().contains("clearcore-secret"));
+
+        let dir = std::env::temp_dir().join(format!("cc-pdfnet3-dev-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tampered.tar.gz");
+        std::fs::write(&path, b"not the pinned archive").unwrap();
+        let tampered = dev_status(Ok(Some(pdfnet3_dev_config::PdfNet3DevConfig {
+            archive_path: path,
+            expected_sha256: "ab".repeat(32),
+        })));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(tampered["dev_base_model"], "base");
+        assert_eq!(tampered["dev_base_model_error"], "DEV_MODEL_HASH_MISMATCH");
     }
 }

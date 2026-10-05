@@ -220,3 +220,113 @@ fn real_denoiser_and_development_model_build_and_apply_a_profile() {
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["active_voice_profile_id"], job["profile_id"]);
 }
+
+const M3_PDFNET3: &str =
+    "/home/joaorura/orca/projects/clearcore-train/runs/m3/pdfnet3-release-asset-v1.tar.gz";
+const M3_PDFNET3_SHA256: &str = "42dfc577fdf8a881ecbafce7777bf6f0a4cf914ffc1aaff2580aec0cbac79505";
+const M3_ENROLLMENT: &str =
+    "/home/joaorura/orca/projects/clearcore-train/runs/m3/voice-enrollment-asset-v1.tar.gz";
+const M3_ENROLLMENT_SHA256: &str =
+    "bd4d6dd941f8527b5011a2bae78169148f33155e25d30c5707e88963e7ea824d";
+
+fn env_or(key: &str, default: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default.to_owned())
+}
+
+/// The runtime that receives the profile is the REAL tract backend running the development
+/// pDFNet3 (FiLM), not a test double: the build must end `done` and the profile must be active.
+/// Ingestion still denoises with the approved base `DFNet3` (decision D2).
+#[test]
+#[ignore = "needs the M3 pDFNet3 and enrollment archives and the approved DFNet3; run locally"]
+fn real_pdfnet3_backend_accepts_the_profile_built_from_real_samples() {
+    let pdfnet3 = PathBuf::from(env_or("CLEARCORE_DEV_PDFNET3_ASSET", M3_PDFNET3));
+    let enrollment = PathBuf::from(env_or("CLEARCORE_DEV_ENROLLMENT_ASSET", M3_ENROLLMENT));
+    if !pdfnet3.is_file() || !enrollment.is_file() {
+        eprintln!("M3 archives not present; skipping");
+        return;
+    }
+    let archive = realtime_noise_model::PdfNet3DevArchive::read(
+        &pdfnet3,
+        &env_or("CLEARCORE_DEV_PDFNET3_SHA256", M3_PDFNET3_SHA256),
+    )
+    .expect("verified development pDFNet3");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root");
+    let temp = TempDir::new("enroll-real-pdfnet3");
+    let mut supervisor = EngineSupervisor::default();
+    supervisor.set_dev_base_model(Some(archive));
+    // "auto" would pick an accelerator on this machine; the development model forces tract.
+    let info = supervisor.select_backend("auto", None, Some(&repo_root));
+    assert_eq!(info.name, "tract");
+    let mut daemon =
+        ServiceDaemon::with_supervisor(supervisor).with_enrollment_hooks(EnrollmentHooks {
+            denoiser_factory: None,
+            model_factory: None,
+            dev_enrollment_asset: Some((
+                enrollment,
+                env_or("CLEARCORE_DEV_ENROLLMENT_SHA256", M3_ENROLLMENT_SHA256),
+            )),
+            legacy_samples_dir: None,
+        });
+    daemon.set_repo_root(repo_root);
+    daemon.attach_profile_store(ProfileStore::new(temp.path()));
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["active_backend"], "tract", "{status:?}");
+    assert_eq!(status.payload["dev_base_model"], "pdfnet3-dev");
+    assert_eq!(status.payload["dev_base_model_error"], Value::Null);
+    assert_eq!(status.payload["voice_profile_supported"], true);
+
+    let clip = speech_over_noise();
+    let bytes: Vec<u8> = clip.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    for _ in 0..3 {
+        let resp = send(
+            &mut daemon,
+            IpcCommand::AddVoiceSample {
+                name: "Frase".to_owned(),
+                pcm_f32_le_b64: b64.clone(),
+                sample_rate: 48_000,
+                device_label: "Mic".to_owned(),
+                device_id_hash: "dev".to_owned(),
+            },
+        );
+        assert_eq!(resp.status, IpcStatus::Ok, "{resp:?}");
+        let id = resp.payload["job_id"].as_str().expect("job").to_owned();
+        let job = wait_job(&mut daemon, &id);
+        assert_eq!(job["state"], "done", "{job}");
+    }
+
+    let build_start = Instant::now();
+    let resp = send(
+        &mut daemon,
+        IpcCommand::BuildVoiceProfile {
+            name: "Dev".to_owned(),
+        },
+    );
+    assert_eq!(resp.status, IpcStatus::Ok, "{resp:?}");
+    let id = resp.payload["job_id"].as_str().expect("job").to_owned();
+    let job = wait_job(&mut daemon, &id);
+    eprintln!("build job: {job} in {:?}", build_start.elapsed());
+    assert_eq!(job["state"], "done", "{job}");
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(
+        status.payload["is_voice_profile_active"], true,
+        "{status:?}"
+    );
+    assert_eq!(status.payload["active_voice_profile_id"], job["profile_id"]);
+    assert_eq!(status.payload["dev_base_model"], "pdfnet3-dev");
+
+    // The conditioned runtime still produces finite audio of the right length.
+    let mut frame: AudioFrame = [0.0; realtime_noise_contracts::HOP_SAMPLES];
+    for (index, chunk) in clip.chunks_exact(frame.len()).take(50).enumerate() {
+        frame.copy_from_slice(chunk);
+        let out = daemon
+            .supervisor_mut()
+            .process_frame(&frame)
+            .unwrap_or_else(|e| panic!("frame {index}: {e}"));
+        assert!(out.iter().all(|s| s.is_finite()), "frame {index}");
+    }
+}
