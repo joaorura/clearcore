@@ -1236,3 +1236,162 @@ fn an_empty_device_hash_is_refused_synchronously() {
     }
     assert_eq!(list(&mut daemon)["total_count"], 0);
 }
+
+// ---------------------------------------------------------------- reviewer coverage
+
+/// Stores a real WAV at `samples/<id>.wav` and records the sample with `audio_path`.
+fn seed_wav_sample(
+    daemon: &mut ServiceDaemon,
+    id: &str,
+    ts: u64,
+    seconds: f32,
+    audio_path: Option<String>,
+) -> PathBuf {
+    let wav = realtime_noise_model::wav::encode_wav_pcm16_mono(&speech_pcm(seconds, 0.15), 48_000);
+    let path = daemon
+        .voice_samples()
+        .write_sample_wav(id, &wav)
+        .expect("write wav");
+    let sample = VoiceSample {
+        id: id.to_owned(),
+        timestamp: ts.to_string(),
+        name: "seed".to_owned(),
+        audio_path: Some(audio_path.unwrap_or_else(|| path.to_string_lossy().into_owned())),
+        embedding: Vec::new(),
+        is_active: true,
+        device_label: "Mic mic-a".to_owned(),
+        device_id_hash: "mic-a".to_owned(),
+        capture_sample_rate: 48_000,
+        speech_seconds: seconds,
+    };
+    daemon.voice_samples_mut().add_sample(sample).expect("seed");
+    path
+}
+
+#[test]
+fn concurrent_ingestions_that_fit_alone_but_not_together_store_exactly_one() {
+    let temp = TempDir::new("enroll-concurrent-budget");
+    let (mut daemon, _) = daemon_with(
+        temp.path(),
+        Setup {
+            denoise_delay: Duration::from_millis(150),
+            ..Setup::default()
+        },
+    );
+    seed_sample(&mut daemon, "seed-80", 1, "mic-a", 80.0);
+    let pcm = speech_pcm(6.0, 0.3);
+    let a = job_id(&send(&mut daemon, add_cmd(&pcm, "mic-a")));
+    let b = job_id(&send(&mut daemon, add_cmd(&pcm, "mic-a")));
+    let (ja, jb) = (wait_job(&mut daemon, &a), wait_job(&mut daemon, &b));
+    let states = [ja["state"].clone(), jb["state"].clone()];
+    assert!(
+        states.contains(&json!("done")) && states.contains(&json!("failed")),
+        "{ja} {jb}"
+    );
+    let failed = if ja["state"] == "failed" { &ja } else { &jb };
+    assert_eq!(failed["error_code"], ENROLL_BUDGET_EXCEEDED);
+    let listed = list(&mut daemon);
+    assert_eq!(listed["total_count"], 2);
+    assert!(listed["budget"]["used_seconds"].as_f64().expect("used") <= 90.0 + 1e-3);
+}
+
+#[test]
+fn a_migrated_group_over_ninety_seconds_fails_without_dropping_audio() {
+    let temp = TempDir::new("enroll-over-ninety");
+    let mut daemon = daemon(temp.path());
+    for (i, id) in ["m-1", "m-2", "m-3"].iter().enumerate() {
+        seed_wav_sample(&mut daemon, id, i as u64 + 1, 31.0, None);
+    }
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "failed", "{job}");
+    assert_eq!(job["error_code"], ENROLL_BUDGET_EXCEEDED);
+    assert_eq!(
+        list(&mut daemon)["total_count"],
+        3,
+        "no sample was discarded"
+    );
+    assert_eq!(files_under(&temp.path().join("samples")).len(), 3);
+    assert!(send(&mut daemon, IpcCommand::GetStatus).payload["active_voice_profile_id"].is_null());
+}
+
+#[test]
+fn deleting_an_ingested_sample_removes_its_wav() {
+    let temp = TempDir::new("enroll-delete-wav");
+    let mut daemon = daemon(temp.path());
+    let job = add_sample(&mut daemon, 3.0, "mic-a");
+    let sample_id = job["sample_id"].as_str().expect("id").to_owned();
+    let wav = temp.path().join("samples").join(format!("{sample_id}.wav"));
+    assert!(wav.is_file());
+    let resp = send(&mut daemon, IpcCommand::DeleteVoiceSample { id: sample_id });
+    assert_eq!(resp.payload["deleted"], true);
+    assert!(!wav.exists());
+}
+
+#[test]
+fn the_build_reads_audio_by_id_and_ignores_a_stored_outside_path() {
+    let temp = TempDir::new("enroll-outside-path");
+    let mut daemon = daemon(&temp.path().join("profiles"));
+    let outside = temp.path().join("not-a-wav.bin");
+    std::fs::write(&outside, b"garbage that would fail to decode").expect("outside");
+    seed_wav_sample(
+        &mut daemon,
+        "s-by-id",
+        1,
+        8.0,
+        Some(outside.to_string_lossy().into_owned()),
+    );
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "done", "{job}");
+    assert_eq!(
+        std::fs::read(&outside).expect("outside"),
+        b"garbage that would fail to decode"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinks_inside_samples_never_delete_their_targets() {
+    let temp = TempDir::new("enroll-symlinks");
+    let dir = temp.path().join("profiles");
+    let mut daemon = daemon(&dir);
+    let sentinel = temp.path().join("sentinel.wav");
+    std::fs::write(&sentinel, b"keep").expect("sentinel");
+
+    // A sample whose samples/<id>.wav is a symlink to a file outside.
+    seed_wav_sample(&mut daemon, "s-link", 1, 3.0, None);
+    let link = dir.join("samples").join("s-link.wav");
+    std::fs::remove_file(&link).expect("rm");
+    std::os::unix::fs::symlink(&sentinel, &link).expect("symlink");
+    let resp = send(
+        &mut daemon,
+        IpcCommand::DeleteVoiceSample {
+            id: "s-link".to_owned(),
+        },
+    );
+    assert_eq!(resp.payload["deleted"], true);
+    assert_eq!(std::fs::read(&sentinel).expect("sentinel"), b"keep");
+
+    // A take whose audio path is a symlink inside samples/ pointing outside.
+    let take_link = dir.join("samples").join("t-link.wav");
+    std::os::unix::fs::symlink(&sentinel, &take_link).expect("symlink");
+    let take = IntakeTake::new(
+        "t-link",
+        "1",
+        3.0,
+        0.0,
+        Some(take_link.to_string_lossy().into_owned()),
+        Vec::new(),
+    )
+    .expect("take");
+    daemon.voice_intake_mut().add_take(take).expect("seed take");
+    let resp = send(
+        &mut daemon,
+        IpcCommand::DiscardIntakeSuggestion {
+            id: "t-link".to_owned(),
+        },
+    );
+    assert_eq!(resp.payload["discarded"], true);
+    assert_eq!(std::fs::read(&sentinel).expect("sentinel"), b"keep");
+}
