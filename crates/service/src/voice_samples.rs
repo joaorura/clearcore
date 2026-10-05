@@ -20,6 +20,7 @@ pub const PROFILE_BIN_BYTES: usize = 768; // 192 * 4 bytes (IEEE-754 Float32 lit
 pub const SAMPLES_FILE_NAME: &str = "voice_samples.json";
 pub const PROFILE_BIN_FILE_NAME: &str = "profile.bin";
 pub const SAMPLES_DIR_NAME: &str = "samples";
+pub const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 pub const MANIFEST_VERSION: u32 = 1;
 
 #[derive(Debug)]
@@ -33,7 +34,7 @@ pub enum VoiceSampleError {
     InsecurePermissions(String),
     Io(std::io::Error),
     SampleNotFound(String),
-    InvalidSampleId(String),
+    InvalidSampleId,
 }
 
 impl fmt::Display for VoiceSampleError {
@@ -55,10 +56,10 @@ impl fmt::Display for VoiceSampleError {
             Self::InsecurePermissions(err) => write!(f, "insecure storage permissions: {err}"),
             Self::Io(err) => write!(f, "I/O error: {err}"),
             Self::SampleNotFound(id) => write!(f, "voice sample with id '{id}' not found"),
-            Self::InvalidSampleId(id) => {
+            Self::InvalidSampleId => {
                 write!(
                     f,
-                    "invalid voice sample id '{id}' (expected [A-Za-z0-9_-]{{1,64}})"
+                    "invalid voice sample id (expected [A-Za-z0-9_-]{{1,64}})"
                 )
             }
         }
@@ -82,6 +83,15 @@ impl From<std::io::Error> for VoiceSampleError {
 
 const fn default_active() -> bool {
     true
+}
+
+/// True when `id` matches `[A-Za-z0-9_-]{1,64}`.
+#[must_use]
+pub(crate) fn is_valid_sample_id(id: &str) -> bool {
+    (1..=64).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// Metadata and 192d embedding vector for a single voice sample.
@@ -292,18 +302,22 @@ impl VoiceSampleManager {
 
     /// Atomically writes `<samples_dir>/<id>.wav` with mode 0600.
     pub fn write_sample_wav(&self, id: &str, wav: &[u8]) -> Result<PathBuf, VoiceSampleError> {
-        let valid = (1..=64).contains(&id.len())
-            && id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
-        if !valid {
-            return Err(VoiceSampleError::InvalidSampleId(id.to_string()));
+        if !is_valid_sample_id(id) {
+            return Err(VoiceSampleError::InvalidSampleId);
         }
         self.ensure_dir()?;
         self.ensure_samples_dir()?;
         let path = self.samples_dir().join(format!("{id}.wav"));
         Self::write_secure_atomic(&path, wav)?;
         Ok(path)
+    }
+
+    fn remove_if_present(path: &Path) -> Result<(), VoiceSampleError> {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
 
     /// True when `path` resolves (canonicalized) inside `samples_dir()`.
@@ -335,9 +349,19 @@ impl VoiceSampleManager {
             }
         }
 
+        if fs::metadata(&path)?.len() > MAX_MANIFEST_BYTES {
+            return Err(VoiceSampleError::Deserialization(
+                "manifest too large".to_string(),
+            ));
+        }
         let bytes = fs::read(&path)?;
+        if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+            return Err(VoiceSampleError::Deserialization(
+                "manifest too large".to_string(),
+            ));
+        }
         let text = std::str::from_utf8(&bytes)
-            .map_err(|e| VoiceSampleError::Deserialization(e.to_string()))?;
+            .map_err(|_| VoiceSampleError::Deserialization("manifest is not UTF-8".to_string()))?;
 
         // Support both direct array `[VoiceSample, ...]` and `VoiceSamplesManifest`.
         if let Ok(manifest) = serde_json::from_str::<VoiceSamplesManifest>(text) {
@@ -347,7 +371,7 @@ impl VoiceSampleManager {
             self.samples = manifest.samples;
         } else {
             let samples: Vec<VoiceSample> = serde_json::from_str(text)
-                .map_err(|e| VoiceSampleError::Deserialization(e.to_string()))?;
+                .map_err(|_| VoiceSampleError::Deserialization("invalid manifest".to_string()))?;
             for sample in &samples {
                 sample.validate()?;
             }
@@ -451,13 +475,19 @@ impl VoiceSampleManager {
         delete_audio_file: bool,
     ) -> Result<bool, VoiceSampleError> {
         if let Some(pos) = self.samples.iter().position(|s| s.id == id) {
-            let removed = self.samples.remove(pos);
-            if delete_audio_file && let Some(ref audio_path_str) = removed.audio_path {
-                let audio_path = PathBuf::from(audio_path_str);
-                if audio_path.is_file() && self.is_inside_samples_dir(&audio_path) {
-                    let _ = fs::remove_file(audio_path);
+            if delete_audio_file {
+                // Remove files first: on failure the sample stays in the manifest.
+                if is_valid_sample_id(id) {
+                    Self::remove_if_present(&self.samples_dir().join(format!("{id}.wav")))?;
+                }
+                if let Some(audio_path_str) = &self.samples[pos].audio_path {
+                    let audio_path = PathBuf::from(audio_path_str);
+                    if self.is_inside_samples_dir(&audio_path) {
+                        Self::remove_if_present(&audio_path)?;
+                    }
                 }
             }
+            self.samples.remove(pos);
             self.persist()?;
             Ok(true)
         } else {
@@ -789,7 +819,7 @@ mod tests {
             assert!(
                 matches!(
                     mgr.write_sample_wav(id, b"x"),
-                    Err(VoiceSampleError::InvalidSampleId(_))
+                    Err(VoiceSampleError::InvalidSampleId)
                 ),
                 "id {id:?} must be rejected"
             );
@@ -849,5 +879,87 @@ mod tests {
         mgr.add_sample(sample).unwrap();
         mgr.delete_sample("in1", true).unwrap();
         assert!(!wav.exists());
+    }
+
+    #[test]
+    fn delete_sample_removes_computed_wav_even_if_audio_path_points_elsewhere() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut mgr = VoiceSampleManager::new(temp.path().join("profiles"));
+        let wav = mgr.write_sample_wav("c1", b"RIFF").unwrap();
+        let copy = temp.path().join("copy.wav");
+        fs::write(&copy, b"RIFF").unwrap();
+        let sample = VoiceSample::new(
+            "c1",
+            "1",
+            "C",
+            Some(copy.to_str().unwrap().to_string()),
+            vec![],
+        )
+        .unwrap();
+        mgr.add_sample(sample).unwrap();
+        mgr.delete_sample("c1", true).unwrap();
+        assert!(!wav.exists(), "samples/<id>.wav must be removed");
+        assert!(copy.is_file(), "outside copy must survive");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_sample_keeps_sample_when_removal_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let mut mgr = VoiceSampleManager::new(temp.path().join("profiles"));
+        let wav = mgr.write_sample_wav("f1", b"RIFF").unwrap();
+        mgr.add_sample(VoiceSample::new("f1", "1", "F", None, vec![]).unwrap())
+            .unwrap();
+        fs::set_permissions(mgr.samples_dir(), fs::Permissions::from_mode(0o500)).unwrap();
+        let result = mgr.delete_sample("f1", true);
+        fs::set_permissions(mgr.samples_dir(), fs::Permissions::from_mode(0o700)).unwrap();
+        if fs::write(mgr.samples_dir().join("probe"), b"").is_ok() {
+            return; // running as root: permissions are not enforced
+        }
+        assert!(matches!(result, Err(VoiceSampleError::Io(_))));
+        assert!(mgr.get_sample("f1").is_some());
+        assert!(wav.is_file());
+    }
+
+    #[cfg(unix)]
+    fn write_manifest_0600(dir: &Path, body: &[u8]) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::create_dir_all(dir).unwrap();
+        let path = dir.join(SAMPLES_FILE_NAME);
+        fs::write(&path, body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_errors_never_echo_manifest_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("p");
+        write_manifest_0600(
+            &dir,
+            br#"[{"id":"a","timestamp":"1","name":"n","audio_path":null,"embedding":["SECRETNAME"]}]"#,
+        );
+        let err = VoiceSampleManager::load(&dir).unwrap_err();
+        assert!(!format!("{err}").contains("SECRETNAME"));
+        assert!(!format!("{err:?}").contains("SECRETNAME"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_rejects_oversized_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("p");
+        write_manifest_0600(&dir, &vec![b' '; 4 * 1024 * 1024 + 1]);
+        assert!(matches!(
+            VoiceSampleManager::load(&dir),
+            Err(VoiceSampleError::Deserialization(_))
+        ));
+    }
+
+    #[test]
+    fn invalid_sample_id_display_does_not_echo_the_id() {
+        let err = VoiceSampleError::InvalidSampleId;
+        assert!(!format!("{err}").contains("../"));
     }
 }
