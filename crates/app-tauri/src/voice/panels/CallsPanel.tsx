@@ -10,6 +10,8 @@ export interface CallsPanelProps {
   playingAudioId: string | null;
   /** Translated error of an approval the user asked for. */
   errorText: string | null;
+  /** Takes whose approval is in flight (approve disabled: no double approval). */
+  approvingIds?: readonly string[];
   onPlay: (id: string, audioUrl?: string) => void;
   onApprove: (take: CallSuggestionTake) => void;
   onDismiss: (id: string) => void;
@@ -59,7 +61,7 @@ export function CallsPanel(p: CallsPanelProps) {
                     {p.playingAudioId === take.id ? t('voiceProfile.stopSample') : t('voiceProfile.playSample')}
                   </button>
                 )}
-                <button className="action-btn take-approve-btn" onClick={() => p.onApprove(take)}>
+                <button className="action-btn take-approve-btn" disabled={p.approvingIds?.includes(take.id) ?? false} onClick={() => p.onApprove(take)}>
                   {t('voiceProfile.approveTake')}
                 </button>
                 <button className="action-btn take-dismiss-btn" onClick={() => p.onDismiss(take.id)}>

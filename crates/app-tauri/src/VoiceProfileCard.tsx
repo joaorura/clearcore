@@ -134,6 +134,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     jobs.setBudgetError(null);
     jobs.setEnrollErrorText(null);
     const outcome = await takes.approveTake(take);
+    if (outcome === null) return; // already being approved
     if (outcome.kind === 'budget') jobs.showBudgetError(outcome.remainingSeconds);
     else if (outcome.kind === 'error') jobs.showError('calls', errorLabel(outcome.code, labels));
     else flash(t('voiceProfile.takeApprovedFeedback'), 4000);
@@ -168,6 +169,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             sampleList={sampleList}
             samplesLoadFailed={samplesLoadFailed}
             deletingId={deletingId}
+            busy={jobBusy && jobs.source?.kind === 'build'}
             budgetError={budgetError}
             feedback={isModalOpen ? null : feedbackFor('gallery')}
             onDelete={(sampleId) => void handleDeleteSample(sampleId)}
@@ -182,6 +184,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             takes={callTakes}
             playingAudioId={playingAudioId}
             errorText={feedbackFor('calls')?.enrollErrorText ?? null}
+            approvingIds={takes.approvingIds}
             onPlay={playback.playUrl}
             onApprove={(take) => void handleApproveCallTake(take)}
             onDismiss={(takeId) => void handleDismissCallTake(takeId)}

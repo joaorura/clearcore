@@ -12,6 +12,8 @@ export interface GalleryPanelProps {
   sampleList: SampleList | null;
   samplesLoadFailed: boolean;
   deletingId: string | null;
+  /** A profile build is running: delete is locked. */
+  busy?: boolean;
   /** Set on ENROLL_BUDGET_EXCEEDED: shows the banner and highlights delete (spec §4.4). */
   budgetError: { remainingSeconds: number | null } | null;
   /** Feedback of the voluntary sample job once its modal closed. */
@@ -63,6 +65,7 @@ export function GalleryPanel(p: GalleryPanelProps) {
           labels={labels}
           onDelete={p.onDelete}
           deletingId={p.deletingId}
+          busy={p.busy}
           highlightDelete={budgetError !== null}
           lang={p.locale}
         />

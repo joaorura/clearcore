@@ -6,8 +6,10 @@ const badge = { fontSize: 11, padding: '2px 8px', borderRadius: 10, border: '1px
 export function VoiceSampleGallery(p: {
   samples: ServiceSample[]; budget: SpeechBudget; labels: EnrollmentLabels;
   onDelete: (id: string) => void; deletingId?: string | null; highlightDelete?: boolean; lang?: string;
+  /** A profile build is running: deleting would change its input, so delete is locked. */
+  busy?: boolean;
 }) {
-  const { samples, budget, labels, onDelete, deletingId, highlightDelete, lang = 'en-US' } = p;
+  const { samples, budget, labels, onDelete, deletingId, highlightDelete, lang = 'en-US', busy = false } = p;
   return (
     <ul className="voice-sample-gallery" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {samples.map((s) => {
@@ -41,7 +43,7 @@ export function VoiceSampleGallery(p: {
               data-testid={`delete-${s.id}`}
               data-highlight={highlightDelete ? 'true' : undefined}
               aria-label={`${labels.deleteAction}: ${s.name}`}
-              disabled={deleting}
+              disabled={deleting || busy}
               onClick={() => onDelete(s.id)}
               style={highlightDelete ? { borderColor: '#f87171', color: '#f87171', boxShadow: '0 0 0 2px rgba(248,113,113,0.35)' } : undefined}
             >
