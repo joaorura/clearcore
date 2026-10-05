@@ -100,4 +100,12 @@ describe('tab labels', () => {
       expect(text).not.toMatch(/end-to-end|produ[cç][aã]o|production/i);
     }
   });
+  it('the labels of the old two-tab layout are gone', async () => {
+    const { ptBR } = await import('../../i18n/locales/pt-BR');
+    const { enUS } = await import('../../i18n/locales/en-US');
+    for (const v of [ptBR.voiceProfile, enUS.voiceProfile]) {
+      expect('tabSamples' in v).toBe(false);
+      expect('tabCallSuggestions' in v).toBe(false);
+    }
+  });
 });

@@ -251,8 +251,6 @@ export const enUS: Translations = {
     activateProfileBtn: '🚀 Build profile in the service',
     profileActivatedSuccess: 'Profile built by the service. Check the status above.',
     reEnrollBtn: '🔄 Full Re-enrollment',
-    tabSamples: 'Cumulative Sample Gallery ({count})',
-    tabCallSuggestions: 'Call Suggestions ({count})',
     tabEnroll: 'Enrollment',
     tabGallery: 'Gallery',
     tabCalls: 'Calls',

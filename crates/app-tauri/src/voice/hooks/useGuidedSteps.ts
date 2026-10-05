@@ -56,6 +56,10 @@ export function useGuidedSteps(opts: {
       return take ? { ...prev, [step]: take } : prev;
     });
     flash(t('voiceProfile.sampleCompleted'), 3500);
+    // Known limit: the new sample is added BEFORE the old one is deleted, so the old one still
+    // counts against the 90 s budget while the new one is checked. With the budget almost full,
+    // the new take is refused with ENROLL_BUDGET_EXCEEDED: safe (nothing is lost, the old sample
+    // stays) and the card opens the gallery so the user can free speech first.
     const replaced = replacedSampleToDelete(previous, outcome, sampleId);
     if (replaced !== null) await deleteReplacedSample(replaced);
   };
@@ -87,6 +91,9 @@ export function useGuidedSteps(opts: {
     startStep, finishStep, redoStep,
     nextStep: () => { if (currentStep < GUIDED_STEP_COUNT) setCurrentStep(currentStep + 1); },
     toggleReadingMode,
+    // "Full re-enrollment" only restarts the guided flow here: it clears completedSteps and so
+    // forgets the steps' sampleIds. The old samples stay in the service and keep using the speech
+    // budget; nothing deletes them automatically (spec §4.4) — the user deletes them in the gallery.
     resetSteps: () => { setCompletedSteps({}); setCurrentStep(1); },
   };
 }

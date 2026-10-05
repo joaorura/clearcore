@@ -249,8 +249,6 @@ export interface Translations {
     activateProfileBtn: string;
     profileActivatedSuccess: string;
     reEnrollBtn: string;
-    tabSamples: string;
-    tabCallSuggestions: string;
     tabEnroll: string;
     tabGallery: string;
     tabCalls: string;

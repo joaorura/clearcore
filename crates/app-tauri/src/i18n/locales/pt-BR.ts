@@ -251,8 +251,6 @@ export const ptBR: Translations = {
     activateProfileBtn: '🚀 Gerar perfil no serviço',
     profileActivatedSuccess: 'Perfil gerado pelo serviço. Confira o status acima.',
     reEnrollBtn: '🔄 Refazer Cadastro Completo',
-    tabSamples: 'Galeria Cumulativa de Amostras ({count})',
-    tabCallSuggestions: 'Sugestões de Chamadas ({count})',
     tabEnroll: 'Cadastro',
     tabGallery: 'Galeria',
     tabCalls: 'Chamadas',
