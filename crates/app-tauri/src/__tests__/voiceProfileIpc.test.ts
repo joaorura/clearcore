@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { invokeBridge } from '../bridge';
+import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus } from '../VoiceProfileCard';
 import type { VoiceProfileStatus, VoiceSample, CallSuggestionTake, StudioPreset } from '../types';
 import fs from 'fs';
 import path from 'path';
@@ -274,8 +275,6 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
   });
 });
 
-import { normalizeVoiceProfileStatus } from '../VoiceProfileCard';
-
 describe('normalizeVoiceProfileStatus', () => {
   const base = { is_enrolled: true, active_samples_count: 3, embedding_dim: 192, neural_eq_calibrated: false };
   it('reads a flat status', () => {
@@ -288,5 +287,35 @@ describe('normalizeVoiceProfileStatus', () => {
     const s = normalizeVoiceProfileStatus({ success: false });
     expect(s.is_enrolled).toBe(false);
     expect(s.active_samples_count).toBe(0);
+  });
+});
+
+describe('normalizeVoiceProfileStatus edge cases', () => {
+  it('handles null and undefined', () => {
+    expect(normalizeVoiceProfileStatus(null).active_samples_count).toBe(0);
+    expect(normalizeVoiceProfileStatus(undefined).is_enrolled).toBe(false);
+  });
+  it('prefers nested profile over flat fields', () => {
+    const s = normalizeVoiceProfileStatus({ is_enrolled: false, active_samples_count: 1, profile: { is_enrolled: true, active_samples_count: 5 } });
+    expect(s.is_enrolled).toBe(true);
+    expect(s.active_samples_count).toBe(5);
+  });
+});
+
+describe('mergeVoiceProfileStatus', () => {
+  const initial: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, embedding_dim: 192, neural_eq_calibrated: true, gain_boost_db: 1.8 };
+  it('keeps initial for failed or null responses', () => {
+    expect(mergeVoiceProfileStatus(initial, { success: false }, 2)).toEqual(initial);
+    expect(mergeVoiceProfileStatus(initial, null, 2)).toEqual(initial);
+    expect(mergeVoiceProfileStatus(initial, undefined, 2)).toEqual(initial);
+  });
+  it('does not overwrite with defaults on a partial response', () => {
+    const m = mergeVoiceProfileStatus(initial, { profile: { is_enrolled: true, active_samples_count: 9 } }, 0);
+    expect(m.embedding_dim).toBe(192);
+    expect(m.gain_boost_db).toBe(1.8);
+    expect(m.active_samples_count).toBe(9);
+  });
+  it('prefers local sample count when present', () => {
+    expect(mergeVoiceProfileStatus(initial, { is_enrolled: false, active_samples_count: 9 }, 2).active_samples_count).toBe(2);
   });
 });

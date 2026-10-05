@@ -255,6 +255,25 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
   };
 }
 
+export function mergeVoiceProfileStatus(
+  initial: VoiceProfileStatus,
+  res: unknown,
+  loadedSamplesCount: number,
+): VoiceProfileStatus {
+  const r = (res ?? {}) as Partial<VoiceProfileStatus> & { profile?: Partial<VoiceProfileStatus> };
+  const raw = r.profile ?? r;
+  if (!raw || typeof raw !== 'object' || typeof raw.is_enrolled !== 'boolean') return initial;
+  const prof = normalizeVoiceProfileStatus(res);
+  return {
+    ...initial,
+    is_enrolled: prof.is_enrolled,
+    neural_eq_calibrated: prof.neural_eq_calibrated,
+    embedding_dim: raw.embedding_dim ?? initial.embedding_dim,
+    gain_boost_db: raw.gain_boost_db ?? initial.gain_boost_db,
+    active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
+  };
+}
+
 export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   selectedInputId,
   virtualMicPresent: _virtualMicPresent,
@@ -408,16 +427,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
         try {
           const profileRes = await invokeBridge<unknown>('get_voice_profile');
-          if (profileRes && typeof profileRes === 'object') {
-            const prof = normalizeVoiceProfileStatus(profileRes);
-            if (prof && typeof prof.is_enrolled === 'boolean') {
-              initialProfile = {
-                ...initialProfile,
-                ...prof,
-                active_samples_count: loadedSamples.length > 0 ? loadedSamples.length : prof.active_samples_count,
-              };
-            }
-          }
+          initialProfile = mergeVoiceProfileStatus(initialProfile, profileRes, loadedSamples.length);
         } catch {}
 
         setProfileStatus(initialProfile);
