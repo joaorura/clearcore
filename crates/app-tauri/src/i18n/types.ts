@@ -294,6 +294,7 @@ export interface Translations {
     deviceSwitchBody: string;
     deviceSwitchConfirm: string;
     deviceSwitchCancel: string;
+    captureNotStarted: string;
     enrollment: {
       budgetTitle: string;
       budgetUsed: string;

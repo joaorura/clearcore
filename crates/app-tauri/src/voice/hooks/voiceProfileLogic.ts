@@ -219,3 +219,16 @@ export function classifyTakeApproval(res: unknown): TakeApprovalOutcome {
   }
   return { kind: 'error', code };
 }
+
+/**
+ * startCapture() returned without recording and without a physical-microphone error: tell the
+ * user when another start was in flight ('busy') or the start was cancelled without them asking.
+ */
+export function shouldReportUnstartedCapture(
+  status: 'started' | 'busy' | 'cancelled' | 'failed',
+  cancelRequested: boolean,
+): boolean {
+  if (status === 'busy') return true;
+  if (status === 'cancelled') return !cancelRequested;
+  return false;
+}

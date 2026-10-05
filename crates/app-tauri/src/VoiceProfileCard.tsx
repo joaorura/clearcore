@@ -98,7 +98,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       deviceSwitch.ask({ newLabel: captured.device.label, oldLabel: list?.selectedDeviceLabel ?? '' }));
   };
   const rec = useEnrollmentRecorder({ selectedInputId, inputDevices, t, jobs, refreshSamples, beforeSend });
-  const { isRecording, recordingElapsedSeconds, liveVoiceLevel, captureError } = rec;
+  const { isRecording, isStarting, recordingElapsedSeconds, liveVoiceLevel, captureError } = rec;
   const playback = useAudioPlayback();
   const { playingAudioId, playCaptured } = playback;
   const profile = useProfileBuild({ t, labels, jobs, refreshSamples });
@@ -216,6 +216,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             recordingElapsedSeconds={recordingElapsedSeconds}
             captureError={isModalOpen ? null : captureError}
             jobBusy={jobBusy}
+            isStarting={isStarting}
             playingAudioId={playingAudioId}
             feedback={isModalOpen ? null : feedbackFor('enroll')}
             onSelectStep={(step) => setCurrentStep(stepAfterSelect(currentStep, step, isRecording))}
@@ -270,6 +271,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
           recordingElapsedSeconds={recordingElapsedSeconds}
           captureError={captureError}
           jobBusy={jobBusy}
+          isStarting={isStarting}
           feedback={feedbackView}
           playingAudioId={playingAudioId}
           onStart={() => void modal.startRecording()}

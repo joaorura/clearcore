@@ -296,6 +296,7 @@ export const ptBR: Translations = {
     deviceSwitchBody: 'Esta amostra foi gravada com outro microfone ({newLabel}). Se você continuar, as amostras anteriores ({oldLabel}) deixam de ser usadas no perfil; elas continuam na Galeria até você apagá-las.',
     deviceSwitchConfirm: 'Usar este microfone',
     deviceSwitchCancel: 'Cancelar e descartar a gravação',
+    captureNotStarted: 'A gravação não começou. Tente de novo.',
     enrollment: {
       budgetTitle: 'Fala usada no perfil',
       budgetUsed: 'Usado',

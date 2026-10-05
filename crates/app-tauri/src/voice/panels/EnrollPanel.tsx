@@ -17,6 +17,8 @@ export interface EnrollPanelProps {
   /** Null while the voluntary sample modal shows it instead. */
   captureError: string | null;
   jobBusy: boolean;
+  /** The microphone is being opened: recording cannot be started again. */
+  isStarting?: boolean;
   playingAudioId: string | null;
   /** Feedback of the sample job started here (null when another tab started the job). */
   feedback: JobFeedbackView | null;
@@ -127,7 +129,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
                 >
                   {p.playingAudioId === `step-${currentStep}` ? t('voiceProfile.stopSample') : t('voiceProfile.playSample')}
                 </button>
-                <button className="action-btn" disabled={p.jobBusy} onClick={() => p.onRedoStep(currentStep)}>
+                <button className="action-btn" disabled={p.jobBusy || p.isStarting} onClick={() => p.onRedoStep(currentStep)}>
                   {t('voiceProfile.redoSample')}
                 </button>
                 {currentStep < GUIDED_STEP_COUNT && (
@@ -137,7 +139,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
                 )}
               </div>
             ) : (
-              <button className="record-btn-trigger" disabled={p.jobBusy} onClick={() => p.onStartStep(currentStep)}>
+              <button className="record-btn-trigger" disabled={p.jobBusy || p.isStarting} onClick={() => p.onStartStep(currentStep)}>
                 🎙️ {t('voiceProfile.recordSample')}
               </button>
             )}

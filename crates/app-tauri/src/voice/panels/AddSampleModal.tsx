@@ -15,6 +15,8 @@ export interface AddSampleModalProps {
   recordingElapsedSeconds: number;
   captureError: string | null;
   jobBusy: boolean;
+  /** The microphone is being opened: recording cannot be started again. */
+  isStarting?: boolean;
   feedback: JobFeedbackView | null;
   playingAudioId: string | null;
   onStart: () => void;
@@ -62,7 +64,7 @@ export function AddSampleModal(p: AddSampleModalProps) {
           {p.isRecording ? (
             <RecordingIndicator t={t} locale={p.locale} elapsed={p.recordingElapsedSeconds} onStop={p.onStop} />
           ) : (
-            <button className="record-btn-trigger" disabled={p.jobBusy} onClick={p.onStart}>
+            <button className="record-btn-trigger" disabled={p.jobBusy || p.isStarting} onClick={p.onStart}>
               🎙️ {p.captured ? t('voiceProfile.redoSample') : t('voiceProfile.recordSample')}
             </button>
           )}

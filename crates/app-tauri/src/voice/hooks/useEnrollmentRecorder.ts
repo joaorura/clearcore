@@ -7,7 +7,7 @@ import { addSample, waitForJob } from '../enrollmentClient';
 import { acquireRawPhysicalStream, PhysicalMicUnavailableError } from '../captureDevice';
 import { PcmRecorder } from '../pcmCapture';
 import { CaptureController } from '../captureController';
-import { nextStepAfterJob, type JobOutcome, type Translate } from './voiceProfileLogic';
+import { nextStepAfterJob, shouldReportUnstartedCapture, type JobOutcome, type Translate } from './voiceProfileLogic';
 import type { JobFeedback, JobOrigin } from './useJobFeedback';
 
 export interface SubmitResult {
@@ -57,6 +57,8 @@ export function useEnrollmentRecorder(opts: {
   }
   const controller = controllerRef.current;
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Set by cleanupRecording(): a start cancelled on purpose is not reported as an error.
+  const cancelRequestedRef = useRef<boolean>(false);
   const recordingStartTimeRef = useRef<number>(0);
 
   const clearTimer = () => {
@@ -68,6 +70,7 @@ export function useEnrollmentRecorder(opts: {
 
   // Stops any capture in progress (or in flight) and discards its PCM.
   const cleanupRecording = useCallback(() => {
+    cancelRequestedRef.current = true;
     clearTimer();
     controller.cancel();
     setIsStarting(false);
@@ -83,7 +86,11 @@ export function useEnrollmentRecorder(opts: {
    * NOT start recording (spec D1: no fallback).
    */
   const startCapture = async (onLimit: () => void): Promise<boolean> => {
-    if (controller.isStarting) return false;
+    if (controller.isStarting) {
+      setCaptureError(t('voiceProfile.captureNotStarted'));
+      return false;
+    }
+    cancelRequestedRef.current = false;
     clearTimer();
     setCaptureError(null);
     setIsRecording(false);
@@ -97,8 +104,14 @@ export function useEnrollmentRecorder(opts: {
         setCaptureError(t('voiceProfile.physicalMicUnavailable'));
       },
     });
-    if (result.status === 'busy') return false;
-    if (result.status === 'cancelled') return false; // cleanup already reset the state
+    if (result.status === 'busy' || result.status === 'cancelled') {
+      // A cancel the user asked for (cleanup) already reset the state and needs no message.
+      if (shouldReportUnstartedCapture(result.status, cancelRequestedRef.current)) {
+        setIsStarting(false);
+        setCaptureError(t('voiceProfile.captureNotStarted'));
+      }
+      return false;
+    }
     setIsStarting(false);
     if (result.status === 'failed') {
       if (!(result.error instanceof PhysicalMicUnavailableError)) console.warn('Physical microphone capture failed');

@@ -296,6 +296,7 @@ export const enUS: Translations = {
     deviceSwitchBody: 'This sample was recorded with another microphone ({newLabel}). If you continue, the earlier samples ({oldLabel}) stop being used in the profile; they stay in the Gallery until you delete them.',
     deviceSwitchConfirm: 'Use this microphone',
     deviceSwitchCancel: 'Cancel and discard the recording',
+    captureNotStarted: 'Recording did not start. Try again.',
     enrollment: {
       budgetTitle: 'Speech used in the profile',
       budgetUsed: 'Used',
