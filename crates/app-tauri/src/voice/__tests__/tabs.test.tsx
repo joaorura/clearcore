@@ -53,8 +53,9 @@ describe('Tabs markup', () => {
     const out = render('c');
     expect((out.match(/aria-selected="true"/g) ?? []).length).toBe(1);
     expect((out.match(/aria-selected="false"/g) ?? []).length).toBe(3);
-    expect((out.match(/tabindex="0"/g) ?? []).length).toBe(1);
-    expect((out.match(/tabindex="-1"/g) ?? []).length).toBe(3);
+    const tabButtons = out.match(/<button[^>]*role="tab"[^>]*>/g) ?? [];
+    expect(tabButtons.filter((b) => b.includes('tabindex="0"')).length).toBe(1);
+    expect(tabButtons.filter((b) => b.includes('tabindex="-1"')).length).toBe(3);
   });
   it('ids match between tab and panel', () => {
     const out = render('c');
