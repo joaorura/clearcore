@@ -9,6 +9,39 @@ const MAX_SPEECH_SECONDS = 90;
 const RATE = 48000;
 const MAX_NAME = 64;
 const MAX_LABEL = 128;
+const MAX_META_BYTES = 256; // service limit on metadata, in UTF-8 bytes
+const JOB_ID_RE = /^job-[0-9]+$/;
+const KNOWN_CODES = new Set([
+  'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
+  'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE', 'ENROLL_JOB_NOT_FOUND',
+  'ENROLL_BUSY', 'ENROLL_FAILED',
+]);
+const CONNECTION_CODES = new Set(['ECONNREFUSED', 'ENOENT', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT']);
+
+// Trim, drop orphan surrogates (serde_json rejects them), then cut by code points and by UTF-8 bytes
+// without ever splitting a code point.
+function sanitizeMeta(value, maxChars) {
+  const points = Array.from(String(value == null ? '' : value).trim())
+    .filter((ch) => !/^[\ud800-\udfff]$/.test(ch))
+    .slice(0, maxChars);
+  let bytes = 0;
+  const out = [];
+  for (const ch of points) {
+    const b = Buffer.byteLength(ch, 'utf8');
+    if (bytes + b > MAX_META_BYTES) break;
+    bytes += b;
+    out.push(ch);
+  }
+  return out.join('');
+}
+
+// The invoke payload is a structured-clone copy owned by this handler, so it is safe to wipe.
+function wipePcm(pcm) {
+  try {
+    if (pcm instanceof ArrayBuffer) new Uint8Array(pcm).fill(0);
+    else if (ArrayBuffer.isView(pcm)) new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength).fill(0);
+  } catch (_) { /* best effort */ }
+}
 const STAGES = ['queued', 'denoise', 'trim', 'eq', 'enroll', 'apply'];
 const STATES = ['running', 'done', 'failed'];
 
@@ -49,21 +82,21 @@ function buildAddVoiceSampleCommand({ pcm, sampleRate, name, device } = {}) {
   }
   return {
     AddVoiceSample: {
-      name: String(name == null ? '' : name).trim().slice(0, MAX_NAME),
+      name: sanitizeMeta(name, MAX_NAME),
       pcm_f32_le_b64: buf.toString('base64'),
       sample_rate: RATE,
-      device_label: device.label.trim().slice(0, MAX_LABEL),
+      device_label: sanitizeMeta(device.label, MAX_LABEL),
       device_id_hash: device.idHash,
     },
   };
 }
 
 function buildBuildProfileCommand({ name } = {}) {
-  return { BuildVoiceProfile: { name: String(name == null ? '' : name).trim().slice(0, MAX_NAME) } };
+  return { BuildVoiceProfile: { name: sanitizeMeta(name, MAX_NAME) } };
 }
 
 function buildGetJobCommand({ jobId } = {}) {
-  if (typeof jobId !== 'string' || !/^job-[0-9]+$/.test(jobId)) throw new Error('invalid job id');
+  if (typeof jobId !== 'string' || !JOB_ID_RE.test(jobId)) throw new Error('invalid job id');
   return { GetEnrollmentJob: { job_id: jobId } };
 }
 
@@ -73,13 +106,20 @@ function num(v, fallback = 0) {
 
 function mapJob(s) {
   const src = s && typeof s === 'object' ? s : {};
+  if (typeof src.job_id !== 'string' || !JOB_ID_RE.test(src.job_id) || !STATES.includes(src.state)) {
+    // Fail closed: a malformed job must stop the poller, not look like a running one.
+    return {
+      jobId: '', state: 'failed', stage: 'queued', errorCode: 'ENROLL_FAILED',
+      remainingSeconds: null, sampleId: null, profileId: null, quality: null,
+    };
+  }
   const q = src.quality && typeof src.quality === 'object' ? src.quality : null;
   return {
-    jobId: typeof src.job_id === 'string' ? src.job_id : '',
-    state: STATES.includes(src.state) ? src.state : 'running',
+    jobId: src.job_id,
+    state: src.state,
     stage: STAGES.includes(src.stage) ? src.stage : 'queued',
-    errorCode: typeof src.error_code === 'string' ? src.error_code : null,
-    remainingSeconds: typeof src.remaining_seconds === 'number' ? src.remaining_seconds : null,
+    errorCode: typeof src.error_code === 'string' ? (KNOWN_CODES.has(src.error_code) ? src.error_code : 'ENROLL_FAILED') : null,
+    remainingSeconds: Number.isFinite(src.remaining_seconds) ? src.remaining_seconds : null,
     sampleId: typeof src.sample_id === 'string' ? src.sample_id : null,
     profileId: typeof src.profile_id === 'string' ? src.profile_id : null,
     quality: q
@@ -97,8 +137,10 @@ function mapSampleList(s) {
   const src = s && typeof s === 'object' ? s : {};
   const b = src.budget && typeof src.budget === 'object' ? src.budget : {};
   return {
-    samples: (Array.isArray(src.samples) ? src.samples : []).map((x) => ({
-      id: String(x.id),
+    samples: (Array.isArray(src.samples) ? src.samples : [])
+      .filter((x) => x && typeof x === 'object' && typeof x.id === 'string')
+      .map((x) => ({
+      id: x.id,
       name: typeof x.name === 'string' ? x.name : '',
       timestamp: String(x.timestamp == null ? '' : x.timestamp),
       speechSeconds: num(x.speech_seconds),
@@ -116,11 +158,11 @@ function mapSampleList(s) {
 }
 
 function classifyEnrollError(err) {
-  if (err && typeof err.code === 'string' && /^ENROLL_[A-Z_]+$/.test(err.code)) return err.code;
+  const code = err && typeof err.code === 'string' ? err.code : '';
+  if (KNOWN_CODES.has(code)) return code;
+  if (CONNECTION_CODES.has(code)) return 'SERVICE_UNAVAILABLE';
   const msg = err && typeof err.message === 'string' ? err.message : '';
-  if (/Daemon unreachable|Daemon IPC timeout|ECONNREFUSED|ENOENT|ECONNRESET|EPIPE/.test(msg)) {
-    return 'SERVICE_UNAVAILABLE';
-  }
+  if (msg.startsWith('Daemon unreachable') || msg.startsWith('Daemon IPC timeout')) return 'SERVICE_UNAVAILABLE';
   return 'ENROLL_FAILED';
 }
 
@@ -135,15 +177,23 @@ function registerEnrollmentHandlers(ipcMain, { sendIpcRequest }) {
     });
   };
 
+  const jobIdOf = (res) => {
+    if (!res || typeof res.job_id !== 'string' || !JOB_ID_RE.test(res.job_id)) {
+      const err = new Error('malformed job id');
+      err.code = 'ENROLL_FAILED';
+      throw err;
+    }
+    return { jobId: res.job_id };
+  };
   wrap('enrollment_add_sample', async (a) => {
-    const cmd = buildAddVoiceSampleCommand(a);
-    const res = await sendIpcRequest(cmd, {}, 60000);
-    return { jobId: res && res.job_id };
+    try {
+      const cmd = buildAddVoiceSampleCommand(a);
+      return jobIdOf(await sendIpcRequest(cmd, {}, 60000));
+    } finally {
+      wipePcm(a.pcm);
+    }
   });
-  wrap('enrollment_build_profile', async (a) => {
-    const res = await sendIpcRequest(buildBuildProfileCommand(a), {}, 5000);
-    return { jobId: res && res.job_id };
-  });
+  wrap('enrollment_build_profile', async (a) => jobIdOf(await sendIpcRequest(buildBuildProfileCommand(a), {}, 5000)));
   wrap('enrollment_get_job', async (a) => mapJob(await sendIpcRequest(buildGetJobCommand(a), {}, 5000)));
   wrap('enrollment_list_samples', async () => mapSampleList(await sendIpcRequest('ListVoiceSamples', {}, 5000)));
   wrap('enrollment_delete_sample', async (a) => {

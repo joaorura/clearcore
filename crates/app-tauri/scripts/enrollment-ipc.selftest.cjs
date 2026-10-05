@@ -17,7 +17,7 @@ assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', stage: 'zzz', er
 assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', stage: 'trim', error_code: 'ENROLL_BUDGET_EXCEEDED', remaining_seconds: 2.5 }).remainingSeconds, 2.5);
 assert.strictEqual(m.mapSampleList({ samples: [{ id: 's', name: 'n', timestamp: '1', speech_seconds: 4, device_label: 'M', used_in_profile: true, needs_reenroll: false, other_microphone: false }], budget: { used_seconds: 4, max_seconds: 90, remaining_seconds: 86 } }).budget.remainingSeconds, 86);
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('secret text'), { code: 'ENROLL_BUDGET_EXCEEDED' })), 'ENROLL_BUDGET_EXCEEDED');
-assert.strictEqual(m.classifyEnrollError(new Error('connect ECONNREFUSED')), 'SERVICE_UNAVAILABLE');
+assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('connect'), { code: 'ECONNREFUSED' })), 'SERVICE_UNAVAILABLE');
 
 // extras: pcm as ArrayBuffer / Uint8Array
 const dev = { label: 'Mic', idHash: hash };
@@ -45,6 +45,10 @@ assert.strictEqual(j.errorCode, null); assert.strictEqual(j.remainingSeconds, nu
 // errors
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'lowercase' })), 'ENROLL_FAILED');
 assert.strictEqual(m.classifyEnrollError(new Error('Daemon unreachable at /x: connect ENOENT')), 'SERVICE_UNAVAILABLE');
+assert.strictEqual(m.classifyEnrollError(new Error('service rejected: ENOENT')), 'ENROLL_FAILED');
+assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ENROLL_WHATEVER' })), 'ENROLL_FAILED');
+assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ENROLL_BUSY' })), 'ENROLL_BUSY');
+assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ETIMEDOUT' })), 'SERVICE_UNAVAILABLE');
 assert.strictEqual(m.classifyEnrollError(new Error('Daemon IPC timeout')), 'SERVICE_UNAVAILABLE');
 assert.strictEqual(m.classifyEnrollError(new Error('boom')), 'ENROLL_FAILED');
 
@@ -81,7 +85,7 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
   try {
     nextError = Object.assign(new Error('SECRET-MSG pcm name Ana'), { code: 'ENROLL_BUDGET_EXCEEDED' });
     const e1 = await handlers.enrollment_add_sample({}, { pcm: f, sampleRate: 48000, name: 'Ana', device: dev });
-    nextError = new Error('connect ECONNREFUSED SECRET-MSG');
+    nextError = Object.assign(new Error('connect SECRET-MSG'), { code: 'ECONNREFUSED' });
     const e2 = await handlers.enrollment_list_samples({}, {});
     console.error = origErr; console.warn = origWarn; console.log = origLog;
     assert.deepStrictEqual(e1, { errorCode: 'ENROLL_BUDGET_EXCEEDED' });
@@ -90,4 +94,57 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
     assert.ok(!logs.join('\n').includes('Ana'));
   } finally { console.error = origErr; console.warn = origWarn; console.log = origLog; }
   console.log('enrollment-ipc selftest passed.');
+})().catch((e) => { console.error(e); process.exit(1); });
+
+// --- round 1 fixes ---
+{
+  const mk = (name, label) => m.buildAddVoiceSampleCommand({ pcm: f, sampleRate: 48000, name, device: { label, idHash: hash } }).AddVoiceSample;
+  const lone = (str) => /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(str);
+  const n1 = mk('x'.repeat(63) + '\u{1F600}', 'M').name;
+  assert.ok(!lone(n1)); assert.strictEqual(n1, 'x'.repeat(63) + '\u{1F600}');
+  const n1b = mk('x'.repeat(64) + '\u{1F600}', 'M').name;
+  assert.ok(!lone(n1b)); assert.strictEqual(n1b, 'x'.repeat(64));
+  const n2 = mk('x'.repeat(10) + '\ud83d' + 'y', 'M').name;
+  assert.ok(!lone(n2)); assert.strictEqual(n2, 'x'.repeat(10) + 'y');
+  const l1 = mk('n', '语'.repeat(128)).device_label;
+  assert.ok(Buffer.byteLength(l1) <= 256); assert.strictEqual(l1, '语'.repeat(85));
+  assert.ok(!lone(l1));
+  const l2 = mk('n', '\u{1F600}'.repeat(100)).device_label;
+  assert.ok(Buffer.byteLength(l2) <= 256); assert.strictEqual(Array.from(l2).length, 64); assert.ok(!lone(l2));
+  const n3 = mk('语'.repeat(64), 'M').name;
+  assert.ok(Buffer.byteLength(n3) <= 256); assert.strictEqual(Array.from(n3).length, 64);
+  // fail closed
+  for (const bad of [{}, { state: 'weird' }, { job_id: 'x', state: 'running' }, { job_id: 'job-1' }, { job_id: 'job-1', state: 'weird' }, null, undefined]) {
+    const j = m.mapJob(bad);
+    assert.strictEqual(j.state, 'failed'); assert.strictEqual(j.errorCode, 'ENROLL_FAILED');
+  }
+  assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'running' }).state, 'running');
+  assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', error_code: 'bogus' }).errorCode, 'ENROLL_FAILED');
+  assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', remaining_seconds: Infinity }).remainingSeconds, null);
+  assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', remaining_seconds: NaN }).remainingSeconds, null);
+  // sample list filtering
+  const sl = m.mapSampleList({ samples: [null, 5, {}, { id: 3 }, { id: 'ok', name: 'n' }], budget: {} });
+  assert.deepStrictEqual(sl.samples.map((x) => x.id), ['ok']);
+}
+(async () => {
+  const hs = {}; let res = { job_id: 'job-9' };
+  m.registerEnrollmentHandlers({ handle: (ch, fn) => { hs[ch] = fn; } }, { sendIpcRequest: async () => res });
+  const dev = { label: 'M', idHash: hash };
+  res = { job_id: 'oops' };
+  assert.deepStrictEqual(await hs.enrollment_add_sample({}, { pcm: new Float32Array([0.5]), sampleRate: 48000, name: 'n', device: dev }), { errorCode: 'ENROLL_FAILED' });
+  assert.deepStrictEqual(await hs.enrollment_build_profile({}, { name: 'n' }), { errorCode: 'ENROLL_FAILED' });
+  res = {};
+  assert.deepStrictEqual(await hs.enrollment_build_profile({}, { name: 'n' }), { errorCode: 'ENROLL_FAILED' });
+  // PCM buffer zeroed after send (success and failure)
+  res = { job_id: 'job-9' };
+  const p1 = new Float32Array([0.5, 0.25]);
+  await hs.enrollment_add_sample({}, { pcm: p1, sampleRate: 48000, name: 'n', device: dev });
+  assert.ok(p1.every((v) => v === 0));
+  const p2 = new Uint8Array(new Float32Array([0.5]).buffer);
+  await hs.enrollment_add_sample({}, { pcm: p2, sampleRate: 48000, name: 'n', device: dev });
+  assert.ok(p2.every((v) => v === 0));
+  const p3 = new Float32Array([0.5]);
+  await hs.enrollment_add_sample({}, { pcm: p3, sampleRate: 1, name: 'n', device: dev });
+  assert.ok(p3.every((v) => v === 0));
+  console.log('enrollment-ipc round-1 selftest passed.');
 })().catch((e) => { console.error(e); process.exit(1); });
