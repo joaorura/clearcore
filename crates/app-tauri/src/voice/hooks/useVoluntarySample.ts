@@ -40,6 +40,10 @@ export function useVoluntarySample(opts: {
     if (!modalCaptured) return;
     const name = modalSampleName.trim() || t('voiceProfile.defaultSampleName', { n: String(samplesCount + 1) });
     const { outcome } = await recorder.submitSample(modalCaptured, name, 'gallery');
+    if (outcome.kind === 'cancelled') {
+      setModalCaptured(null); // declined microphone switch: the take was wiped, record again
+      return;
+    }
     if (outcome.kind === 'show-error') return; // the modal stays open with the error
     // Done, or budget exceeded: close the modal so the gallery (and its delete buttons) is reachable.
     setIsModalOpen(false);

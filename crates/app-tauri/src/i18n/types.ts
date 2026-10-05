@@ -290,6 +290,10 @@ export interface Translations {
     takeSpeech: string;
     recordedDuration: string;
     defaultProfileName: string;
+    deviceSwitchTitle: string;
+    deviceSwitchBody: string;
+    deviceSwitchConfirm: string;
+    deviceSwitchCancel: string;
     enrollment: {
       budgetTitle: string;
       budgetUsed: string;

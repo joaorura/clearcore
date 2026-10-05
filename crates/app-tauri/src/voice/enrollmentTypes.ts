@@ -18,8 +18,14 @@ export interface SpeechBudget { usedSeconds: number; maxSeconds: number; remaini
 export interface ServiceSample {
   id: string; name: string; timestamp: string; speechSeconds: number; deviceLabel: string;
   usedInProfile: boolean; needsReenroll: boolean; otherMicrophone: boolean;
+  /** Capture device hash of the sample (null/absent from an older service). */
+  deviceIdHash?: string | null;
 }
-export interface SampleList { samples: ServiceSample[]; budget: SpeechBudget }
+export interface SampleList {
+  samples: ServiceSample[]; budget: SpeechBudget;
+  /** Current device group (spec D7); null/absent when the service does not report it. */
+  selectedDeviceIdHash?: string | null; selectedDeviceLabel?: string;
+}
 export type JobState = 'running' | 'done' | 'failed';
 export type JobStage = 'queued' | 'denoise' | 'trim' | 'eq' | 'enroll' | 'apply';
 export interface Quality { peak: number; rmsDbfs: number; activeFraction: number; speechSeconds: number }

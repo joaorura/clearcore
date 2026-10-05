@@ -11,7 +11,8 @@ import { nextStepAfterJob, type JobOutcome, type Translate } from './voiceProfil
 import type { JobFeedback, JobOrigin } from './useJobFeedback';
 
 export interface SubmitResult {
-  outcome: JobOutcome;
+  /** 'cancelled': the user declined the microphone switch; nothing was sent and the PCM was wiped. */
+  outcome: JobOutcome | { kind: 'cancelled' };
   /** Id of the sample the service stored (null unless the job reported one). */
   sampleId: string | null;
 }
@@ -40,8 +41,10 @@ export function useEnrollmentRecorder(opts: {
   t: Translate;
   jobs: JobFeedback;
   refreshSamples: () => Promise<SampleList | null>;
+  /** Asked before a take is sent (device switch, spec §4.4); false = do not send. */
+  beforeSend?: (captured: CapturedPcm) => Promise<boolean>;
 }): EnrollmentRecorder {
-  const { selectedInputId, inputDevices, t, jobs, refreshSamples } = opts;
+  const { selectedInputId, inputDevices, t, jobs, refreshSamples, beforeSend } = opts;
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isStarting, setIsStarting] = useState<boolean>(false);
   const [recordingElapsedSeconds, setRecordingElapsedSeconds] = useState<number>(0);
@@ -128,6 +131,7 @@ export function useEnrollmentRecorder(opts: {
 
   /** Sends one captured sample to the service and follows its job until done/failed. */
   const submitSample = async (captured: CapturedPcm, name: string, origin: JobOrigin): Promise<SubmitResult> => {
+    if (beforeSend && !(await beforeSend(captured))) return { outcome: { kind: 'cancelled' }, sampleId: null };
     jobs.begin(origin);
     let outcome: JobOutcome;
     let sampleId: string | null = null;

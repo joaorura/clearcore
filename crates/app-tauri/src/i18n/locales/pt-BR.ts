@@ -292,6 +292,10 @@ export const ptBR: Translations = {
     takeSpeech: 'Fala: {sec} s',
     recordedDuration: 'Gravado: {sec} s',
     defaultProfileName: 'Meu perfil de voz',
+    deviceSwitchTitle: 'Gravar com outro microfone?',
+    deviceSwitchBody: 'Esta amostra foi gravada com outro microfone ({newLabel}). Se você continuar, as amostras anteriores ({oldLabel}) deixam de ser usadas no perfil; elas continuam na Galeria até você apagá-las.',
+    deviceSwitchConfirm: 'Usar este microfone',
+    deviceSwitchCancel: 'Cancelar e descartar a gravação',
     enrollment: {
       budgetTitle: 'Fala usada no perfil',
       budgetUsed: 'Usado',

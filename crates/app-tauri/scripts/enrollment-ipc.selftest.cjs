@@ -158,5 +158,17 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
   res = { job_id: 'job-4' };
   assert.deepStrictEqual(await hs.enrollment_build_profile({}, { name: 'n' }), { errorCode: 'ENROLL_FAILED' });
   assert.deepStrictEqual(await hs.enrollment_add_sample({}, { pcm: new Float32Array([0.5]), sampleRate: 48000, name: 'n', device: dev }), { errorCode: 'ENROLL_FAILED' });
+  // Device group (spec §4.4, D7): passed through; absent or malformed -> null / '' (older service).
+  const h1 = 'b'.repeat(64);
+  const grp = m.mapSampleList({ selected_device_id_hash: h1, selected_device_label: 'Yeti', samples: [{ id: 'a', device_id_hash: h1 }, { id: 'b', device_id_hash: 'nothex' }, { id: 'c' }], budget: {} });
+  assert.strictEqual(grp.selectedDeviceIdHash, h1);
+  assert.strictEqual(grp.selectedDeviceLabel, 'Yeti');
+  assert.deepStrictEqual(grp.samples.map((x) => x.deviceIdHash), [h1, null, null]);
+  const old = m.mapSampleList({ samples: [], budget: {} });
+  assert.strictEqual(old.selectedDeviceIdHash, null);
+  assert.strictEqual(old.selectedDeviceLabel, '');
+  const badGrp = m.mapSampleList({ selected_device_id_hash: 'X'.repeat(64), selected_device_label: 42, samples: [] });
+  assert.strictEqual(badGrp.selectedDeviceIdHash, null);
+  assert.strictEqual(badGrp.selectedDeviceLabel, '');
   console.log('enrollment-ipc round-1 selftest passed.');
 })().catch((e) => { console.error(e); process.exit(1); });

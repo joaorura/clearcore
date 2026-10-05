@@ -134,6 +134,9 @@ function mapJob(s) {
   };
 }
 
+const HASH_RE = /^[0-9a-f]{64}$/;
+const hashOrNull = (v) => (typeof v === 'string' && HASH_RE.test(v) ? v : null);
+
 function mapSampleList(s) {
   const src = s && typeof s === 'object' ? s : {};
   const b = src.budget && typeof src.budget === 'object' ? src.budget : {};
@@ -149,7 +152,11 @@ function mapSampleList(s) {
       usedInProfile: x.used_in_profile === true,
       needsReenroll: x.needs_reenroll === true,
       otherMicrophone: x.other_microphone === true,
+      deviceIdHash: hashOrNull(x.device_id_hash),
     })),
+    // Current device group (null/'' when an older service does not send it).
+    selectedDeviceIdHash: hashOrNull(src.selected_device_id_hash),
+    selectedDeviceLabel: typeof src.selected_device_label === 'string' ? sanitizeMeta(src.selected_device_label, MAX_LABEL) : '',
     budget: {
       usedSeconds: num(b.used_seconds),
       maxSeconds: num(b.max_seconds, MAX_SPEECH_SECONDS),

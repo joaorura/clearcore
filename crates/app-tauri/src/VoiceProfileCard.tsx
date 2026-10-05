@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from './i18n';
 import type { CallSuggestionTake, InputDeviceInfo } from './types';
 import { errorLabel } from './voice/enrollmentErrors';
@@ -19,6 +19,9 @@ import { GalleryPanel } from './voice/panels/GalleryPanel';
 import { CallsPanel } from './voice/panels/CallsPanel';
 import { ProfilePanel } from './voice/panels/ProfilePanel';
 import { AddSampleModal } from './voice/panels/AddSampleModal';
+import { DeviceSwitchDialog, type DeviceSwitchInfo } from './voice/panels/DeviceSwitchDialog';
+import { useConfirmDialog } from './voice/hooks/useConfirmDialog';
+import { confirmDeviceSwitchBeforeSend } from './voice/deviceSwitch';
 import { profileStatusLabel } from './voice/panels/profileStatusLabel';
 import {
   browserStorage,
@@ -85,7 +88,16 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const jobs = useJobFeedback(t, labels, () => changeTab({ by: 'budget-error' }));
   const { jobBusy, currentJob, enrollErrorText, budgetError } = jobs;
   const { sampleList, samples, samplesLoadFailed, deletingId, refreshSamples, removeSample } = useVoiceSamples();
-  const rec = useEnrollmentRecorder({ selectedInputId, inputDevices, t, jobs, refreshSamples });
+  // Device switch (spec §4.4): asked in the card before a take from another microphone is sent.
+  const deviceSwitch = useConfirmDialog<DeviceSwitchInfo>();
+  const sampleListRef = useRef(sampleList);
+  sampleListRef.current = sampleList;
+  const beforeSend = (captured: Parameters<typeof confirmDeviceSwitchBeforeSend>[1]) => {
+    const list = sampleListRef.current;
+    return confirmDeviceSwitchBeforeSend(list?.selectedDeviceIdHash ?? null, captured, () =>
+      deviceSwitch.ask({ newLabel: captured.device.label, oldLabel: list?.selectedDeviceLabel ?? '' }));
+  };
+  const rec = useEnrollmentRecorder({ selectedInputId, inputDevices, t, jobs, refreshSamples, beforeSend });
   const { isRecording, recordingElapsedSeconds, liveVoiceLevel, captureError } = rec;
   const playback = useAudioPlayback();
   const { playingAudioId, playCaptured } = playback;
@@ -267,6 +279,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
           onSave={() => void modal.save()}
         />
       )}
+
+      {deviceSwitch.pending && <DeviceSwitchDialog t={t} info={deviceSwitch.pending} onAnswer={deviceSwitch.answer} />}
     </div>
   );
 };

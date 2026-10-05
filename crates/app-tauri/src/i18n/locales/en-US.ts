@@ -292,6 +292,10 @@ export const enUS: Translations = {
     takeSpeech: 'Speech: {sec} s',
     recordedDuration: 'Recorded: {sec} s',
     defaultProfileName: 'My voice profile',
+    deviceSwitchTitle: 'Record with another microphone?',
+    deviceSwitchBody: 'This sample was recorded with another microphone ({newLabel}). If you continue, the earlier samples ({oldLabel}) stop being used in the profile; they stay in the Gallery until you delete them.',
+    deviceSwitchConfirm: 'Use this microphone',
+    deviceSwitchCancel: 'Cancel and discard the recording',
     enrollment: {
       budgetTitle: 'Speech used in the profile',
       budgetUsed: 'Used',
