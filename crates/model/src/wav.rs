@@ -1,4 +1,17 @@
 //! Dependency-free 16-bit mono PCM WAV codec.
+//!
+//! Policy:
+//! - Scaling is asymmetric: encode multiplies by 32767, decode divides by
+//!   32768. A round trip can therefore differ by up to about 1.4 LSB (hence
+//!   the 2 LSB tolerance in the tests).
+//! - NaN is encoded as 0 and +/-infinity saturates (the `as i16` cast
+//!   saturates). Callers (ingestion) must validate finiteness beforehand.
+//! - A sample rate of 0 is invalid: the decoder returns
+//!   `WavError::UnsupportedFormat`, and the encoder writes the 0 as given so
+//!   that its output is rejected on decode. Callers must pass a rate > 0.
+//! - A `data` chunk with an odd size (no padding) or the streaming
+//!   placeholder size `u32::MAX` is rejected as `WavError::BadDataChunk`.
+//! - `WAVE_FORMAT_EXTENSIBLE` is not accepted: only format tag 1 (PCM).
 
 /// Errors returned when decoding a WAV buffer.
 #[derive(Debug, PartialEq, Eq)]
@@ -103,7 +116,10 @@ pub fn decode_wav_pcm16_mono(bytes: &[u8]) -> Result<(Vec<f32>, u32), WavError> 
             if tag != Some(1) || channels != Some(1) || bits != Some(16) {
                 return Err(WavError::UnsupportedFormat);
             }
-            sample_rate = Some(rate.ok_or(WavError::UnsupportedFormat)?);
+            match rate {
+                Some(r) if r > 0 => sample_rate = Some(r),
+                _ => return Err(WavError::UnsupportedFormat),
+            }
         }
         // Chunks are word-aligned: odd sizes carry one pad byte.
         pos = end.checked_add(size & 1).ok_or(WavError::BadDataChunk)?;
@@ -187,6 +203,27 @@ mod tests {
         let w = encode_wav_pcm16_mono(&[], 44_100);
         assert_eq!(w.len(), 44);
         assert_eq!(decode_wav_pcm16_mono(&w), Ok((Vec::new(), 44_100)));
+    }
+
+    #[test]
+    fn zero_sample_rate_is_rejected() {
+        let w = encode_wav_pcm16_mono(&[0.1; 4], 0);
+        assert_eq!(decode_wav_pcm16_mono(&w), Err(WavError::UnsupportedFormat));
+    }
+
+    #[test]
+    fn hand_written_zero_rate_header_is_rejected() {
+        let mut w = encode_wav_pcm16_mono(&[0.1; 4], 48_000);
+        w[24..28].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(decode_wav_pcm16_mono(&w), Err(WavError::UnsupportedFormat));
+    }
+
+    #[test]
+    fn non_finite_samples_follow_the_documented_policy() {
+        let w = encode_wav_pcm16_mono(&[f32::NAN, f32::INFINITY, f32::NEG_INFINITY], 48_000);
+        let (y, _) = decode_wav_pcm16_mono(&w).unwrap();
+        assert!(y[0].abs() < f32::EPSILON);
+        assert!(y[1] > 0.99 && y[2] < -0.99);
     }
 
     #[test]
