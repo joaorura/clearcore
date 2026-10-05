@@ -6,6 +6,7 @@ use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
 use realtime_noise_model::{
     BackendDescriptor, InferenceBackend, InferenceError, StudioBackend, StudioResetHandle,
+    VoiceProfile,
 };
 use std::fmt;
 use std::path::Path;
@@ -67,6 +68,7 @@ pub struct EngineSupervisor {
     requested_backend_name: String,
     studio_control: Arc<StudioControl>,
     studio_reset: StudioResetHandle,
+    active_profile: Option<VoiceProfile>,
 }
 
 impl Default for EngineSupervisor {
@@ -89,6 +91,7 @@ impl EngineSupervisor {
             requested_backend_name: String::new(),
             studio_control: Arc::new(StudioControl::new(Preset::Off)),
             studio_reset: StudioResetHandle::new(),
+            active_profile: None,
         }
     }
 
@@ -188,6 +191,42 @@ impl EngineSupervisor {
             self.studio_reset.clone(),
         ));
         self.backend = Some(wrapped);
+        self.reapply_voice_profile();
+    }
+
+    /// Applies `profile` to the live backend. The profile is reported as active only after the
+    /// backend confirms it; on failure the previously active profile is preserved.
+    pub fn set_voice_profile(
+        &mut self,
+        profile: Option<&VoiceProfile>,
+    ) -> Result<(), InferenceError> {
+        let backend = self
+            .backend
+            .as_mut()
+            .ok_or_else(|| InferenceError::UnsupportedFeature("no active backend".into()))?;
+        backend.set_voice_profile(profile)?;
+        self.active_profile = profile.cloned();
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn active_voice_profile(&self) -> Option<&VoiceProfile> {
+        self.active_profile.as_ref()
+    }
+
+    #[must_use]
+    pub fn active_voice_profile_id(&self) -> Option<&str> {
+        self.active_profile.as_ref().map(|p| p.id.as_str())
+    }
+
+    /// Re-applies the stored profile to a freshly installed backend. If the new backend does not
+    /// confirm it, the profile is dropped so an unconfirmed profile is never reported.
+    fn reapply_voice_profile(&mut self) {
+        if let Some(profile) = self.active_profile.take() {
+            if self.set_voice_profile(Some(&profile)).is_err() {
+                self.active_profile = None;
+            }
+        }
     }
 
     pub fn select_backend(
