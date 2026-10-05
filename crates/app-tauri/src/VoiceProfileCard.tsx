@@ -137,7 +137,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     if (outcome === null) return; // already being approved
     if (outcome.kind === 'budget') jobs.showBudgetError(outcome.remainingSeconds);
     else if (outcome.kind === 'error') jobs.showError('calls', errorLabel(outcome.code, labels));
-    else flash(t('voiceProfile.takeApprovedFeedback'), 4000);
+    else if (outcome.kind === 'approved') flash(t('voiceProfile.takeApprovedFeedback'), 4000);
+    // 'not-recorded' (no margin left): silent by design (spec §4.4).
     await Promise.all([refreshSamples(), refreshCallTakes()]);
   };
 

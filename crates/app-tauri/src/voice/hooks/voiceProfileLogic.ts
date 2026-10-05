@@ -206,12 +206,17 @@ export type Translate = (path: string, params?: Record<string, string | number>)
 
 export type TakeApprovalOutcome =
   | { kind: 'approved' }
+  /** The service did not record it for lack of margin (spec §4.4): no flash, no error. */
+  | { kind: 'not-recorded' }
   | { kind: 'budget'; remainingSeconds: number | null }
   | { kind: 'error'; code: EnrollErrorCode | null };
 
 /** What approving a call take means for the card (the service rechecks the speech budget). */
 export function classifyTakeApproval(res: unknown): TakeApprovalOutcome {
-  if (!shouldShowTakeError(res)) return { kind: 'approved' };
+  if (!shouldShowTakeError(res)) {
+    const recorded = typeof res === 'object' && res !== null ? (res as { recorded?: unknown }).recorded : undefined;
+    return recorded === false ? { kind: 'not-recorded' } : { kind: 'approved' };
+  }
   const code = enrollmentErrorCode(res);
   if (isBudgetError(code)) {
     const remaining = (res as { remainingSeconds?: unknown }).remainingSeconds;

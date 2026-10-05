@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { classifyTakeApproval } from '../hooks/voiceProfileLogic';
 
 describe('classifyTakeApproval', () => {
-  it('is approved on success and when a dynamic take was skipped for lack of margin', () => {
+  it('is approved on success and silent when a take was not recorded for lack of margin', () => {
     expect(classifyTakeApproval({ success: true })).toEqual({ kind: 'approved' });
-    expect(classifyTakeApproval({ recorded: false, reason: 'budget' })).toEqual({ kind: 'approved' });
+    // Not recorded for lack of margin: a third, SILENT outcome (no success flash, no error).
+    expect(classifyTakeApproval({ recorded: false, reason: 'budget' })).toEqual({ kind: 'not-recorded' });
+    expect(classifyTakeApproval({ success: true, recorded: true })).toEqual({ kind: 'approved' });
   });
   it('is a budget error with the remaining seconds when the take no longer fits', () => {
     expect(classifyTakeApproval({ errorCode: 'ENROLL_BUDGET_EXCEEDED', remainingSeconds: 3.5 })).toEqual({ kind: 'budget', remainingSeconds: 3.5 });
