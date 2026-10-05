@@ -11,6 +11,7 @@ mod error;
 mod golden;
 mod json;
 mod m0_records;
+pub mod microphone_eq;
 pub mod model_registry;
 pub mod profile_store;
 pub mod spectral_eq;
@@ -29,6 +30,10 @@ pub use dsp_pipeline::{
 };
 pub use error::InferenceError;
 pub use golden::{GoldenCase, GoldenFixture, GoldenProvenance, NumericalTolerance, frames_sha256};
+pub use microphone_eq::{
+    LtasMeasurement, MicrophoneEqConfig, MicrophoneEqError, SpeechTargetCurve, compute_ltas,
+    embed_eq_in_profile, estimate_microphone_eq,
+};
 pub use model_registry::{
     AssetDescriptor, DEV_KEY_ID, ModelAssetRegistry, ModelRole, VerifiedAsset,
 };

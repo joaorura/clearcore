@@ -3,9 +3,7 @@
 
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
-use realtime_noise_supervisor::{
-    EngineSupervisor, find_repo_root, find_stateful_model_dir,
-};
+use realtime_noise_supervisor::{EngineSupervisor, find_repo_root, find_stateful_model_dir};
 use std::path::Path;
 
 #[test]

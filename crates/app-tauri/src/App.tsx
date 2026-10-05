@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { DiagnosticsPanel, DiagnosticsData } from './diagnostics';
 import { AudioTestCard } from './AudioTestCard';
 import { HardwareAcceleratorCard } from './HardwareAcceleratorCard';
+import { VoiceProfileCard } from './VoiceProfileCard';
+import { StudioDspCard } from './StudioDspCard';
 import { useI18n } from './i18n';
 import { invokeBridge } from './bridge';
 import type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo } from './types';
 
 export type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo };
+
 
 
 export const App: React.FC = () => {
@@ -370,6 +373,15 @@ export const App: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Perfil de Voz do Usuário & Isolamento Vocal */}
+      <VoiceProfileCard
+        selectedInputId={selectedDeviceId}
+        virtualMicPresent={Boolean(virtualMic?.present)}
+      />
+
+      {/* Processamento de Estúdio DSP */}
+      <StudioDspCard />
 
       {/* Aceleração de Hardware & Runtimes de IA */}
       <HardwareAcceleratorCard />

@@ -358,6 +358,22 @@ impl VoiceProfile {
         Ok(profile)
     }
 
+    /// Sets or updates the equalization gains, recalculating the profile integrity hash.
+    pub fn set_eq(&mut self, eq: Option<BandGains>) -> Result<(), VoiceProfileError> {
+        if let Some(ref gains) = eq {
+            gains.validate()?;
+        }
+        self.eq = eq;
+        self.integrity_hash = self.compute_integrity_hash()?;
+        Ok(())
+    }
+
+    /// Returns a new profile with the given equalization gains applied, recalculating its integrity hash.
+    pub fn with_eq(mut self, eq: Option<BandGains>) -> Result<Self, VoiceProfileError> {
+        self.set_eq(eq)?;
+        Ok(self)
+    }
+
     /// Checks if this profile represents a neutral identity operation.
     pub fn is_neutral(&self) -> bool {
         self.film.is_identity() && self.eq.as_ref().is_none_or(BandGains::is_neutral)
@@ -645,5 +661,33 @@ mod tests {
                 Err(VoiceProfileError::InsecurePermissions(_))
             ));
         }
+    }
+
+    #[test]
+    fn test_voice_profile_set_eq_updates_integrity_hash() {
+        let mut profile =
+            VoiceProfile::identity("spk-001", "Primary Speaker", "2026-10-02T12:00:00Z")
+                .expect("identity");
+        let initial_hash = profile.integrity_hash.clone();
+        profile.verify_integrity().expect("valid");
+
+        let mut gains = [0.0_f32; NUM_ERB_BANDS];
+        gains[10] = 3.5;
+        let band_gains = BandGains::from_array(gains).expect("valid gains");
+
+        profile.set_eq(Some(band_gains.clone())).expect("set_eq");
+        assert_ne!(profile.integrity_hash, initial_hash);
+        profile
+            .verify_integrity()
+            .expect("must verify after set_eq");
+        assert_eq!(profile.eq.as_ref(), Some(&band_gains));
+
+        // Test with_eq
+        let cleared = profile.clone().with_eq(None).expect("with_eq None");
+        cleared
+            .verify_integrity()
+            .expect("must verify after with_eq");
+        assert!(cleared.eq.is_none());
+        assert_ne!(cleared.integrity_hash, profile.integrity_hash);
     }
 }

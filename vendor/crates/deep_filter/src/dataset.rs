@@ -555,40 +555,43 @@ impl DatasetBuilder {
                 .build_global()
                 .unwrap_or(());
         }
-        datasets.hdf5s.par_iter().try_for_each(|cfg| -> Result<()> {
-            let path = ds_path.join(cfg.filename());
-            log::trace!("Opening hdf5 dataset {}", path.display());
-            if (!path.is_file()) && path.read_link().is_err() {
-                log::warn!("Dataset {:?} not found. Skipping.", path);
-                return Ok(());
-            }
-            let mut cfg = cfg.clone();
-            let ds = match Hdf5Dataset::new(path.to_str().unwrap()) {
-                Err(e) => {
-                    log::error!("Error opening dataset {:?}: {:?}", path, e);
+        datasets
+            .hdf5s
+            .par_iter()
+            .try_for_each(|cfg| -> Result<()> {
+                let path = ds_path.join(cfg.filename());
+                log::trace!("Opening hdf5 dataset {}", path.display());
+                if (!path.is_file()) && path.read_link().is_err() {
+                    log::warn!("Dataset {:?} not found. Skipping.", path);
                     return Ok(());
                 }
-                Ok(ds) => ds,
-            };
-            let modified_hash = cfg.hash_from_ds_path(path.to_str().unwrap())?;
-            cfg.store_modified_hash(modified_hash);
-            let keys = cfg.load_keys(modified_hash)?.cloned();
-            match keys {
-                Some(keys) => {
-                    log::trace!("Found cached hdf5 keys for {}", cfg.filename());
-                    cfg.set_keys(keys)?
+                let mut cfg = cfg.clone();
+                let ds = match Hdf5Dataset::new(path.to_str().unwrap()) {
+                    Err(e) => {
+                        log::error!("Error opening dataset {:?}: {:?}", path, e);
+                        return Ok(());
+                    }
+                    Ok(ds) => ds,
+                };
+                let modified_hash = cfg.hash_from_ds_path(path.to_str().unwrap())?;
+                cfg.store_modified_hash(modified_hash);
+                let keys = cfg.load_keys(modified_hash)?.cloned();
+                match keys {
+                    Some(keys) => {
+                        log::trace!("Found cached hdf5 keys for {}", cfg.filename());
+                        cfg.set_keys(keys)?
+                    }
+                    None => {
+                        log::trace!("No cached hdf5 keys found for {}", cfg.filename());
+                        cfg.set_keys_new(modified_hash, ds.keys()?)?
+                    }
+                };
+                if let Some(f) = self.global_sampling_f {
+                    cfg.set_sampling_factor(cfg.sampling_factor() * f)
                 }
-                None => {
-                    log::trace!("No cached hdf5 keys found for {}", cfg.filename());
-                    cfg.set_keys_new(modified_hash, ds.keys()?)?
-                }
-            };
-            if let Some(f) = self.global_sampling_f {
-                cfg.set_sampling_factor(cfg.sampling_factor() * f)
-            }
-            sender.send(Some((cfg, ds))).unwrap();
-            Ok(())
-        })?;
+                sender.send(Some((cfg, ds))).unwrap();
+                Ok(())
+            })?;
         sender.send(None).unwrap();
         let mut config = HashMap::new();
         let mut hdf5_handles = HashMap::new();
@@ -856,7 +859,10 @@ pub struct FftDataset {
 }
 impl FftDataset {
     pub fn get_hdf5cfg(&self, filename: &str) -> Option<&Hdf5Cfg> {
-        self.ds.config.values().find(|&cfg| cfg.filename() == filename)
+        self.ds
+            .config
+            .values()
+            .find(|&cfg| cfg.filename() == filename)
     }
 }
 impl Dataset<Complex32> for FftDataset {
@@ -975,8 +981,13 @@ impl TdDataset {
         max_len: Option<usize>,
     ) -> Result<Array2<f32>> {
         let h = &self.hdf5_handles.get(name).unwrap();
-        let sr =
-            h.sr.unwrap_or_else(|| self.config.get(name).unwrap().fallback_sr().unwrap_or(self.sr));
+        let sr = h.sr.unwrap_or_else(|| {
+            self.config
+                .get(name)
+                .unwrap()
+                .fallback_sr()
+                .unwrap_or(self.sr)
+        });
         let slc = if let Some(l) = max_len {
             let l_sr = l * sr / self.sr;
             let sample_len = h.sample_len(key)?;
@@ -1081,7 +1092,9 @@ impl TdDataset {
             _ => {
                 let cfg = self.config.get(name).unwrap();
                 cfg.fallback_max_freq().unwrap_or_else(|| {
-                    ds.sr.unwrap_or_else(|| cfg.fallback_sr().unwrap_or(self.sr)) / 2
+                    ds.sr
+                        .unwrap_or_else(|| cfg.fallback_sr().unwrap_or(self.sr))
+                        / 2
                 })
             }
         };
@@ -1093,7 +1106,12 @@ impl TdDataset {
     }
 
     fn ds_codec(&self, name: &str) -> Codec {
-        self.hdf5_handles.get(name).unwrap().codec.clone().unwrap_or_default()
+        self.hdf5_handles
+            .get(name)
+            .unwrap()
+            .codec
+            .clone()
+            .unwrap_or_default()
     }
 
     fn load_aug_speech(&self, idx: usize, rng: &mut SeededRng) -> Result<(Array2<f32>, usize)> {
@@ -1122,8 +1140,11 @@ impl TdDataset {
                         "Found sample with length {}. Skipping.",
                         sample.len_of(Axis(1))
                     );
-                    (sp_name, sp_key) =
-                        self.sp_keys.choose(rng).context("Failed to sample speech signal")?.clone();
+                    (sp_name, sp_key) = self
+                        .sp_keys
+                        .choose(rng)
+                        .context("Failed to sample speech signal")?
+                        .clone();
                     continue;
                 }
                 // Extend clean speech to make sure it covers the full spectrum
@@ -1140,8 +1161,11 @@ impl TdDataset {
                     "Speech sample before augmentation {} is zero! Choosing new one.",
                     idx
                 );
-                (sp_name, sp_key) =
-                    self.sp_keys.choose(rng).context("Failed to sample speech signal")?.clone();
+                (sp_name, sp_key) = self
+                    .sp_keys
+                    .choose(rng)
+                    .context("Failed to sample speech signal")?
+                    .clone();
                 continue;
             }
             self.sp_augmentations.transform(&mut (&mut sample).into())?;
@@ -1150,15 +1174,21 @@ impl TdDataset {
                     "Speech sample after augmentation {} is zero! Choosing new one.",
                     idx
                 );
-                (sp_name, sp_key) =
-                    self.sp_keys.choose(rng).context("Failed to sample speech signal")?.clone();
+                (sp_name, sp_key) = self
+                    .sp_keys
+                    .choose(rng)
+                    .context("Failed to sample speech signal")?
+                    .clone();
                 continue;
             }
             cur_len += sample.len_of(Axis(1));
             speech_samples.push(sample);
             if cur_len < self.max_sample_len() {
-                (sp_name, sp_key) =
-                    self.sp_keys.choose(rng).context("Failed to sample speech signal")?.clone();
+                (sp_name, sp_key) = self
+                    .sp_keys
+                    .choose(rng)
+                    .context("Failed to sample speech signal")?
+                    .clone();
             } else {
                 break;
             }
@@ -1176,13 +1206,17 @@ impl TdDataset {
     fn load_aug_noise(&self, rng: &mut SeededRng) -> Result<(Array2<f32>, f32)> {
         // In 5% us a randomly generated noise signal instead of a real noise.
         if let Some(ns) =
-            self.noise_generator.maybe_generate_random_noise(-2., 2., 1, self.max_samples)?
+            self.noise_generator
+                .maybe_generate_random_noise(-2., 2., 1, self.max_samples)?
         {
             return Ok((ns, *[-24., -12., -6., 0.].choose(rng).unwrap()));
         }
         loop {
-            let (ns_name, ns_key) =
-                self.ns_keys.iter().choose(rng).context("Failed to sample noise signal")?;
+            let (ns_name, ns_key) = self
+                .ns_keys
+                .iter()
+                .choose(rng)
+                .context("Failed to sample noise signal")?;
             let mut ns = match self.read_max_len(ns_name, ns_key, None) {
                 Err(e) => {
                     log::warn!("Error during noise reading get_sample(): {}", e);
@@ -1282,7 +1316,8 @@ impl Dataset<f32> for TdDataset {
         .unwrap_or_else(|| speech.clone());
         // TD distortions like clipping
         if !self.sp_distortions_td.is_empty() {
-            self.sp_distortions_td.transform(&mut (&mut speech_distorted).into())?;
+            self.sp_distortions_td
+                .transform(&mut (&mut speech_distorted).into())?;
         }
         // Bandwidth limitation
         let downsample_freq = if let Some(limiter) = self.bw_limiter.as_ref() {
@@ -1432,8 +1467,12 @@ impl Dataset<f32> for TdDataset {
             if self.ds_split == Split::Train {
                 keys.shuffle(&mut thread_rng()?);
             }
-            let keys: Vec<(String, String)> =
-                keys.iter().cycle().take(n_samples).map(|k| (name.clone(), k.clone())).collect();
+            let keys: Vec<(String, String)> = keys
+                .iter()
+                .cycle()
+                .take(n_samples)
+                .map(|k| (name.clone(), k.clone()))
+                .collect();
             match dstype {
                 DsType::Speech => self.sp_keys.extend(keys),
                 DsType::Noise => self.ns_keys.extend(keys),
@@ -2054,14 +2093,18 @@ fn mix_audio_signal(
     let g = 10f32.powf(gain_db / 20.);
     let mut clean_out = &clean * g;
     // clean_mix may contain distorted speech
-    let clean_mix = clean_distorted.map(|c| &c * g).unwrap_or_else(|| clean_out.clone());
+    let clean_mix = clean_distorted
+        .map(|c| &c * g)
+        .unwrap_or_else(|| clean_out.clone());
     // For energy calculation use clean speech to also consider direct-to-reverberant ratio
     noise *= mix_f(clean_out.view(), noise.view(), snr_db);
     let mut mixture = clean_mix + &noise;
     // Guard against clipping
-    let max = &([&clean_out, &noise, &mixture].iter().map(|x| find_max_abs(x.iter())))
-        .collect::<Option<Vec<f32>>>()
-        .expect("Found NaN");
+    let max = &([&clean_out, &noise, &mixture]
+        .iter()
+        .map(|x| find_max_abs(x.iter())))
+    .collect::<Option<Vec<f32>>>()
+    .expect("Found NaN");
     let max = find_max(max).expect("Found NaN");
     if (max - 1.) > 1e-10 {
         let f = 1. / (max + 1e-10);
@@ -2301,8 +2344,9 @@ mod tests {
                 &str::replace(basen, ".wav", &format!("_{}_{}_raw.wav", &r.start, &r.end));
             dbg!(hdf5.sample_len(key).unwrap());
             write_wav_arr2(filename, samples_raw.view(), hdf5.sr.unwrap() as u32).unwrap();
-            let dsn =
-                &str::replace(ds, "../assets/noise", "").replace('_', "").replace(".hdf5", "");
+            let dsn = &str::replace(ds, "../assets/noise", "")
+                .replace('_', "")
+                .replace(".hdf5", "");
             let filename = &str::replace(
                 basen,
                 ".wav",

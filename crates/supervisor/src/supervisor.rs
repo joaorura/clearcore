@@ -4,10 +4,14 @@ use crate::backend::{BackendResolutionInfo, instantiate_backend_with_fallback};
 use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
-use realtime_noise_model::{BackendDescriptor, InferenceBackend, InferenceError};
+use realtime_noise_model::{
+    BackendDescriptor, InferenceBackend, InferenceError, StudioBackend, StudioResetHandle,
+};
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
+use studio_dsp::{Preset, StudioControl};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SupervisorState {
@@ -30,6 +34,7 @@ pub struct SupervisorStatus {
     pub total_crashes: u64,
     pub active_mode: DenoiseMode,
     pub active_backend: Option<String>,
+    pub dsp_preset: Preset,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +65,8 @@ pub struct EngineSupervisor {
     backend: Option<Box<dyn InferenceBackend>>,
     active_backend_name: String,
     requested_backend_name: String,
+    studio_control: Arc<StudioControl>,
+    studio_reset: StudioResetHandle,
 }
 
 impl Default for EngineSupervisor {
@@ -70,7 +77,7 @@ impl Default for EngineSupervisor {
 
 impl EngineSupervisor {
     #[must_use]
-    pub const fn new(initial_mode: DenoiseMode) -> Self {
+    pub fn new(initial_mode: DenoiseMode) -> Self {
         Self {
             state: SupervisorState::Running,
             mode: initial_mode,
@@ -80,7 +87,29 @@ impl EngineSupervisor {
             backend: None,
             active_backend_name: String::new(),
             requested_backend_name: String::new(),
+            studio_control: Arc::new(StudioControl::new(Preset::Off)),
+            studio_reset: StudioResetHandle::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_studio_control(mut self, control: Arc<StudioControl>) -> Self {
+        self.studio_control = control;
+        self
+    }
+
+    #[must_use]
+    pub fn studio_control(&self) -> Arc<StudioControl> {
+        Arc::clone(&self.studio_control)
+    }
+
+    #[must_use]
+    pub fn dsp_preset(&self) -> Preset {
+        self.studio_control.preset()
+    }
+
+    pub fn set_dsp_preset(&mut self, preset: Preset) {
+        self.studio_control.set_preset(preset);
     }
 
     #[must_use]
@@ -153,7 +182,12 @@ impl EngineSupervisor {
         active_name: impl Into<String>,
     ) {
         self.active_backend_name = active_name.into();
-        self.backend = Some(backend);
+        let wrapped: Box<dyn InferenceBackend> = Box::new(StudioBackend::with_reset_handle(
+            backend,
+            Arc::clone(&self.studio_control),
+            self.studio_reset.clone(),
+        ));
+        self.backend = Some(wrapped);
     }
 
     pub fn select_backend(
@@ -169,10 +203,7 @@ impl EngineSupervisor {
     }
 
     /// Process a frame according to supervisor state, denoise mode, and active backend.
-    pub fn process_frame(
-        &mut self,
-        input: &AudioFrame,
-    ) -> Result<AudioFrame, InferenceError> {
+    pub fn process_frame(&mut self, input: &AudioFrame) -> Result<AudioFrame, InferenceError> {
         if !self.is_running() || self.is_terminal() || self.mode == DenoiseMode::Mute {
             return Ok([0.0; HOP_SAMPLES]);
         }
@@ -214,9 +245,9 @@ impl EngineSupervisor {
             } else {
                 Some(self.active_backend_name.clone())
             },
+            dsp_preset: self.studio_control.preset(),
         }
     }
-
 
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
@@ -283,6 +314,7 @@ impl EngineSupervisor {
     pub fn reset(&mut self) -> Result<(), SupervisorError> {
         self.state = SupervisorState::Running;
         self.backoff.reset();
+        self.studio_reset.request();
         self.diagnostics_log
             .push("Explicit supervisor reset initiated by control client".to_string());
         Ok(())
@@ -318,5 +350,27 @@ pub const fn convert_engine_mode_to_ipc(mode: DenoiseMode) -> realtime_noise_ipc
         DenoiseMode::Active => realtime_noise_ipc::DenoiseMode::Active,
         DenoiseMode::Bypass => realtime_noise_ipc::DenoiseMode::Bypass,
         DenoiseMode::Mute => realtime_noise_ipc::DenoiseMode::Mute,
+    }
+}
+
+/// Converts IPC `StudioPreset` to `studio_dsp::Preset`.
+#[must_use]
+pub const fn convert_ipc_preset_to_dsp(preset: realtime_noise_ipc::StudioPreset) -> Preset {
+    match preset {
+        realtime_noise_ipc::StudioPreset::Off => Preset::Off,
+        realtime_noise_ipc::StudioPreset::Natural => Preset::Natural,
+        realtime_noise_ipc::StudioPreset::Podcast => Preset::Podcast,
+        realtime_noise_ipc::StudioPreset::Broadcast => Preset::Broadcast,
+    }
+}
+
+/// Converts `studio_dsp::Preset` to IPC `StudioPreset`.
+#[must_use]
+pub const fn convert_dsp_preset_to_ipc(preset: Preset) -> realtime_noise_ipc::StudioPreset {
+    match preset {
+        Preset::Off => realtime_noise_ipc::StudioPreset::Off,
+        Preset::Natural => realtime_noise_ipc::StudioPreset::Natural,
+        Preset::Podcast => realtime_noise_ipc::StudioPreset::Podcast,
+        Preset::Broadcast => realtime_noise_ipc::StudioPreset::Broadcast,
     }
 }

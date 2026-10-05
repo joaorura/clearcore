@@ -22,8 +22,8 @@ pub struct BackendResolutionInfo {
 /// Attempts to locate the directory containing stateful model graphs (`models/stateful/enc.onnx`).
 #[must_use]
 pub fn find_stateful_model_dir() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("CLEARCORE_STATEFUL_DIR")
-        .or_else(|_| std::env::var("CLEARCORE_MODEL_DIR"))
+    if let Ok(path) =
+        std::env::var("CLEARCORE_STATEFUL_DIR").or_else(|_| std::env::var("CLEARCORE_MODEL_DIR"))
     {
         let p = PathBuf::from(path);
         if p.join("enc.onnx").exists() {
@@ -130,7 +130,9 @@ pub fn instantiate_backend_with_fallback(
     model_dir: Option<&Path>,
     repo_root: Option<&Path>,
 ) -> (Box<dyn InferenceBackend>, BackendResolutionInfo) {
-    let resolved_model_dir = model_dir.map(Path::to_path_buf).or_else(find_stateful_model_dir);
+    let resolved_model_dir = model_dir
+        .map(Path::to_path_buf)
+        .or_else(find_stateful_model_dir);
     let resolved_repo_root = repo_root.map(Path::to_path_buf).or_else(find_repo_root);
 
     let trimmed = request.trim();

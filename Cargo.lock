@@ -1037,6 +1037,7 @@ dependencies = [
  "realtime-noise-supervisor",
  "serde",
  "serde_json",
+ "studio-dsp",
  "tempfile",
 ]
 
@@ -1051,6 +1052,7 @@ dependencies = [
  "realtime-noise-model",
  "serde",
  "serde_json",
+ "studio-dsp",
 ]
 
 [[package]]

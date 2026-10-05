@@ -1,4 +1,4 @@
-import type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo } from './types';
+import type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo, StudioPreset, VoiceProfileStatus } from './types';
 import type { DiagnosticsData } from './diagnostics';
 
 export interface HardwareBackendItem {
@@ -43,6 +43,10 @@ export interface ClearcoreApi {
   setInputDevice: (deviceId: string) => Promise<{ success: boolean; selectedId: string }>;
   getHardwareBackends: () => Promise<HardwareBackendsResponse>;
   setHardwareBackend: (backendId: string) => Promise<{ success: boolean; reason?: string; active_backend: string }>;
+  getStudioPreset?: () => Promise<StudioPreset>;
+  setStudioPreset?: (preset: StudioPreset) => Promise<{ success: boolean; preset: StudioPreset }>;
+  getVoiceProfileStatus?: () => Promise<VoiceProfileStatus>;
+  setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean }>;
   onStatusUpdate: (cb: (data: { mode?: DenoiseMode }) => void) => () => void;
   onVirtualMicUpdate: (cb: (data: VirtualMicStatus) => void) => () => void;
   onInputDevicesUpdate: (cb: (data: { devices: InputDeviceInfo[]; selectedId: string | null }) => void) => () => void;
@@ -76,10 +80,61 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     if (cmd === 'set_input_device') return (await api.setInputDevice(String(args?.deviceId ?? ''))) as unknown as T;
     if (cmd === 'get_hardware_backends') return (await api.getHardwareBackends()) as unknown as T;
     if (cmd === 'set_hardware_backend') return (await api.setHardwareBackend(String(args?.backendId ?? 'auto'))) as unknown as T;
+    if (cmd === 'get_studio_preset') {
+      if (typeof api.getStudioPreset === 'function') {
+        return (await api.getStudioPreset()) as unknown as T;
+      }
+    }
+    if (cmd === 'set_studio_preset') {
+      if (typeof api.setStudioPreset === 'function') {
+        return (await api.setStudioPreset(args?.preset as StudioPreset)) as unknown as T;
+      }
+    }
+    if (cmd === 'get_voice_profile_status') {
+      if (typeof api.getVoiceProfileStatus === 'function') {
+        return (await api.getVoiceProfileStatus()) as unknown as T;
+      }
+    }
+    if (cmd === 'set_voice_profile') {
+      if (typeof api.setVoiceProfile === 'function') {
+        return (await api.setVoiceProfile(args?.profile)) as unknown as T;
+      }
+    }
   }
   if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<T>(cmd, args);
   }
+
+  // Graceful browser / test fallbacks
+  if (cmd === 'get_studio_preset') {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_studio_preset') : null;
+    return (saved || 'Natural') as unknown as T;
+  }
+  if (cmd === 'set_studio_preset') {
+    const preset = String(args?.preset ?? 'Natural');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('clearcore_studio_preset', preset);
+    }
+    return { success: true, preset } as unknown as T;
+  }
+  if (cmd === 'get_voice_profile_status') {
+    const enrolled = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_profile_enrolled') === 'true' : false;
+    const count = typeof localStorage !== 'undefined' ? Number(localStorage.getItem('clearcore_voice_sample_count') || (enrolled ? '5' : '0')) : 0;
+    return {
+      is_enrolled: enrolled,
+      active_samples_count: count,
+      embedding_dim: 192,
+      neural_eq_calibrated: enrolled,
+      gain_boost_db: 1.8,
+    } as unknown as T;
+  }
+  if (cmd === 'set_voice_profile') {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('clearcore_voice_profile_enrolled', 'true');
+    }
+    return { success: true } as unknown as T;
+  }
+
   return {} as T;
 }

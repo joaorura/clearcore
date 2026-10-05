@@ -33,3 +33,33 @@ export interface InputDeviceInfo {
   name: string;
   is_default?: boolean;
 }
+
+export type StudioPreset = 'Natural' | 'Podcast' | 'Broadcast' | 'Off';
+
+export interface VoiceSample {
+  id: string;
+  title: string;
+  category?: string;
+  timestamp: string;
+  durationSec: number;
+  audioUrl?: string;
+  isInitialStep?: boolean;
+}
+
+export interface CallSuggestionTake {
+  id: string;
+  title: string;
+  timestamp: string;
+  durationSec: number;
+  snrDb: number;
+  audioUrl?: string;
+}
+
+export interface VoiceProfileStatus {
+  is_enrolled: boolean;
+  active_samples_count: number;
+  embedding_dim: number;
+  neural_eq_calibrated: boolean;
+  gain_boost_db?: number;
+}
+

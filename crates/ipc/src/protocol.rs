@@ -13,6 +13,35 @@ pub enum DenoiseMode {
     Mute,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum StudioPreset {
+    #[default]
+    #[serde(alias = "off")]
+    Off,
+    #[serde(alias = "natural")]
+    Natural,
+    #[serde(alias = "podcast", alias = "Warm", alias = "warm")]
+    Podcast,
+    #[serde(alias = "broadcast", alias = "Radio", alias = "radio")]
+    Broadcast,
+}
+
+impl StudioPreset {
+    pub const WARM: Self = Self::Podcast;
+    pub const RADIO: Self = Self::Broadcast;
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Natural => "Natural",
+            Self::Podcast => "Podcast",
+            Self::Broadcast => "Broadcast",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum IpcStatus {
@@ -56,6 +85,29 @@ pub enum IpcCommand {
     ClearVoiceProfile,
     SetBackend(BackendPayload),
     GetBackend,
+    #[serde(alias = "set_preset", alias = "SetDspPreset", alias = "set_dsp_preset")]
+    SetPreset(StudioPreset),
+    #[serde(alias = "get_preset", alias = "GetDspPreset", alias = "get_dsp_preset")]
+    GetPreset,
+    ListVoiceSamples,
+    AddVoiceSample {
+        sample_json: String,
+    },
+    DeleteVoiceSample {
+        id: String,
+    },
+    GetVoiceProfileEmbedding,
+    ListIntakeSuggestions,
+    AddIntakeSuggestion {
+        take_json: String,
+    },
+    ApproveIntakeSuggestion {
+        id: String,
+        name: Option<String>,
+    },
+    DiscardIntakeSuggestion {
+        id: String,
+    },
 }
 
 impl IpcCommand {
@@ -63,10 +115,30 @@ impl IpcCommand {
     pub fn set_backend(backend: impl Into<String>) -> Self {
         Self::SetBackend(BackendPayload::Direct(backend.into()))
     }
+
+    #[must_use]
+    pub const fn set_dsp_preset(preset: StudioPreset) -> Self {
+        Self::SetPreset(preset)
+    }
+
+    #[must_use]
+    pub const fn get_dsp_preset() -> Self {
+        Self::GetPreset
+    }
+
+    #[must_use]
+    pub const fn set_preset(preset: StudioPreset) -> Self {
+        Self::SetPreset(preset)
+    }
+
+    #[must_use]
+    pub const fn get_preset() -> Self {
+        Self::GetPreset
+    }
 }
 
-/// Manual `Debug`: `SetVoiceProfile` carries biometric data, so its payload is redacted and can
-/// never reach a log through `{:?}` (also reached via `IpcRequest`'s derived `Debug`).
+/// Manual `Debug`: `SetVoiceProfile`, `AddVoiceSample` and `AddIntakeSuggestion` carry biometric data,
+/// so their payloads are redacted and can never reach a log through `{:?}` (also reached via `IpcRequest`'s derived `Debug`).
 impl std::fmt::Debug for IpcCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -85,10 +157,34 @@ impl std::fmt::Debug for IpcCommand {
                 .field(&payload.as_str())
                 .finish(),
             Self::GetBackend => f.write_str("GetBackend"),
+            Self::SetPreset(preset) => f.debug_tuple("SetPreset").field(preset).finish(),
+            Self::GetPreset => f.write_str("GetPreset"),
+            Self::ListVoiceSamples => f.write_str("ListVoiceSamples"),
+            Self::AddVoiceSample { .. } => f
+                .debug_struct("AddVoiceSample")
+                .field("sample_json", &format_args!("<redacted>"))
+                .finish(),
+            Self::DeleteVoiceSample { id } => {
+                f.debug_struct("DeleteVoiceSample").field("id", id).finish()
+            }
+            Self::GetVoiceProfileEmbedding => f.write_str("GetVoiceProfileEmbedding"),
+            Self::ListIntakeSuggestions => f.write_str("ListIntakeSuggestions"),
+            Self::AddIntakeSuggestion { .. } => f
+                .debug_struct("AddIntakeSuggestion")
+                .field("take_json", &format_args!("<redacted>"))
+                .finish(),
+            Self::ApproveIntakeSuggestion { id, name } => f
+                .debug_struct("ApproveIntakeSuggestion")
+                .field("id", id)
+                .field("name", name)
+                .finish(),
+            Self::DiscardIntakeSuggestion { id } => f
+                .debug_struct("DiscardIntakeSuggestion")
+                .field("id", id)
+                .finish(),
         }
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcErrorDetail {

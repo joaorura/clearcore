@@ -125,7 +125,9 @@ impl DataLoaderBuilder {
     }
     pub fn build(self) -> Result<DataLoader> {
         let bs_train = self._batch_size.unwrap_or(1);
-        let prefetch = self._prefetch.unwrap_or(bs_train * self._num_threads.unwrap_or(4));
+        let prefetch = self
+            ._prefetch
+            .unwrap_or(bs_train * self._num_threads.unwrap_or(4));
         let mut loader = DataLoader::new(
             self._ds.unwrap(),
             bs_train,
@@ -250,7 +252,12 @@ impl DataLoader {
         self.out_receiver = Some(out_receiver);
         let ds = self.get_ds_arc(split);
         let (in_sender, in_receiver) = unbounded();
-        let idcs = self.idcs.lock().unwrap().drain(..).collect::<Vec<(usize, isize)>>();
+        let idcs = self
+            .idcs
+            .lock()
+            .unwrap()
+            .drain(..)
+            .collect::<Vec<(usize, isize)>>();
         for idx in idcs {
             in_sender.send(idx).expect("Could not send index");
         }
@@ -369,7 +376,9 @@ impl DataLoader {
         let bs = self.batch_size(self.current_split);
         let mut timings = Vec::with_capacity(bs);
         let mut samples = Vec::with_capacity(bs);
-        let target_idx = self.dataset_len(self.current_split).min(self.cur_out_idx + bs);
+        let target_idx = self
+            .dataset_len(self.current_split)
+            .min(self.cur_out_idx + bs);
         if self.cur_out_idx >= self.dataset_len(self.current_split) {
             self.drained = true;
         }

@@ -38,5 +38,38 @@ try {
 }
 
 $OutDir = Join-Path $ScriptDir "release"
+
+# Build NSIS and/or Inno Setup turnkey installers if tools are available
+$InstallerDir = Join-Path $ScriptDir "platform\windows\installer"
+$NsiScript = Join-Path $InstallerDir "Clearcore-Setup.nsi"
+$IssScript = Join-Path $InstallerDir "Clearcore-Setup.iss"
+
+if (Get-Command makensis -ErrorAction SilentlyContinue) {
+    Write-Host "Building NSIS turnkey installer (Clearcore-Setup.exe)..." -ForegroundColor Yellow
+    Push-Location $InstallerDir
+    try {
+        & makensis Clearcore-Setup.nsi
+        Write-Host "✓ Clearcore-Setup.exe built successfully with NSIS." -ForegroundColor Green
+    } catch {
+        Write-Warning "NSIS build failed: $_"
+    } finally {
+        Pop-Location
+    }
+}
+
+if (Get-Command iscc -ErrorAction SilentlyContinue) {
+    Write-Host "Building Inno Setup installer (Clearcore-Inno-Setup.exe)..." -ForegroundColor Yellow
+    Push-Location $InstallerDir
+    try {
+        & iscc /O"$OutDir" /F"Clearcore-Inno-Setup" Clearcore-Setup.iss
+        Write-Host "✓ Clearcore-Inno-Setup.exe built successfully with Inno Setup." -ForegroundColor Green
+    } catch {
+        Write-Warning "Inno Setup build failed: $_"
+    } finally {
+        Pop-Location
+    }
+}
+
 Write-Host ""
 Write-Host "Packaging complete! Standalone packages located in: $OutDir" -ForegroundColor Green
+

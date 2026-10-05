@@ -124,7 +124,9 @@ impl log::Log for DfLogger {
                 .send((
                     record.level(),
                     format!("{}", record.args()),
-                    record.module_path().map(|f| f.replace("::reexport_dataset_modules:", "")),
+                    record
+                        .module_path()
+                        .map(|f| f.replace("::reexport_dataset_modules:", "")),
                     record.line(),
                 ))
                 .unwrap_or_else(|_| {

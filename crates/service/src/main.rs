@@ -14,7 +14,9 @@ fn print_usage() {
         "  realtime-noise-service --run [options]          Run daemon supervisor and IPC loop"
     );
     println!("    Options:");
-    println!("      --backend <name>       Initial inference backend (auto, openvino-npu, tract, etc.)");
+    println!(
+        "      --backend <name>       Initial inference backend (auto, openvino-npu, tract, etc.)"
+    );
     println!("      --models-dir <path>    Explicit path to models/stateful directory");
     println!(
         "  realtime-noise-service --install-user-service   Install per-user autostart service"

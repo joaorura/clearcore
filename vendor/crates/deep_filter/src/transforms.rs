@@ -64,7 +64,11 @@ pub(crate) fn mix_f(clean: ArrayView2<f32>, noise: ArrayView2<f32>, snr_db: f32)
 
 #[inline]
 pub(crate) fn rms_normalize(x: Array2<f32>) -> Array2<f32> {
-    let rms = x.map(|x| x.powi(2)).mean_axis(Axis(1)).unwrap().map(|x| x.sqrt() + 1e-8);
+    let rms = x
+        .map(|x| x.powi(2))
+        .mean_axis(Axis(1))
+        .unwrap()
+        .map(|x| x.sqrt() + 1e-8);
     let ch = x.len_of(Axis(0));
     x / rms.to_shape([ch, 1]).unwrap()
 }
@@ -183,8 +187,9 @@ pub fn istft(mut input: ArrayViewMut3<Complex32>, state: &mut DFState, reset: bo
     let ttd = tfd * state.frame_size;
     let mut output: Array2<f32> = Array2::zeros((ch, ttd));
     for (mut input_ch, mut output_ch) in input.outer_iter_mut().zip(output.outer_iter_mut()) {
-        for (mut ichunk, mut ochunk) in
-            input_ch.outer_iter_mut().zip(output_ch.exact_chunks_mut(state.frame_size))
+        for (mut ichunk, mut ochunk) in input_ch
+            .outer_iter_mut()
+            .zip(output_ch.exact_chunks_mut(state.frame_size))
         {
             frame_synthesis(
                 ichunk.as_slice_mut().unwrap(),
@@ -383,8 +388,9 @@ pub fn resample(
             }
         }
         resampler.process_into_buffer(&inbuf, &mut outbuf, None)?;
-        for (res_ch, mut out_ch) in
-            outbuf.iter().zip(out_chunk_iter.next().unwrap().axis_iter_mut(Axis(0)))
+        for (res_ch, mut out_ch) in outbuf
+            .iter()
+            .zip(out_chunk_iter.next().unwrap().axis_iter_mut(Axis(0)))
         {
             debug_assert_eq!(res_ch.len(), out_ch.len());
             for (&x, y) in res_ch.iter().zip(out_ch.iter_mut()) {
@@ -397,8 +403,9 @@ pub fn resample(
         in_ch.fill(0.)
     }
     resampler.process_into_buffer(&inbuf, &mut outbuf, None)?;
-    for (res_ch, mut out_ch) in
-        outbuf.iter().zip(out_chunk_iter.next().unwrap().axis_iter_mut(Axis(0)))
+    for (res_ch, mut out_ch) in outbuf
+        .iter()
+        .zip(out_chunk_iter.next().unwrap().axis_iter_mut(Axis(0)))
     {
         debug_assert_eq!(res_ch.len(), out_ch.len());
         for (&x, y) in res_ch.iter().zip(out_ch.iter_mut()) {

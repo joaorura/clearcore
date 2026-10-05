@@ -9,6 +9,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
     pub endpoint_path: PathBuf,
+    pub settings_path: PathBuf,
     pub model_dir: Option<PathBuf>,
     pub repo_root: Option<PathBuf>,
     pub initial_backend: Option<String>,
@@ -18,6 +19,7 @@ impl Default for ServiceConfig {
     fn default() -> Self {
         Self {
             endpoint_path: PathBuf::from(default_endpoint_path()),
+            settings_path: crate::settings::default_settings_path(),
             model_dir: None,
             repo_root: None,
             initial_backend: None,
@@ -39,7 +41,8 @@ impl Default for ServiceBootstrap {
 impl ServiceBootstrap {
     #[must_use]
     pub fn new(config: ServiceConfig) -> Self {
-        let mut daemon = ServiceDaemon::new();
+        let settings = crate::settings::Settings::load(&config.settings_path);
+        let mut daemon = ServiceDaemon::with_settings(settings, Some(config.settings_path.clone()));
         if let Some(ref model_dir) = config.model_dir {
             daemon.set_model_dir(model_dir.clone());
         }
@@ -86,7 +89,6 @@ impl ServiceBootstrap {
             self.daemon.supervisor().is_hardware_accelerated()
         );
 
-
         for stream_res in listener.incoming() {
             if self.daemon.is_shutdown() {
                 break;
@@ -122,7 +124,6 @@ impl ServiceBootstrap {
             self.daemon.supervisor().active_backend_name(),
             self.daemon.supervisor().is_hardware_accelerated()
         );
-
 
         for stream_res in listener.incoming() {
             if self.daemon.is_shutdown() {

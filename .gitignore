@@ -25,3 +25,7 @@ fixtures/voice-samples/
 
 # Rascunhos descartáveis (nunca commitar)
 scratch/
+
+build/
+.playwright-mcp/
+

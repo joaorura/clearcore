@@ -88,7 +88,10 @@ pub unsafe extern "C" fn df_process_frame(
     let input = ArrayView2::from_shape_ptr((1, state.0.hop_size), input);
     let output = ArrayViewMut2::from_shape_ptr((1, state.0.hop_size), output);
 
-    state.0.process(input, output).expect("Failed to process DF frame")
+    state
+        .0
+        .process(input, output)
+        .expect("Failed to process DF frame")
 }
 
 /// Processes a filter bank sample and return raw gains and DF coefs.
@@ -114,8 +117,14 @@ pub unsafe extern "C" fn df_process_frame_raw(
 ) -> c_float {
     let state = st.as_mut().expect("Invalid pointer");
     let input = ArrayView2::from_shape_ptr((1, state.0.n_freqs), input);
-    state.0.set_spec_buffer(input).expect("Failed to set input spectrum");
-    let (lsnr, gains, coefs) = state.0.process_raw().expect("Failed to process DF spectral frame");
+    state
+        .0
+        .set_spec_buffer(input)
+        .expect("Failed to set input spectrum");
+    let (lsnr, gains, coefs) = state
+        .0
+        .process_raw()
+        .expect("Failed to process DF spectral frame");
     let mut out_gains = ArrayViewMut2::from_shape_ptr((1, state.0.nb_erb), *out_gains_p);
     let mut out_coefs =
         ArrayViewMut4::from_shape_ptr((1, state.0.df_order, state.0.nb_df, 2), *out_coefs_p);

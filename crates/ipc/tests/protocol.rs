@@ -217,3 +217,80 @@ fn debug_of_set_voice_profile_never_prints_the_biometric_payload() {
     assert_eq!(format!("{:?}", IpcCommand::GetBackend), "GetBackend");
 }
 
+#[test]
+fn debug_of_voice_sample_and_intake_payloads_is_redacted() {
+    let secret = r#"{"embedding":[0.987654321],"audio":"SECRET_AUDIO_WAV"}"#;
+    let add_sample = IpcCommand::AddVoiceSample {
+        sample_json: secret.to_owned(),
+    };
+    let add_intake = IpcCommand::AddIntakeSuggestion {
+        take_json: secret.to_owned(),
+    };
+
+    for cmd in [&add_sample, &add_intake] {
+        let rendered = format!("{cmd:?}");
+        assert!(!rendered.contains("SECRET_AUDIO_WAV"), "{rendered}");
+        assert!(!rendered.contains("0.987654321"), "{rendered}");
+        assert!(rendered.contains("redacted"), "{rendered}");
+    }
+
+    // List and delete commands
+    assert_eq!(
+        format!("{:?}", IpcCommand::ListVoiceSamples),
+        "ListVoiceSamples"
+    );
+    assert_eq!(
+        format!(
+            "{:?}",
+            IpcCommand::DeleteVoiceSample {
+                id: "sample-1".to_string()
+            }
+        ),
+        "DeleteVoiceSample { id: \"sample-1\" }"
+    );
+    assert_eq!(
+        format!("{:?}", IpcCommand::ListIntakeSuggestions),
+        "ListIntakeSuggestions"
+    );
+    assert_eq!(
+        format!(
+            "{:?}",
+            IpcCommand::DiscardIntakeSuggestion {
+                id: "take-1".to_string()
+            }
+        ),
+        "DiscardIntakeSuggestion { id: \"take-1\" }"
+    );
+}
+
+#[test]
+fn voice_samples_and_intake_commands_roundtrip_through_json() {
+    let commands = vec![
+        IpcCommand::ListVoiceSamples,
+        IpcCommand::AddVoiceSample {
+            sample_json: r#"{"id":"s1"}"#.to_string(),
+        },
+        IpcCommand::DeleteVoiceSample {
+            id: "s1".to_string(),
+        },
+        IpcCommand::GetVoiceProfileEmbedding,
+        IpcCommand::ListIntakeSuggestions,
+        IpcCommand::AddIntakeSuggestion {
+            take_json: r#"{"id":"t1"}"#.to_string(),
+        },
+        IpcCommand::ApproveIntakeSuggestion {
+            id: "t1".to_string(),
+            name: Some("Approved Take".to_string()),
+        },
+        IpcCommand::DiscardIntakeSuggestion {
+            id: "t1".to_string(),
+        },
+    ];
+
+    for cmd in commands {
+        let req = IpcRequest::new(cmd.clone(), json!({}));
+        let wire = req.to_json().expect("serialize");
+        let parsed = IpcRequest::from_json(&wire).expect("deserialize");
+        assert_eq!(parsed.command, cmd);
+    }
+}

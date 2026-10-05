@@ -1315,3 +1315,21 @@ ipcMain.handle('set_hardware_backend', (_event, backendId) => {
   return result;
 });
 
+ipcMain.handle('get_studio_preset', () => {
+  if (process.platform === 'linux') {
+    const current = clearcoreState.readPreset(clearcoreStatePath());
+    return current || 'Natural';
+  }
+  return 'Natural';
+});
+
+ipcMain.handle('set_studio_preset', (_event, args) => {
+  const preset = typeof args === 'string' ? args : (args && args.preset ? args.preset : 'Natural');
+  if (clearcoreState.isPreset(preset)) {
+    writeClearcoreSharedState({ preset });
+    return { success: true, preset };
+  }
+  return { success: false, preset: 'Off' };
+});
+
+

@@ -1,0 +1,243 @@
+#![forbid(unsafe_code)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::cognitive_complexity
+)]
+
+use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus};
+use realtime_noise_model::ProfileStore;
+use realtime_noise_service::{IntakeTake, ServiceDaemon, VOICE_EMBEDDING_DIM, VoiceSample};
+use serde_json::json;
+use std::io::Cursor;
+use std::path::Path;
+
+fn make_unit_vector(idx: usize) -> Vec<f32> {
+    let mut v = vec![0.0f32; VOICE_EMBEDDING_DIM];
+    v[idx % VOICE_EMBEDDING_DIM] = 1.0;
+    v
+}
+
+fn send_raw(daemon: &mut ServiceDaemon, command: IpcCommand) -> (String, IpcResponse) {
+    let request = IpcRequest::new(command, json!({}));
+    let mut reader = Cursor::new(format!("{}\n", request.to_json().expect("ser")).into_bytes());
+    let mut writer = Cursor::new(Vec::new());
+    daemon
+        .serve_client(&mut reader, &mut writer)
+        .expect("serve");
+    let raw = String::from_utf8(writer.into_inner()).expect("utf8");
+    let response = IpcResponse::from_json(raw.trim()).expect("parse");
+    (raw, response)
+}
+
+fn send(daemon: &mut ServiceDaemon, command: IpcCommand) -> IpcResponse {
+    send_raw(daemon, command).1
+}
+
+fn daemon_with_store(dir: &Path) -> ServiceDaemon {
+    ServiceDaemon::with_profile_store(ProfileStore::new(dir))
+}
+
+#[test]
+fn test_voice_samples_and_intake_ipc_lifecycle() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let mut daemon = daemon_with_store(&dir);
+
+    // Initial status: no samples, no intake takes, no profile
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_samples_count"], 0);
+    assert_eq!(status.payload["has_voice_profile"], false);
+    assert_eq!(status.payload["intake_pending_count"], 0);
+
+    // List samples when empty
+    let list_resp = send(&mut daemon, IpcCommand::ListVoiceSamples);
+    assert_eq!(list_resp.status, IpcStatus::Ok);
+    assert_eq!(list_resp.payload["total_count"], 0);
+    assert_eq!(list_resp.payload["has_profile"], false);
+
+    // Get embedding when empty
+    let emb_resp = send(&mut daemon, IpcCommand::GetVoiceProfileEmbedding);
+    assert_eq!(emb_resp.status, IpcStatus::Ok);
+    assert_eq!(emb_resp.payload["has_profile"], false);
+
+    // Add first sample via IPC
+    let sample1 = VoiceSample::new(
+        "sample-1",
+        "2026-10-05T01:00:00Z",
+        "Frase Inicial 1",
+        None,
+        make_unit_vector(0),
+    )
+    .expect("sample1");
+    let sample1_json = serde_json::to_string(&sample1).expect("ser");
+
+    let add_resp = send(
+        &mut daemon,
+        IpcCommand::AddVoiceSample {
+            sample_json: sample1_json,
+        },
+    );
+    assert_eq!(add_resp.status, IpcStatus::Ok);
+    assert_eq!(add_resp.payload["success"], true);
+    assert_eq!(add_resp.payload["sample_id"], "sample-1");
+    assert_eq!(add_resp.payload["has_profile"], true);
+
+    // Status after adding sample 1
+    let status2 = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status2.payload["voice_samples_count"], 1);
+    assert_eq!(status2.payload["has_voice_profile"], true);
+
+    // Get embedding now has profile
+    let emb_resp2 = send(&mut daemon, IpcCommand::GetVoiceProfileEmbedding);
+    assert_eq!(emb_resp2.status, IpcStatus::Ok);
+    assert_eq!(emb_resp2.payload["has_profile"], true);
+    assert_eq!(emb_resp2.payload["dimension"], 192);
+
+    // Add candidate intake take via IPC
+    let take1 = IntakeTake::new(
+        "take-100",
+        "2026-10-05T01:10:00Z",
+        5.2,
+        21.0,
+        None,
+        make_unit_vector(1),
+    )
+    .expect("take1");
+    let take1_json = serde_json::to_string(&take1).expect("ser");
+
+    let add_take_resp = send(
+        &mut daemon,
+        IpcCommand::AddIntakeSuggestion {
+            take_json: take1_json,
+        },
+    );
+    assert_eq!(add_take_resp.status, IpcStatus::Ok);
+    assert_eq!(add_take_resp.payload["success"], true);
+    assert_eq!(add_take_resp.payload["take_id"], "take-100");
+
+    // Status shows 1 pending take
+    let status3 = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status3.payload["intake_pending_count"], 1);
+
+    // List intake suggestions
+    let list_intake = send(&mut daemon, IpcCommand::ListIntakeSuggestions);
+    assert_eq!(list_intake.status, IpcStatus::Ok);
+    assert_eq!(list_intake.payload["count"], 1);
+    assert_eq!(list_intake.payload["suggestions"][0]["id"], "take-100");
+
+    // Approve intake suggestion
+    let approve_resp = send(
+        &mut daemon,
+        IpcCommand::ApproveIntakeSuggestion {
+            id: "take-100".to_string(),
+            name: Some("Sugestão Aprovada Reunião".to_string()),
+        },
+    );
+    assert_eq!(approve_resp.status, IpcStatus::Ok);
+    assert_eq!(approve_resp.payload["approved"], true);
+    assert_eq!(approve_resp.payload["sample_id"], "take-100");
+    assert_eq!(approve_resp.payload["has_profile"], true);
+
+    // Status: now 2 samples in gallery, 0 pending takes
+    let status4 = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status4.payload["voice_samples_count"], 2);
+    assert_eq!(status4.payload["intake_pending_count"], 0);
+
+    // List samples now contains 2 samples
+    let list_resp2 = send(&mut daemon, IpcCommand::ListVoiceSamples);
+    assert_eq!(list_resp2.payload["total_count"], 2);
+
+    // Delete first sample
+    let del_resp = send(
+        &mut daemon,
+        IpcCommand::DeleteVoiceSample {
+            id: "sample-1".to_string(),
+        },
+    );
+    assert_eq!(del_resp.status, IpcStatus::Ok);
+    assert_eq!(del_resp.payload["deleted"], true);
+    assert_eq!(del_resp.payload["has_profile"], true);
+
+    let status5 = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status5.payload["voice_samples_count"], 1);
+}
+
+#[test]
+fn test_intake_discard_via_ipc() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let mut daemon = daemon_with_store(&dir);
+
+    let audio_file = temp.path().join("discard_call.wav");
+    std::fs::write(&audio_file, b"sample wav audio bytes").expect("write");
+    assert!(audio_file.is_file());
+
+    let take = IntakeTake::new(
+        "take-bad",
+        "2026-10-05T02:00:00Z",
+        4.5,
+        14.2,
+        Some(audio_file.to_str().expect("str").to_string()),
+        make_unit_vector(5),
+    )
+    .expect("take");
+
+    send(
+        &mut daemon,
+        IpcCommand::AddIntakeSuggestion {
+            take_json: serde_json::to_string(&take).expect("ser"),
+        },
+    );
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["intake_pending_count"], 1);
+
+    // Discard via IPC
+    let discard_resp = send(
+        &mut daemon,
+        IpcCommand::DiscardIntakeSuggestion {
+            id: "take-bad".to_string(),
+        },
+    );
+    assert_eq!(discard_resp.status, IpcStatus::Ok);
+    assert_eq!(discard_resp.payload["discarded"], true);
+
+    // File was removed
+    assert!(!audio_file.exists());
+
+    let status_after = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status_after.payload["intake_pending_count"], 0);
+}
+
+#[test]
+fn test_invalid_json_payloads_rejected_safely() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut daemon = daemon_with_store(&temp.path().join("profiles"));
+
+    let bad_sample = send(
+        &mut daemon,
+        IpcCommand::AddVoiceSample {
+            sample_json: "not-json".to_string(),
+        },
+    );
+    assert_eq!(bad_sample.status, IpcStatus::InvalidCommand);
+
+    let bad_take = send(
+        &mut daemon,
+        IpcCommand::AddIntakeSuggestion {
+            take_json: "not-json".to_string(),
+        },
+    );
+    assert_eq!(bad_take.status, IpcStatus::InvalidCommand);
+
+    let not_found_approve = send(
+        &mut daemon,
+        IpcCommand::ApproveIntakeSuggestion {
+            id: "non-existent".to_string(),
+            name: None,
+        },
+    );
+    assert_eq!(not_found_approve.status, IpcStatus::InvalidCommand);
+}

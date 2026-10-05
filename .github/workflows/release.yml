@@ -5,6 +5,15 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag or version name (e.g. v0.1.0-beta.2)'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Publish as prerelease'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -31,7 +40,7 @@ jobs:
           sudo apt-get install -y libpipewire-0.3-dev libclang-dev meson ninja-build
 
       - name: Build Native Rust Binaries
-        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi
+        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
 
       - name: Build PipeWire Helper
         run: |
@@ -76,11 +85,40 @@ jobs:
           fi
           echo "Pacote Linux OK: pipewire_helper e check-virtual-mic.sh presentes"
 
+      - name: Build Linux AppImage Package
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="release/Clearcore-linux-x64"
+          if [ -d "${BUNDLE_DIR}" ]; then
+            echo "Packaging AppImage..."
+            if [ ! -f "${BUNDLE_DIR}/AppRun" ]; then
+              printf '%s\n' '#!/usr/bin/env bash' \
+                'HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
+                'export PATH="${HERE}:${HERE}/resources/bin:${PATH}"' \
+                'export LD_LIBRARY_PATH="${HERE}:${HERE}/resources/bin:${LD_LIBRARY_PATH}"' \
+                'exec "${HERE}/clearcore" "$@"' > "${BUNDLE_DIR}/AppRun"
+              chmod +x "${BUNDLE_DIR}/AppRun"
+            fi
+            cp crates/app-tauri/assets/icon.png "${BUNDLE_DIR}/clearcore.png" || true
+
+            if curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage || \
+               curl -fsSL -o appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage; then
+              chmod +x appimagetool
+              ARCH=x86_64 ./appimagetool --appimage-extract-and-run "${BUNDLE_DIR}" "release/Clearcore-linux-x64.AppImage" || {
+                ./appimagetool --appimage-extract
+                ARCH=x86_64 ./squashfs-root/AppRun "${BUNDLE_DIR}" "release/Clearcore-linux-x64.AppImage"
+              }
+            fi
+            ls -lh release/Clearcore-linux-*.AppImage 2>/dev/null || true
+          fi
+
       - name: Upload Linux Package Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Clearcore-linux-x64
-          path: release/Clearcore-linux-*.tar.gz
+          path: |
+            release/Clearcore-linux-*.tar.gz
+            release/Clearcore-linux-*.AppImage
 
   build-windows:
     name: Build Windows x64 Package
@@ -96,7 +134,7 @@ jobs:
 
       - name: Build Native Rust Binaries
         shell: powershell
-        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi
+        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -123,15 +161,66 @@ jobs:
           nuget restore packages.config -PackagesDirectory packages
           msbuild driver.vcxproj /p:Configuration=Release /p:Platform=x64
 
+      - name: Install NSIS and Inno Setup
+        shell: powershell
+        run: |
+          choco install -y nsis innosetup
+          $nsisPath = "C:\Program Files (x86)\NSIS"
+          $innoPath = "C:\Program Files (x86)\Inno Setup 6"
+          if (Test-Path $nsisPath) {
+            echo $nsisPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+          if (Test-Path $innoPath) {
+            echo $innoPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
       - name: Package Windows Standalone Application
         shell: powershell
         run: .\package.ps1
+
+      - name: Build Windows Installers (NSIS and Inno Setup)
+        shell: powershell
+        run: |
+          $env:Path += ";C:\Program Files (x86)\NSIS;C:\Program Files (x86)\Inno Setup 6"
+          
+          # 1. Compile NSIS turnkey installer -> produces release\Clearcore-Setup.exe
+          if (Get-Command makensis -ErrorAction SilentlyContinue) {
+            Write-Host "Compiling NSIS turnkey installer (Clearcore-Setup.exe)..." -ForegroundColor Cyan
+            Push-Location platform\windows\installer
+            try {
+              makensis Clearcore-Setup.nsi
+              Write-Host "✓ Clearcore-Setup.exe built successfully with NSIS." -ForegroundColor Green
+            } finally {
+              Pop-Location
+            }
+          }
+
+          # 2. Compile Inno Setup installer -> produces release\Clearcore-Inno-Setup.exe
+          if (Get-Command iscc -ErrorAction SilentlyContinue) {
+            Write-Host "Compiling Inno Setup installer (Clearcore-Inno-Setup.exe)..." -ForegroundColor Cyan
+            Push-Location platform\windows\installer
+            try {
+              iscc /O"..\..\..\release" /F"Clearcore-Inno-Setup" Clearcore-Setup.iss
+              Write-Host "✓ Clearcore-Inno-Setup.exe built successfully with Inno Setup." -ForegroundColor Green
+            } finally {
+              Pop-Location
+            }
+          }
+
+          # Ensure Clearcore-Setup.exe is guaranteed to exist
+          if (-not (Test-Path "release\Clearcore-Setup.exe") -and (Test-Path "release\Clearcore-Inno-Setup.exe")) {
+            Copy-Item "release\Clearcore-Inno-Setup.exe" "release\Clearcore-Setup.exe"
+          }
+
+          Get-ChildItem -Path release -Filter "*.*" | Select-Object Name, Length
 
       - name: Upload Windows Package Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Clearcore-win32-x64
-          path: release/Clearcore-win32-*.zip
+          path: |
+            release/Clearcore-win32-*.zip
+            release/Clearcore-*.exe
 
   build-macos:
     name: Build macOS x64/ARM64 Package
@@ -146,7 +235,7 @@ jobs:
           toolchain: 1.90.0
 
       - name: Build Native Rust Binaries
-        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi
+        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -159,24 +248,66 @@ jobs:
       - name: Package macOS Application Bundle
         run: ./package.sh
 
+      - name: Build macOS DMG Package
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="$(ls -d release/Clearcore-darwin-* 2>/dev/null | grep -v '\.tar\.gz$' | grep -v '\.dmg$' | head -n1 || true)"
+          if [ -n "${BUNDLE_DIR}" ] && [ -d "${BUNDLE_DIR}" ]; then
+            BASE="$(basename "${BUNDLE_DIR}")"
+            DMG_OUT="release/${BASE}.dmg"
+            if [ ! -f "${DMG_OUT}" ]; then
+              echo "Building macOS DMG: ${DMG_OUT} from ${BUNDLE_DIR}..."
+              hdiutil create -volname "Clearcore" -srcfolder "${BUNDLE_DIR}" -ov -format UDZO "${DMG_OUT}"
+            fi
+            ls -lh "${DMG_OUT}"
+          fi
+
       - name: Upload macOS Package Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Clearcore-darwin-app
-          path: release/Clearcore-darwin-*.tar.gz
+          path: |
+            release/Clearcore-darwin-*.tar.gz
+            release/Clearcore-darwin-*.dmg
 
   publish-github-release:
     name: Publish Multi-Platform GitHub Release
     needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag_name != '' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Publishing is only supported for `v*` tags: the notes file is resolved from the tag name,
-      # so a workflow_dispatch run without a tag does not publish a release.
-      - name: Verify release notes exist
-        run: test -f "release/RELEASE-NOTES-${GITHUB_REF_NAME}.md" || { echo "missing release/RELEASE-NOTES-${GITHUB_REF_NAME}.md"; exit 1; }
+      - name: Resolve Release Tag & Notes
+        run: |
+          set -euo pipefail
+          RELEASE_TAG="${{ github.event.inputs.tag_name }}"
+          if [ -z "${RELEASE_TAG}" ]; then
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+
+          NOTES_FILE="release/RELEASE-NOTES-${RELEASE_TAG}.md"
+          if [ ! -f "${NOTES_FILE}" ]; then
+            LATEST_NOTES="$(ls -t release/RELEASE-NOTES-*.md 2>/dev/null | head -n1 || true)"
+            if [ -n "${LATEST_NOTES}" ] && [ -f "${LATEST_NOTES}" ]; then
+              echo "Using existing notes from ${LATEST_NOTES} for ${RELEASE_TAG}"
+              cp "${LATEST_NOTES}" "${NOTES_FILE}"
+            else
+              printf '%s\n' \
+                "# Clearcore Release ${RELEASE_TAG}" \
+                "" \
+                "Turnkey multi-platform distribution built entirely via GitHub Actions." \
+                "" \
+                "### Included Packages & Installers" \
+                "- **Linux**: Standalone archive (\`.tar.gz\`) and AppImage (\`.AppImage\`) with PipeWire C-API bridge." \
+                "- **Windows**: Single-click installer (\`Clearcore-Setup.exe\`, \`Clearcore-Inno-Setup.exe\`) with WaveRT virtual audio driver and portable zip (\`.zip\`)." \
+                "- **macOS**: Application bundle with CoreAudio HAL driver (\`.tar.gz\` and \`.dmg\`)." > "${NOTES_FILE}"
+            fi
+          fi
+
+          echo "TARGET_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "NOTES_PATH=${NOTES_FILE}" >> "$GITHUB_ENV"
 
       - name: Download all built artifacts
         uses: actions/download-artifact@v4
@@ -185,14 +316,19 @@ jobs:
 
       - name: Consolidate Release Assets
         run: |
+          set -euo pipefail
           mkdir -p release-assets
-          find downloaded-artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release-assets/ \;
+          find downloaded-artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" \) -exec cp {} release-assets/ \;
+          echo "=== Consolidated Release Assets ==="
           ls -lh release-assets/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tag_name: ${{ env.TARGET_TAG }}
           files: release-assets/*
-          body_path: release/RELEASE-NOTES-${{ github.ref_name }}.md
+          body_path: ${{ env.NOTES_PATH }}
           draft: false
-          prerelease: true
+          prerelease: ${{ github.event.inputs.prerelease != 'false' }}

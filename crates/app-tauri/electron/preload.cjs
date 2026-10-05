@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
   setInputDevice: (deviceId) => ipcRenderer.invoke('set_input_device', deviceId),
   getHardwareBackends: () => ipcRenderer.invoke('get_hardware_backends'),
   setHardwareBackend: (backendId) => ipcRenderer.invoke('set_hardware_backend', backendId),
+  getStudioPreset: () => ipcRenderer.invoke('get_studio_preset'),
+  setStudioPreset: (preset) => ipcRenderer.invoke('set_studio_preset', preset),
   onStatusUpdate: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('status-update', handler);

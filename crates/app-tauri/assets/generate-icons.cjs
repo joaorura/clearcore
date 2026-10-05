@@ -111,6 +111,23 @@ fs.mkdirSync(assetsDir, { recursive: true });
 const appIcon = createPng(64, 64, drawMicIcon([14, 165, 233, 255])); // Cyan
 fs.writeFileSync(path.join(assetsDir, 'icon.png'), appIcon);
 
+// 1b. Windows ICO format containing 64x64 PNG
+const icoHeader = Buffer.alloc(6);
+icoHeader.writeUInt16LE(0, 0); // reserved
+icoHeader.writeUInt16LE(1, 2); // icon type
+icoHeader.writeUInt16LE(1, 4); // 1 image
+const icoDirEntry = Buffer.alloc(16);
+icoDirEntry.writeUInt8(64, 0); // width 64
+icoDirEntry.writeUInt8(64, 1); // height 64
+icoDirEntry.writeUInt8(0, 2);  // color count
+icoDirEntry.writeUInt8(0, 3);  // reserved
+icoDirEntry.writeUInt16LE(1, 4); // color planes
+icoDirEntry.writeUInt16LE(32, 6); // bits per pixel
+icoDirEntry.writeUInt32LE(appIcon.length, 8); // PNG size
+icoDirEntry.writeUInt32LE(22, 12); // image data offset (6 + 16 = 22)
+const icoFile = Buffer.concat([icoHeader, icoDirEntry, appIcon]);
+fs.writeFileSync(path.join(assetsDir, 'icon.ico'), icoFile);
+
 // 2. Active Mode Tray Icon (Green badge: suppression active)
 const activeTray = createPng(32, 32, drawMicIcon([34, 197, 94, 255])); // Green #22c55e
 fs.writeFileSync(path.join(assetsDir, 'tray-active.png'), activeTray);
@@ -124,3 +141,4 @@ const muteTray = createPng(32, 32, drawMicIcon([239, 68, 68, 255])); // Red #ef4
 fs.writeFileSync(path.join(assetsDir, 'tray-mute.png'), muteTray);
 
 console.log('Successfully generated tray and app icons in:', assetsDir);
+

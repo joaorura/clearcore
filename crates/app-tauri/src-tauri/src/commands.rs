@@ -2,7 +2,8 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_const_for_fn)]
 
 use realtime_noise_ipc::{
-    DenoiseMode, IpcClient, IpcCommand, IpcRequest, IpcResponse, IpcStatus, default_endpoint_path,
+    DenoiseMode, IpcClient, IpcCommand, IpcRequest, IpcResponse, IpcStatus, StudioPreset,
+    default_endpoint_path,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -92,4 +93,22 @@ pub fn restart_generation() -> Result<Value, CommandError> {
 pub fn get_diagnostics() -> Result<Value, CommandError> {
     let resp = execute_ipc_command(IpcCommand::GetDiagnostics, json!({}))?;
     Ok(resp.payload)
+}
+
+pub fn get_preset() -> Result<Value, CommandError> {
+    let resp = execute_ipc_command(IpcCommand::GetPreset, json!({}))?;
+    Ok(resp.payload)
+}
+
+pub fn set_preset(preset: StudioPreset) -> Result<Value, CommandError> {
+    let resp = execute_ipc_command(IpcCommand::SetPreset(preset), json!({}))?;
+    Ok(resp.payload)
+}
+
+pub fn get_dsp_preset() -> Result<Value, CommandError> {
+    get_preset()
+}
+
+pub fn set_dsp_preset(preset: StudioPreset) -> Result<Value, CommandError> {
+    set_preset(preset)
 }

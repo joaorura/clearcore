@@ -14,6 +14,7 @@ realtime-noise-ipc = { path = "../ipc" }
 realtime-noise-model = { path = "../model", features = ["tract"] }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
+studio-dsp = { path = "../studio-dsp" }
 
 [features]
 tract = ["realtime-noise-engine/tract", "realtime-noise-model/tract", "realtime-noise-accelerators/tract"]

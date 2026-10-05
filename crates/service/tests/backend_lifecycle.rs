@@ -11,7 +11,9 @@ fn send(daemon: &mut ServiceDaemon, command: IpcCommand) -> IpcResponse {
     let req_str = format!("{}\n", req.to_json().expect("serialize"));
     let mut reader = Cursor::new(req_str.into_bytes());
     let mut writer = Cursor::new(Vec::new());
-    daemon.serve_client(&mut reader, &mut writer).expect("serve");
+    daemon
+        .serve_client(&mut reader, &mut writer)
+        .expect("serve");
     let resp_str = String::from_utf8(writer.into_inner()).expect("utf8");
     IpcResponse::from_json(resp_str.trim()).expect("parse")
 }
@@ -22,11 +24,17 @@ fn service_starts_with_auto_accelerator_and_reports_status() {
     let resp = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(resp.status, IpcStatus::Ok);
 
-    let active_backend = resp.payload["active_backend"].as_str().expect("active_backend");
+    let active_backend = resp.payload["active_backend"]
+        .as_str()
+        .expect("active_backend");
     assert!(!active_backend.is_empty());
 
     if realtime_noise_accelerators::OpenVINOBackend::is_available() {
-        assert!(resp.payload["is_hardware_accelerated"].as_bool().unwrap_or(false));
+        assert!(
+            resp.payload["is_hardware_accelerated"]
+                .as_bool()
+                .unwrap_or(false)
+        );
         assert!(active_backend.starts_with("openvino"));
         assert_eq!(resp.payload["backend_device"], "NPU");
         assert_eq!(resp.payload["backend_runtime"], "openvino-npu");

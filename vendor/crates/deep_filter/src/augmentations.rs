@@ -269,7 +269,9 @@ pub(crate) enum BiquadFilter {
 }
 impl BiquadFilter {
     pub fn iterator() -> impl Iterator<Item = BiquadFilter> {
-        [HighShelf, LowShelf, HighPass, LowPass, PeakingEQ, Notch].iter().copied()
+        [HighShelf, LowShelf, HighPass, LowPass, PeakingEQ, Notch]
+            .iter()
+            .copied()
     }
 }
 
@@ -612,7 +614,8 @@ impl Transform for RandZeroingTD {
         while cur < p {
             let pos = rng.uniform(0, a_len - max);
             let z_len = rng.uniform(min, max);
-            x.slice_mut(s![.., pos..pos + z_len]).map_inplace(|s| *s = 0.);
+            x.slice_mut(s![.., pos..pos + z_len])
+                .map_inplace(|s| *s = 0.);
             cur += z_len as f32 / a_len as f32;
         }
         Ok(())
@@ -873,7 +876,10 @@ impl RandReverbSim {
         if missing > 1 {
             factors[0] += (missing as f32).log2().ceil() as u32;
         }
-        let fft_size = primes.iter().zip(factors).fold(1, |acc, (p, f)| acc * p.pow(f));
+        let fft_size = primes
+            .iter()
+            .zip(factors)
+            .fold(1, |acc, (p, f)| acc * p.pow(f));
         debug_assert!(fft_size >= len);
         fft_size
     }
@@ -885,7 +891,9 @@ impl RandReverbSim {
         x.append(Axis(1), Array2::zeros((ch, pad_front + pad_back)).view())?;
         if pad_front > 0 {
             for mut x_ch in x.outer_iter_mut() {
-                x_ch.as_slice_memory_order_mut().unwrap().rotate_right(pad_front);
+                x_ch.as_slice_memory_order_mut()
+                    .unwrap()
+                    .rotate_right(pad_front);
             }
         }
         Ok(())
@@ -1123,7 +1131,12 @@ impl BandwidthLimiterAugmentation {
         #[cfg(feature = "timings")]
         let t0 = Instant::now();
         let mut rng = thread_rng()?;
-        let &f = self.cut_off_freqs.iter().filter(|&f| *f < max_freq).choose(&mut rng).unwrap();
+        let &f = self
+            .cut_off_freqs
+            .iter()
+            .filter(|&f| *f < max_freq)
+            .choose(&mut rng)
+            .unwrap();
         let d = low_pass_resample(audio.view(), f, self.sr).unwrap();
         audio.clone_from(&d);
         #[cfg(feature = "timings")]
@@ -1368,7 +1381,9 @@ mod tests {
         let ch = test_sample.len_of(Axis(0)) as u16;
         seed_from_u64(42);
         let rand_resample = RandResample::new(1., sr, 0.8, 1.2, 1024);
-        rand_resample.transform(&mut (&mut test_sample).into()).unwrap();
+        rand_resample
+            .transform(&mut (&mut test_sample).into())
+            .unwrap();
         write_wav_iter("../out/resampled.wav", test_sample.iter(), sr as u32, ch)?;
         Ok(())
     }
@@ -1387,7 +1402,11 @@ mod tests {
         write_wav_iter("../out/lowpass_biquad.wav", lowpass_biquad.iter(), sr, ch).unwrap();
         let xx: f64 = sample.iter().map(|&n| n as f64 * n as f64).sum();
         let yy: f64 = lowpass_biquad.iter().map(|&n| n as f64 * n as f64).sum();
-        let xy: f64 = sample.iter().zip(lowpass_biquad).map(|(&n, m)| n as f64 * m as f64).sum();
+        let xy: f64 = sample
+            .iter()
+            .zip(lowpass_biquad)
+            .map(|(&n, m)| n as f64 * m as f64)
+            .sum();
         let corr = xy / (xx.sqrt() * yy.sqrt());
         dbg!(corr);
 
@@ -1396,7 +1415,11 @@ mod tests {
 
         let xx: f64 = sample.iter().map(|&n| n as f64 * n as f64).sum();
         let yy: f64 = lowpass_res.iter().map(|&n| n as f64 * n as f64).sum();
-        let xy: f64 = sample.iter().zip(lowpass_res).map(|(&n, m)| n as f64 * m as f64).sum();
+        let xy: f64 = sample
+            .iter()
+            .zip(lowpass_res)
+            .map(|(&n, m)| n as f64 * m as f64)
+            .sum();
         let corr = xy / (xx.sqrt() * yy.sqrt());
         dbg!(corr);
         Ok(())
@@ -1414,7 +1437,9 @@ mod tests {
         let reverb = RandReverbSim::new(1., sr).with_drr(0.2).with_rt60(0.1);
         write_wav_arr2("../out/speech_noreverb.wav", speech.view(), sr as u32)?;
         write_wav_arr2("../out/noise_noreverb.wav", noise.view(), sr as u32)?;
-        let speech_rev = reverb.transform(&mut speech, &mut noise, move || Ok(rir))?.unwrap();
+        let speech_rev = reverb
+            .transform(&mut speech, &mut noise, move || Ok(rir))?
+            .unwrap();
         write_wav_arr2("../out/speech_target.wav", speech.view(), sr as u32)?;
         write_wav_arr2("../out/speech_reverb.wav", speech_rev.view(), sr as u32)?;
         write_wav_arr2("../out/noise_reverb.wav", noise.view(), sr as u32)?;

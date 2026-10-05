@@ -24,9 +24,12 @@ pub fn load_hdf5_key_cache(cfg_path: &str, cfg: &mut DatasetConfigJson) {
     match DatasetConfigCacheJson::open(cache_path.to_str().unwrap()) {
         Err(e) => log::warn!("Could not load dataset keys cache: {}", e),
         Ok(cache) => {
-            cfg.set_keys(Split::Train, cache.keys()).expect("Could not set cached keys");
-            cfg.set_keys(Split::Valid, cache.keys()).expect("Could not set cached keys");
-            cfg.set_keys(Split::Test, cache.keys()).expect("Could not set cached keys");
+            cfg.set_keys(Split::Train, cache.keys())
+                .expect("Could not set cached keys");
+            cfg.set_keys(Split::Valid, cache.keys())
+                .expect("Could not set cached keys");
+            cfg.set_keys(Split::Test, cache.keys())
+                .expect("Could not set cached keys");
         }
     }
 }
@@ -40,7 +43,9 @@ pub fn write_hdf5_key_cache(cfg_path: &str, cfg: &DatasetConfigJson) {
     cache.extend(cfg.test.iter().filter_map(|x| x.keys_unchecked().cloned()));
     let cache = DatasetConfigCacheJson::new(cache);
     log::trace!("Writing HDF5 json key cache to {}", cache_path.display());
-    cache.write(cache_path.to_str().unwrap()).expect("Failed to write cache.");
+    cache
+        .write(cache_path.to_str().unwrap())
+        .expect("Failed to write cache.");
 }
 /// Fetch latest HDF5 keys and update the corresponding Hdf5Cfgs.
 ///
@@ -57,11 +62,14 @@ pub fn fetch_hdf5_keys_from_ds(ds_dir: &str, cfgs: &mut [Hdf5Cfg], ds: &FftDatas
                 continue;
             }
         };
-        let hash = cfg
-            .hash()
-            .unwrap_or_else(|| cfg.hash_from_ds_path(&ds_path).expect("Could not calculate hash"));
+        let hash = cfg.hash().unwrap_or_else(|| {
+            cfg.hash_from_ds_path(&ds_path)
+                .expect("Could not calculate hash")
+        });
         if let Some(ds_keys) = cfg.load_keys(hash).expect("Could not load Hdf5Keys.") {
-            hdf5cfg.set_keys(ds_keys.clone()).expect("Could not update keys");
+            hdf5cfg
+                .set_keys(ds_keys.clone())
+                .expect("Could not update keys");
         }
     }
 }

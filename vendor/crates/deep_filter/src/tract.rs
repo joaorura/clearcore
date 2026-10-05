@@ -1,7 +1,12 @@
 // Modified by Orca / Clearcore team for FiLM speaker conditioning and Spectral EQ hook.
 // Copyright (c) 2021 Hendrik Schröter
 // Licensed under MIT or Apache-2.0 at your option.
-#![allow(clippy::all, clippy::pedantic, clippy::nursery, mismatched_lifetime_syntaxes)]
+#![allow(
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery,
+    mismatched_lifetime_syntaxes
+)]
 
 use std::fs::File;
 use std::io::{Cursor, Read};
@@ -46,7 +51,10 @@ impl DfParams {
         let mut erb_dec = Vec::new();
         let mut df_dec = Vec::new();
         let mut config = Ini::new();
-        for e in archive.entries().context("Could not extract models from tar file.")? {
+        for e in archive
+            .entries()
+            .context("Could not extract models from tar file.")?
+        {
             let mut file = e.context("Could not open model tar entry.")?;
             let path = file.path().unwrap();
             if path.ends_with("enc.onnx") {
@@ -227,7 +235,12 @@ impl FilmInputs {
         })
     }
     fn identity(ch: usize, hidden: usize) -> Result<Self> {
-        Self::from_slices(ch, hidden, &vec![1f32; ch * hidden], &vec![0f32; ch * hidden])
+        Self::from_slices(
+            ch,
+            hidden,
+            &vec![1f32; ch * hidden],
+            &vec![0f32; ch * hidden],
+        )
     }
 }
 
@@ -467,12 +480,20 @@ impl DfTract {
             bail!("model graphs do not declare gamma/beta inputs");
         }
         if self.film_enc.is_some() {
-            self.film_enc =
-                Some(FilmInputs::from_slices(self.ch, self.film_hidden, &v.gamma_enc, &v.beta_enc)?);
+            self.film_enc = Some(FilmInputs::from_slices(
+                self.ch,
+                self.film_hidden,
+                &v.gamma_enc,
+                &v.beta_enc,
+            )?);
         }
         if self.film_df.is_some() {
-            self.film_df =
-                Some(FilmInputs::from_slices(self.ch, self.film_hidden, &v.gamma_df, &v.beta_df)?);
+            self.film_df = Some(FilmInputs::from_slices(
+                self.ch,
+                self.film_hidden,
+                &v.gamma_df,
+                &v.beta_df,
+            )?);
         }
         Ok(())
     }
@@ -580,7 +601,12 @@ impl DfTract {
         // Run encoder
         let mut enc_in = tvec!(
             self.erb_buf.clone(),
-            TValue::from(self.cplx_buf.clone().into_tensor().permute_axes(&[0, 3, 1, 2])?)
+            TValue::from(
+                self.cplx_buf
+                    .clone()
+                    .into_tensor()
+                    .permute_axes(&[0, 3, 1, 2])?
+            )
         );
         if let Some(film) = &self.film_enc {
             enc_in.push(film.gamma.clone());
@@ -820,7 +846,10 @@ impl DfTract {
 
     pub fn set_spec_buffer(&mut self, spec: ArrayView2<f32>) -> Result<()> {
         debug_assert_eq!(self.spec_buf.shape(), spec.shape());
-        let mut buf = self.spec_buf.to_array_view_mut()?.into_shape([self.ch, self.n_freqs])?;
+        let mut buf = self
+            .spec_buf
+            .to_array_view_mut()?
+            .into_shape([self.ch, self.n_freqs])?;
         for (i_ch, mut b_ch) in spec.outer_iter().zip(buf.outer_iter_mut()) {
             for (&i, b) in i_ch.iter().zip(b_ch.iter_mut()) {
                 *b = i
@@ -933,7 +962,9 @@ fn init_encoder_impl(
         feat_spec.shape,
     );
     let film = m.input_outlets()?.len() == 4;
-    m = m.with_input_fact(0, feat_erb)?.with_input_fact(1, feat_spec)?;
+    m = m
+        .with_input_fact(0, feat_erb)?
+        .with_input_fact(1, feat_spec)?;
     m = if film {
         let g = InferenceFact::dt_shape(f32::datum_type(), shapefactoid!(n_ch, s, film_hidden));
         m.with_input_fact(2, g.clone())?
@@ -959,7 +990,9 @@ fn init_encoder(
     n_ch: usize,
     film_hidden: usize,
 ) -> Result<TypedModel> {
-    let m = tract_onnx::onnx().with_ignore_output_shapes(true).model_for_path(m)?;
+    let m = tract_onnx::onnx()
+        .with_ignore_output_shapes(true)
+        .model_for_path(m)?;
     init_encoder_impl(m, df_cfg, n_ch, film_hidden)
 }
 
@@ -969,7 +1002,9 @@ fn init_encoder_from_read(
     n_ch: usize,
     film_hidden: usize,
 ) -> Result<TypedModel> {
-    let m = tract_onnx::onnx().with_ignore_output_shapes(true).model_for_read(m)?;
+    let m = tract_onnx::onnx()
+        .with_ignore_output_shapes(true)
+        .model_for_read(m)?;
     init_encoder_impl(m, df_cfg, n_ch, film_hidden)
 }
 
@@ -1073,7 +1108,9 @@ fn init_erb_decoder(
     n_ch: usize,
     mask_reduction: Option<ReduceMask>,
 ) -> Result<TypedModel> {
-    let m = tract_onnx::onnx().with_ignore_output_shapes(true).model_for_path(m)?;
+    let m = tract_onnx::onnx()
+        .with_ignore_output_shapes(true)
+        .model_for_path(m)?;
     init_erb_decoder_impl(m, net_cfg, df_cfg, n_ch, mask_reduction)
 }
 fn init_erb_decoder_from_read(
@@ -1083,7 +1120,9 @@ fn init_erb_decoder_from_read(
     n_ch: usize,
     mask_reduction: Option<ReduceMask>,
 ) -> Result<TypedModel> {
-    let m = tract_onnx::onnx().with_ignore_output_shapes(true).model_for_read(m)?;
+    let m = tract_onnx::onnx()
+        .with_ignore_output_shapes(true)
+        .model_for_read(m)?;
     init_erb_decoder_impl(m, net_cfg, df_cfg, n_ch, mask_reduction)
 }
 
@@ -1141,7 +1180,9 @@ fn init_df_decoder(
     n_ch: usize,
     film_hidden: usize,
 ) -> Result<TypedModel> {
-    let m = tract_onnx::onnx().with_ignore_output_shapes(true).model_for_path(m)?;
+    let m = tract_onnx::onnx()
+        .with_ignore_output_shapes(true)
+        .model_for_path(m)?;
     init_df_decoder_impl(m, net_cfg, df_cfg, n_ch, film_hidden)
 }
 fn init_df_decoder_from_read(
@@ -1151,7 +1192,9 @@ fn init_df_decoder_from_read(
     n_ch: usize,
     film_hidden: usize,
 ) -> Result<TypedModel> {
-    let m = tract_onnx::onnx().with_ignore_output_shapes(true).model_for_read(m)?;
+    let m = tract_onnx::onnx()
+        .with_ignore_output_shapes(true)
+        .model_for_read(m)?;
     init_df_decoder_impl(m, net_cfg, df_cfg, n_ch, film_hidden)
 }
 

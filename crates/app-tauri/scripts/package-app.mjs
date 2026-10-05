@@ -385,6 +385,22 @@ echo "✅ Clearcore uninstalled successfully from Linux."
   fs.writeFileSync(uninstallPath, uninstallSh, 'utf8');
   fs.chmodSync(uninstallPath, 0o755);
 
+  // AppRun script and icon for AppImage packaging compatibility
+  const appRunContent = `#!/usr/bin/env bash
+HERE="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+export PATH="\${HERE}:\${HERE}/resources/bin:\${PATH}"
+export LD_LIBRARY_PATH="\${HERE}:\${HERE}/resources/bin:\${LD_LIBRARY_PATH}"
+exec "\${HERE}/clearcore" "$@"
+`;
+  const appRunPath = path.join(bundleDir, 'AppRun');
+  fs.writeFileSync(appRunPath, appRunContent, 'utf8');
+  fs.chmodSync(appRunPath, 0o755);
+
+  const iconSrc = path.join(appDir, 'assets', 'icon.png');
+  if (fs.existsSync(iconSrc)) {
+    fs.copyFileSync(iconSrc, path.join(bundleDir, 'clearcore.png'));
+  }
+
   // Tarball archive for distribution
   const tarName = `${bundleName}.tar.gz`;
   const tarPath = path.join(releaseDir, tarName);
@@ -394,6 +410,21 @@ echo "✅ Clearcore uninstalled successfully from Linux."
     console.log(`✓ Distribution archive created at release/${tarName}`);
   } catch (err) {
     console.warn('Could not create tar.gz archive:', err.message);
+  }
+
+  // If appimagetool is available, build .AppImage
+  const appImageName = `${bundleName}.AppImage`;
+  const appImagePath = path.join(releaseDir, appImageName);
+  try {
+    execSync('appimagetool --version', { stdio: 'ignore' });
+    console.log(`📦 Creating AppImage archive: ${appImageName}...`);
+    execSync(`ARCH=x86_64 appimagetool --appimage-extract-and-run "${bundleDir}" "${appImagePath}"`, {
+      stdio: 'inherit',
+      env: { ...process.env, ARCH: 'x86_64' },
+    });
+    console.log(`✓ AppImage created at release/${appImageName}`);
+  } catch {
+    // appimagetool not in PATH or not installed locally
   }
 } else if (platform === 'darwin') {
   console.log('🍎 Creating macOS application bundle integration and installer...');
@@ -477,6 +508,17 @@ echo "✅ Clearcore uninstalled successfully from macOS."
   } catch (err) {
     console.warn('Could not create tar.gz archive:', err.message);
   }
+
+  // Create DMG on macOS
+  const dmgName = `${bundleName}.dmg`;
+  const dmgPath = path.join(releaseDir, dmgName);
+  console.log(`📦 Creating distribution DMG: ${dmgName}...`);
+  try {
+    execSync(`hdiutil create -volname "Clearcore" -srcfolder "${bundleDir}" -ov -format UDZO "${dmgPath}"`, { stdio: 'inherit' });
+    console.log(`✓ Distribution DMG created at release/${dmgName}`);
+  } catch (err) {
+    console.warn('Could not create DMG archive:', err.message);
+  }
 } else if (platform === 'win32') {
   console.log('🪟 Creating Windows uninstallers and helper scripts...');
   const uninstallBat = `@echo off
@@ -529,6 +571,31 @@ if (Test-Path $PsScript) {
       console.log(`✓ Distribution archive created at release/${zipName}`);
     } catch (err) {
       console.warn('Could not create zip archive:', err.message);
+    }
+  }
+
+  // Compile NSIS / Inno Setup installer if tools are installed
+  const installerDir = path.join(repoRoot, 'platform', 'windows', 'installer');
+  const nsiScript = path.join(installerDir, 'Clearcore-Setup.nsi');
+  if (fs.existsSync(nsiScript)) {
+    try {
+      execSync('makensis /VERSION', { stdio: 'ignore' });
+      console.log('📦 Compiling NSIS turnkey installer (Clearcore-Setup.exe)...');
+      execSync(`makensis "${nsiScript}"`, { cwd: installerDir, stdio: 'inherit' });
+      console.log('✓ NSIS installer compiled at release/Clearcore-Setup.exe');
+    } catch {
+      // makensis not found or failed, try Inno Setup
+      const issScript = path.join(installerDir, 'Clearcore-Setup.iss');
+      if (fs.existsSync(issScript)) {
+        try {
+          execSync('iscc /?', { stdio: 'ignore' });
+          console.log('📦 Compiling Inno Setup installer (Clearcore-Setup.exe)...');
+          execSync(`iscc "${issScript}"`, { cwd: installerDir, stdio: 'inherit' });
+          console.log('✓ Inno Setup installer compiled at release/Clearcore-Setup.exe');
+        } catch {
+          // iscc not found
+        }
+      }
     }
   }
 }

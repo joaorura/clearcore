@@ -378,7 +378,11 @@ fn frame_analysis(input: &[f32], output: &mut [Complex32], state: &mut DFState) 
         *x = y * w;
     }
     // Second part of the window on the new input frame
-    for ((&y, &w), x) in input.iter().zip(window_second.iter()).zip(buf_second.iter_mut()) {
+    for ((&y, &w), x) in input
+        .iter()
+        .zip(window_second.iter())
+        .zip(buf_second.iter_mut())
+    {
         *x = y * w;
     }
     // Shift analysis_mem
@@ -413,7 +417,10 @@ fn frame_synthesis(input: &mut [Complex32], output: &mut [f32], state: &mut DFSt
     }
     apply_window_in_place(&mut x, &state.window);
     let (x_first, x_second) = x.split_at(state.frame_size);
-    for ((&xi, &mem), out) in x_first.iter().zip(state.synthesis_mem.iter()).zip(output.iter_mut())
+    for ((&xi, &mem), out) in x_first
+        .iter()
+        .zip(state.synthesis_mem.iter())
+        .zip(output.iter_mut())
     {
         *out = xi + mem;
     }
