@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PATH="${HOME}/.cargo/bin:${HOME}/.local/bin:${PATH}"
 
-BIN_SERVICE="${SCRIPT_DIR}/target/release/realtime-noise-service"
 BIN_HELPER="${SCRIPT_DIR}/platform/linux/helper/build/pipewire_helper"
 BIN_CLI="${SCRIPT_DIR}/target/release/realtime-noise-app-tauri"
 
@@ -18,10 +17,10 @@ if [[ ! -x "${BIN_HELPER}" ]]; then
     ninja -C "${SCRIPT_DIR}/platform/linux/helper/build"
 fi
 
-if [[ ! -x "${BIN_SERVICE}" || ! -x "${BIN_CLI}" ]]; then
-    echo "[2/4] Compilando binarios Rust (release)..."
-    cargo build --release -p realtime-noise-service -p realtime-noise-app-tauri
-fi
+# Sempre compila (incremental, rapido quando nada mudou): um binario existente pode estar
+# desatualizado em relacao ao codigo. O start-realtime-noise.sh reinicia um daemon antigo.
+echo "[2/4] Compilando binarios Rust (release, incremental)..."
+cargo build --release -p realtime-noise-service -p realtime-noise-app-tauri
 
 # 2. Iniciar o daemon de supressao de ruido
 echo "[3/4] Iniciando daemon de audio PipeWire..."

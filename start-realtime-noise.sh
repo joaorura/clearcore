@@ -23,10 +23,30 @@ echo "PipeWire:        $(pipewire --version | head -n 1)"
 echo "WirePlumber:     $(wireplumber --version 2>&1 | head -n 1)"
 echo "=========================================================="
 
-# Check if already running
-if pgrep -f "realtime-noise-service --run" >/dev/null 2>&1; then
-    echo "Service daemon is already running."
-    exit 0
+# Check if already running, and whether it runs an older binary than the current build
+# (cargo replaces the file: the running one shows as "(deleted)" or started before it).
+if RUNNING_PID="$(pgrep -o -f "realtime-noise-service --run")"; then
+    RUNNING_EXE="$(readlink "/proc/${RUNNING_PID}/exe" 2>/dev/null || true)"
+    OUTDATED=0
+    if [[ "${RUNNING_EXE}" == "${BIN_PATH} (deleted)" ]]; then
+        OUTDATED=1
+    elif [[ "${RUNNING_EXE}" == "${BIN_PATH}" && -d "/proc/${RUNNING_PID}" ]] \
+        && (( $(stat -c %Y "${BIN_PATH}") > $(stat -c %Y "/proc/${RUNNING_PID}") )); then
+        OUTDATED=1
+    fi
+    if (( OUTDATED )); then
+        echo "AVISO: o daemon em execução (PID ${RUNNING_PID}) é de um binário mais antigo que ${BIN_PATH}."
+        echo "Reiniciando para carregar a versão atual..."
+        "${SCRIPT_DIR}/stop-realtime-noise.sh"
+    elif [[ -n "${RUNNING_EXE}" && "${RUNNING_EXE%" (deleted)"}" != "${BIN_PATH}" ]]; then
+        echo "Service daemon is already running from another binary: ${RUNNING_EXE}"
+        echo "AVISO: não é o binário deste checkout (${BIN_PATH}); ele pode estar desatualizado."
+        echo "Para usar este: ./stop-realtime-noise.sh && ./start-realtime-noise.sh"
+        exit 0
+    else
+        echo "Service daemon is already running."
+        exit 0
+    fi
 fi
 
 # Prefer systemd user service if configured
