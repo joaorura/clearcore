@@ -28,6 +28,8 @@ pub use voice_samples::{
     VoiceSampleError, VoiceSampleManager,
 };
 
+use realtime_noise_ipc::enrollment_codes::{ENROLL_PAYLOAD_TOO_LARGE, MAX_REQUEST_LINE_BYTES};
+use realtime_noise_ipc::line_limit::{LineRead, is_invalid_utf8, read_line_limited};
 use realtime_noise_ipc::{IpcCommand, IpcResponse, IpcServer, IpcStatus};
 use realtime_noise_model::{ProfileStore, VoiceProfile};
 use realtime_noise_supervisor::{
@@ -295,6 +297,11 @@ impl ServiceDaemon {
 
     /// Serves a control client connection stream until the client disconnects (EOF).
     /// Safe client disconnect: Daemon outlives UI disconnects and accepts subsequent client connections.
+    ///
+    /// Lines are read with a hard cap of `MAX_REQUEST_LINE_BYTES`: an oversized line is answered
+    /// with `ENROLL_PAYLOAD_TOO_LARGE` and a non-UTF-8 line with a fixed parse error, and the
+    /// connection keeps serving; any other read error ends the session. Finished enrollment jobs
+    /// are drained (and applied on this thread) before every request.
     pub fn serve_client<R: BufRead, W: Write>(
         &mut self,
         mut reader: R,
@@ -303,338 +310,378 @@ impl ServiceDaemon {
         self.served_client_count += 1;
 
         let mut line = String::new();
-        while reader.read_line(&mut line)? > 0 {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                let resp_str = IpcServer::new().handle_line(trimmed, |cmd, _payload| match cmd {
-                    IpcCommand::GetStatus => {
-                        let status = self.supervisor.status();
-                        let mode_ipc = convert_engine_mode_to_ipc(status.active_mode);
-                        let preset_ipc = convert_dsp_preset_to_ipc(status.dsp_preset);
-                        let desc = self.supervisor.active_backend_descriptor();
-                        IpcResponse::success(
-                            "status-resp",
-                            json!({
-                                "state": format!("{:?}", status.state),
-                                "is_terminal": self.supervisor.is_terminal(),
-                                "can_restart": self.supervisor.can_restart(),
-                                "mode": mode_ipc,
-                                "preset": preset_ipc,
-                                "dsp_preset": preset_ipc,
-                                "crash_count_15m": status.crash_count_15m,
-                                "total_crashes": status.total_crashes,
-                                // Voice profile fields describe the SERVICE's own backend: the
-                                // profile is "applied" when that backend accepted it. The packaged
-                                // audio path (filter-capi / helper) does not use it yet (stage 2).
-                                // Reported in every mode, including Mute, Bypass and
-                                // TerminalSafeState.
-                                "active_voice_profile_id": self.supervisor.active_voice_profile_id(),
-                                "stored_voice_profile_id": self.stored_voice_profile_id,
-                                "voice_profile_selected": self.stored_voice_profile_id.is_some(),
-                                "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
-                                "voice_profile_error": self.voice_profile_error,
-                                "voice_samples_count": self.voice_samples.list_samples().len(),
-                                "has_voice_profile": self.voice_samples.compute_profile_embedding().is_some(),
-                                "intake_pending_count": self.voice_intake.list_pending().len(),
-                                "active_backend": self.supervisor.active_backend_name(),
-                                "requested_backend": self.supervisor.requested_backend_name(),
-                                "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
-                                "backend_runtime": desc.as_ref().map(|d| d.runtime),
-                                "backend_device": self.supervisor.active_backend_device(),
-                            }),
-                        )
+        loop {
+            let resp_str = match read_line_limited(&mut reader, &mut line, MAX_REQUEST_LINE_BYTES) {
+                Ok(LineRead::Eof) => return Ok(()),
+                Ok(LineRead::Line) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
                     }
-                    IpcCommand::SetMode(ipc_mode) => {
-                        let engine_mode = convert_ipc_mode_to_engine(*ipc_mode);
-                        self.supervisor.set_mode(engine_mode);
-                        IpcResponse::success(
-                            "set-mode-resp",
-                            json!({
-                                "mode": ipc_mode,
-                                "success": true,
-                            }),
-                        )
-                    }
-                    IpcCommand::SetBackend(payload) => {
-                        let req_name = payload.as_str();
-                        let info = select_backend_and_reapply(
-                            &mut self.supervisor,
-                            req_name,
-                            self.model_dir.as_deref(),
-                            self.repo_root.as_deref(),
-                            self.profile_store.as_ref(),
-                            &mut self.stored_voice_profile_id,
-                            &mut self.voice_profile_error,
-                        );
-                        IpcResponse::success(
-                            "set-backend-resp",
-                            json!({
-                                "success": true,
-                                "requested_backend": req_name,
-                                "active_backend": info.name,
-                                "is_hardware_accelerated": info.is_hardware_accelerated,
-                                "device": info.device,
-                                "runtime": info.runtime,
-                                "fallback": info.is_fallback,
-                                "fallback_reason": info.fallback_reason,
-                            }),
-                        )
-                    }
-                    IpcCommand::GetBackend => {
-                        let desc = self.supervisor.active_backend_descriptor();
-                        IpcResponse::success(
-                            "get-backend-resp",
-                            json!({
-                                "active_backend": self.supervisor.active_backend_name(),
-                                "requested_backend": self.supervisor.requested_backend_name(),
-                                "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
-                                "backend_runtime": desc.as_ref().map(|d| d.runtime),
-                                "backend_device": self.supervisor.active_backend_device(),
-                            }),
-                        )
-                    }
-                    IpcCommand::SetPreset(ipc_preset) => {
-                        let dsp_preset = convert_ipc_preset_to_dsp(*ipc_preset);
-                        self.supervisor.set_dsp_preset(dsp_preset);
-                        self.settings.preset = dsp_preset;
-                        let persisted = settings::persist_settings(self.settings, self.settings_path.as_deref());
-                        IpcResponse::success(
-                            "set-preset-resp",
-                            json!({
-                                "preset": ipc_preset,
-                                "dsp_preset": ipc_preset,
-                                "success": true,
-                                "persisted": persisted,
-                            }),
-                        )
-                    }
-                    IpcCommand::GetPreset => {
-                        let preset_ipc = convert_dsp_preset_to_ipc(self.supervisor.dsp_preset());
-                        IpcResponse::success(
-                            "get-preset-resp",
-                            json!({
-                                "preset": preset_ipc,
-                                "dsp_preset": preset_ipc,
-                            }),
-                        )
-                    }
-                    IpcCommand::RestartGeneration => match self.supervisor.reset() {
-                        Ok(()) => IpcResponse::success(
-                            "restart-resp",
-                            json!({"restarted": true, "state": "Running"}),
-                        ),
-                        Err(err) => IpcResponse::error(
-                            "restart-resp",
-                            IpcStatus::InternalError,
-                            "RESTART_FAILED",
-                            err.to_string(),
-                        ),
-                    },
-                    IpcCommand::GetDiagnostics => {
-                        let diag = self.supervisor.diagnostics();
-                        let preset_ipc = convert_dsp_preset_to_ipc(self.supervisor.dsp_preset());
-                        IpcResponse::success(
-                            "diagnostics-resp",
-                            json!({
-                                "diagnostics": diag,
-                                "total_crashes": self.supervisor.status().total_crashes,
-                                "preset": preset_ipc,
-                                "dsp_preset": preset_ipc,
-                            }),
-                        )
-                    }
-                    IpcCommand::SetVoiceProfile { profile_json } => {
-                        self.set_voice_profile_json(profile_json)
-                    }
-                    IpcCommand::ClearVoiceProfile => clear_voice_profile(
-                        &mut self.supervisor,
-                        self.profile_store.as_ref(),
-                        &mut self.stored_voice_profile_id,
-                        &mut self.voice_profile_error,
-                    ),
-                    IpcCommand::ListVoiceSamples => {
-                        let samples = self.voice_samples.list_samples();
-                        let samples_json: Vec<_> = samples
-                            .iter()
-                            .map(|s| {
-                                json!({
-                                    "id": s.id,
-                                    "timestamp": s.timestamp,
-                                    "name": s.name,
-                                    "audio_path": s.audio_path,
-                                    "is_active": s.is_active,
-                                })
-                            })
-                            .collect();
-                        IpcResponse::success(
-                            "list-voice-samples-resp",
-                            json!({
-                                "samples": samples_json,
-                                "total_count": samples.len(),
-                                "has_profile": self.voice_samples.compute_profile_embedding().is_some(),
-                            }),
-                        )
-                    }
-                    // Provisional until task S6 wires the ingest/build/job handlers.
-                    IpcCommand::AddVoiceSample { .. }
-                    | IpcCommand::BuildVoiceProfile { .. }
-                    | IpcCommand::GetEnrollmentJob { .. } => IpcResponse::error(
-                        "enrollment-resp",
-                        IpcStatus::InternalError,
-                        realtime_noise_ipc::enrollment_codes::ENROLL_FAILED,
-                        "not implemented",
-                    ),
-                    IpcCommand::DeleteVoiceSample { id } => {
-                        match self.voice_samples.delete_sample(id, true) {
-                            Ok(deleted) => {
-                                let has_profile = self.voice_samples.compute_profile_embedding().is_some();
-                                IpcResponse::success(
-                                    "delete-voice-sample-resp",
-                                    json!({
-                                        "success": true,
-                                        "deleted": deleted,
-                                        "has_profile": has_profile,
-                                    }),
-                                )
-                            }
-                            Err(_) => IpcResponse::internal_error(
-                                "delete-voice-sample-resp",
-                                "Failed to delete voice sample",
-                            ),
-                        }
-                    }
-                    IpcCommand::GetVoiceProfileEmbedding => {
-                        self.voice_samples.compute_profile_embedding().map_or_else(
-                            || {
-                                IpcResponse::success(
-                                    "get-voice-profile-embedding-resp",
-                                    json!({
-                                        "has_profile": false,
-                                        "embedding": null,
-                                    }),
-                                )
-                            },
-                            |embedding| {
-                                IpcResponse::success(
-                                    "get-voice-profile-embedding-resp",
-                                    json!({
-                                        "has_profile": true,
-                                        "dimension": voice_samples::VOICE_EMBEDDING_DIM,
-                                        "embedding": embedding.as_slice(),
-                                    }),
-                                )
-                            },
-                        )
-                    }
-                    IpcCommand::ListIntakeSuggestions => {
-                        let pending = self.voice_intake.list_pending();
-                        let suggestions_json: Vec<_> = pending
-                            .iter()
-                            .map(|t| {
-                                json!({
-                                    "id": t.id,
-                                    "timestamp": t.timestamp,
-                                    "duration_secs": t.duration_secs,
-                                    "snr": t.snr,
-                                    "audio_path": t.audio_path,
-                                })
-                            })
-                            .collect();
-                        IpcResponse::success(
-                            "list-intake-suggestions-resp",
-                            json!({
-                                "suggestions": suggestions_json,
-                                "count": pending.len(),
-                            }),
-                        )
-                    }
-                    IpcCommand::AddIntakeSuggestion { take_json } => {
-                        match serde_json::from_str::<voice_intake::IntakeTake>(take_json) {
-                            Ok(take) => {
-                                let take_id = take.id.clone();
-                                match self.voice_intake.add_take(take) {
-                                    Ok(()) => IpcResponse::success(
-                                        "add-intake-suggestion-resp",
-                                        json!({
-                                            "success": true,
-                                            "take_id": take_id,
-                                        }),
-                                    ),
-                                    Err(_) => IpcResponse::internal_error(
-                                        "add-intake-suggestion-resp",
-                                        "Failed to add intake suggestion",
-                                    ),
-                                }
-                            }
-                            Err(_) => IpcResponse::invalid_command(
-                                "add-intake-suggestion-resp",
-                                "Invalid intake suggestion payload",
-                            ),
-                        }
-                    }
-                    IpcCommand::ApproveIntakeSuggestion { id, name } => {
-                        match self.voice_intake.approve_take(id, &mut self.voice_samples, name.as_deref()) {
-                            Ok(sample) => {
-                                let has_profile = self.voice_samples.compute_profile_embedding().is_some();
-                                IpcResponse::success(
-                                    "approve-intake-suggestion-resp",
-                                    json!({
-                                        "success": true,
-                                        "approved": true,
-                                        "sample_id": sample.id,
-                                        "has_profile": has_profile,
-                                    }),
-                                )
-                            }
-                            Err(voice_intake::VoiceIntakeError::TakeNotFound(_)) => {
-                                IpcResponse::error(
-                                    "approve-intake-suggestion-resp",
-                                    IpcStatus::InvalidCommand,
-                                    "TAKE_NOT_FOUND",
-                                    "Intake suggestion not found",
-                                )
-                            }
-                            Err(_) => IpcResponse::internal_error(
-                                "approve-intake-suggestion-resp",
-                                "Failed to approve intake suggestion",
-                            ),
-                        }
-                    }
-                    IpcCommand::DiscardIntakeSuggestion { id } => {
-                        match self.voice_intake.discard_take(id) {
-                            Ok(true) => IpcResponse::success(
-                                "discard-intake-suggestion-resp",
-                                json!({
-                                    "success": true,
-                                    "discarded": true,
-                                }),
-                            ),
-                            Ok(false) => IpcResponse::success(
-                                "discard-intake-suggestion-resp",
-                                json!({
-                                    "success": true,
-                                    "discarded": false,
-                                }),
-                            ),
-                            Err(_) => IpcResponse::internal_error(
-                                "discard-intake-suggestion-resp",
-                                "Failed to discard intake suggestion",
-                            ),
-                        }
-                    }
-                    IpcCommand::Shutdown => {
-                        self.shutdown = true;
-                        IpcResponse::success("shutdown-resp", json!({"shutdown": true}))
-                    }
-                });
-                writer.write_all(resp_str.as_bytes())?;
-                writer.write_all(b"\n")?;
-                writer.flush()?;
-            }
-            line.clear();
+                    let resp = IpcServer::new()
+                        .handle_line(trimmed, |cmd, _payload| self.handle_command(cmd));
+                    // The line may carry raw PCM (base64): wipe it before the next read.
+                    wipe_string(&mut line);
+                    resp
+                }
+                Ok(LineRead::TooLong) => fixed_error_json(
+                    IpcStatus::InvalidCommand,
+                    ENROLL_PAYLOAD_TOO_LARGE,
+                    "request line too large",
+                ),
+                Err(e) if is_invalid_utf8(&e) => fixed_error_json(
+                    IpcStatus::InvalidCommand,
+                    "JSON_PARSE_ERROR",
+                    "malformed request",
+                ),
+                Err(e) => return Err(e),
+            };
+            writer.write_all(resp_str.as_bytes())?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
         }
-        Ok(())
     }
+
+    fn handle_command(&mut self, cmd: &IpcCommand) -> IpcResponse {
+        match cmd {
+            IpcCommand::GetStatus => {
+                let status = self.supervisor.status();
+                let mode_ipc = convert_engine_mode_to_ipc(status.active_mode);
+                let preset_ipc = convert_dsp_preset_to_ipc(status.dsp_preset);
+                let desc = self.supervisor.active_backend_descriptor();
+                IpcResponse::success(
+                    "status-resp",
+                    json!({
+                        "state": format!("{:?}", status.state),
+                        "is_terminal": self.supervisor.is_terminal(),
+                        "can_restart": self.supervisor.can_restart(),
+                        "mode": mode_ipc,
+                        "preset": preset_ipc,
+                        "dsp_preset": preset_ipc,
+                        "crash_count_15m": status.crash_count_15m,
+                        "total_crashes": status.total_crashes,
+                        // Voice profile fields describe the SERVICE's own backend: the
+                        // profile is "applied" when that backend accepted it. The packaged
+                        // audio path (filter-capi / helper) does not use it yet (stage 2).
+                        // Reported in every mode, including Mute, Bypass and
+                        // TerminalSafeState.
+                        "active_voice_profile_id": self.supervisor.active_voice_profile_id(),
+                        "stored_voice_profile_id": self.stored_voice_profile_id,
+                        "voice_profile_selected": self.stored_voice_profile_id.is_some(),
+                        "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
+                        "voice_profile_error": self.voice_profile_error,
+                        "voice_samples_count": self.voice_samples.list_samples().len(),
+                        "has_voice_profile": self.voice_samples.compute_profile_embedding().is_some(),
+                        "intake_pending_count": self.voice_intake.list_pending().len(),
+                        "active_backend": self.supervisor.active_backend_name(),
+                        "requested_backend": self.supervisor.requested_backend_name(),
+                        "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
+                        "backend_runtime": desc.as_ref().map(|d| d.runtime),
+                        "backend_device": self.supervisor.active_backend_device(),
+                    }),
+                )
+            }
+            IpcCommand::SetMode(ipc_mode) => {
+                let engine_mode = convert_ipc_mode_to_engine(*ipc_mode);
+                self.supervisor.set_mode(engine_mode);
+                IpcResponse::success(
+                    "set-mode-resp",
+                    json!({
+                        "mode": ipc_mode,
+                        "success": true,
+                    }),
+                )
+            }
+            IpcCommand::SetBackend(payload) => {
+                let req_name = payload.as_str();
+                let info = select_backend_and_reapply(
+                    &mut self.supervisor,
+                    req_name,
+                    self.model_dir.as_deref(),
+                    self.repo_root.as_deref(),
+                    self.profile_store.as_ref(),
+                    &mut self.stored_voice_profile_id,
+                    &mut self.voice_profile_error,
+                );
+                IpcResponse::success(
+                    "set-backend-resp",
+                    json!({
+                        "success": true,
+                        "requested_backend": req_name,
+                        "active_backend": info.name,
+                        "is_hardware_accelerated": info.is_hardware_accelerated,
+                        "device": info.device,
+                        "runtime": info.runtime,
+                        "fallback": info.is_fallback,
+                        "fallback_reason": info.fallback_reason,
+                    }),
+                )
+            }
+            IpcCommand::GetBackend => {
+                let desc = self.supervisor.active_backend_descriptor();
+                IpcResponse::success(
+                    "get-backend-resp",
+                    json!({
+                        "active_backend": self.supervisor.active_backend_name(),
+                        "requested_backend": self.supervisor.requested_backend_name(),
+                        "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
+                        "backend_runtime": desc.as_ref().map(|d| d.runtime),
+                        "backend_device": self.supervisor.active_backend_device(),
+                    }),
+                )
+            }
+            IpcCommand::SetPreset(ipc_preset) => {
+                let dsp_preset = convert_ipc_preset_to_dsp(*ipc_preset);
+                self.supervisor.set_dsp_preset(dsp_preset);
+                self.settings.preset = dsp_preset;
+                let persisted =
+                    settings::persist_settings(self.settings, self.settings_path.as_deref());
+                IpcResponse::success(
+                    "set-preset-resp",
+                    json!({
+                        "preset": ipc_preset,
+                        "dsp_preset": ipc_preset,
+                        "success": true,
+                        "persisted": persisted,
+                    }),
+                )
+            }
+            IpcCommand::GetPreset => {
+                let preset_ipc = convert_dsp_preset_to_ipc(self.supervisor.dsp_preset());
+                IpcResponse::success(
+                    "get-preset-resp",
+                    json!({
+                        "preset": preset_ipc,
+                        "dsp_preset": preset_ipc,
+                    }),
+                )
+            }
+            IpcCommand::RestartGeneration => match self.supervisor.reset() {
+                Ok(()) => IpcResponse::success(
+                    "restart-resp",
+                    json!({"restarted": true, "state": "Running"}),
+                ),
+                Err(err) => IpcResponse::error(
+                    "restart-resp",
+                    IpcStatus::InternalError,
+                    "RESTART_FAILED",
+                    err.to_string(),
+                ),
+            },
+            IpcCommand::GetDiagnostics => {
+                let diag = self.supervisor.diagnostics();
+                let preset_ipc = convert_dsp_preset_to_ipc(self.supervisor.dsp_preset());
+                IpcResponse::success(
+                    "diagnostics-resp",
+                    json!({
+                        "diagnostics": diag,
+                        "total_crashes": self.supervisor.status().total_crashes,
+                        "preset": preset_ipc,
+                        "dsp_preset": preset_ipc,
+                    }),
+                )
+            }
+            IpcCommand::SetVoiceProfile { profile_json } => {
+                self.set_voice_profile_json(profile_json)
+            }
+            IpcCommand::ClearVoiceProfile => clear_voice_profile(
+                &mut self.supervisor,
+                self.profile_store.as_ref(),
+                &mut self.stored_voice_profile_id,
+                &mut self.voice_profile_error,
+            ),
+            IpcCommand::ListVoiceSamples => {
+                let samples = self.voice_samples.list_samples();
+                let samples_json: Vec<_> = samples
+                    .iter()
+                    .map(|s| {
+                        json!({
+                            "id": s.id,
+                            "timestamp": s.timestamp,
+                            "name": s.name,
+                            "audio_path": s.audio_path,
+                            "is_active": s.is_active,
+                        })
+                    })
+                    .collect();
+                IpcResponse::success(
+                    "list-voice-samples-resp",
+                    json!({
+                        "samples": samples_json,
+                        "total_count": samples.len(),
+                        "has_profile": self.voice_samples.compute_profile_embedding().is_some(),
+                    }),
+                )
+            }
+            // Provisional until task S6 wires the ingest/build/job handlers.
+            IpcCommand::AddVoiceSample { .. }
+            | IpcCommand::BuildVoiceProfile { .. }
+            | IpcCommand::GetEnrollmentJob { .. } => IpcResponse::error(
+                "enrollment-resp",
+                IpcStatus::InternalError,
+                realtime_noise_ipc::enrollment_codes::ENROLL_FAILED,
+                "not implemented",
+            ),
+            IpcCommand::DeleteVoiceSample { id } => {
+                match self.voice_samples.delete_sample(id, true) {
+                    Ok(deleted) => {
+                        let has_profile = self.voice_samples.compute_profile_embedding().is_some();
+                        IpcResponse::success(
+                            "delete-voice-sample-resp",
+                            json!({
+                                "success": true,
+                                "deleted": deleted,
+                                "has_profile": has_profile,
+                            }),
+                        )
+                    }
+                    Err(_) => IpcResponse::internal_error(
+                        "delete-voice-sample-resp",
+                        "Failed to delete voice sample",
+                    ),
+                }
+            }
+            IpcCommand::GetVoiceProfileEmbedding => {
+                self.voice_samples.compute_profile_embedding().map_or_else(
+                    || {
+                        IpcResponse::success(
+                            "get-voice-profile-embedding-resp",
+                            json!({
+                                "has_profile": false,
+                                "embedding": null,
+                            }),
+                        )
+                    },
+                    |embedding| {
+                        IpcResponse::success(
+                            "get-voice-profile-embedding-resp",
+                            json!({
+                                "has_profile": true,
+                                "dimension": voice_samples::VOICE_EMBEDDING_DIM,
+                                "embedding": embedding.as_slice(),
+                            }),
+                        )
+                    },
+                )
+            }
+            IpcCommand::ListIntakeSuggestions => {
+                let pending = self.voice_intake.list_pending();
+                let suggestions_json: Vec<_> = pending
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "id": t.id,
+                            "timestamp": t.timestamp,
+                            "duration_secs": t.duration_secs,
+                            "snr": t.snr,
+                            "audio_path": t.audio_path,
+                        })
+                    })
+                    .collect();
+                IpcResponse::success(
+                    "list-intake-suggestions-resp",
+                    json!({
+                        "suggestions": suggestions_json,
+                        "count": pending.len(),
+                    }),
+                )
+            }
+            IpcCommand::AddIntakeSuggestion { take_json } => {
+                match serde_json::from_str::<voice_intake::IntakeTake>(take_json) {
+                    Ok(take) => {
+                        let take_id = take.id.clone();
+                        match self.voice_intake.add_take(take) {
+                            Ok(()) => IpcResponse::success(
+                                "add-intake-suggestion-resp",
+                                json!({
+                                    "success": true,
+                                    "take_id": take_id,
+                                }),
+                            ),
+                            Err(_) => IpcResponse::internal_error(
+                                "add-intake-suggestion-resp",
+                                "Failed to add intake suggestion",
+                            ),
+                        }
+                    }
+                    Err(_) => IpcResponse::invalid_command(
+                        "add-intake-suggestion-resp",
+                        "Invalid intake suggestion payload",
+                    ),
+                }
+            }
+            IpcCommand::ApproveIntakeSuggestion { id, name } => {
+                match self
+                    .voice_intake
+                    .approve_take(id, &mut self.voice_samples, name.as_deref())
+                {
+                    Ok(sample) => {
+                        let has_profile = self.voice_samples.compute_profile_embedding().is_some();
+                        IpcResponse::success(
+                            "approve-intake-suggestion-resp",
+                            json!({
+                                "success": true,
+                                "approved": true,
+                                "sample_id": sample.id,
+                                "has_profile": has_profile,
+                            }),
+                        )
+                    }
+                    Err(voice_intake::VoiceIntakeError::TakeNotFound(_)) => IpcResponse::error(
+                        "approve-intake-suggestion-resp",
+                        IpcStatus::InvalidCommand,
+                        "TAKE_NOT_FOUND",
+                        "Intake suggestion not found",
+                    ),
+                    Err(_) => IpcResponse::internal_error(
+                        "approve-intake-suggestion-resp",
+                        "Failed to approve intake suggestion",
+                    ),
+                }
+            }
+            IpcCommand::DiscardIntakeSuggestion { id } => {
+                match self.voice_intake.discard_take(id) {
+                    Ok(true) => IpcResponse::success(
+                        "discard-intake-suggestion-resp",
+                        json!({
+                            "success": true,
+                            "discarded": true,
+                        }),
+                    ),
+                    Ok(false) => IpcResponse::success(
+                        "discard-intake-suggestion-resp",
+                        json!({
+                            "success": true,
+                            "discarded": false,
+                        }),
+                    ),
+                    Err(_) => IpcResponse::internal_error(
+                        "discard-intake-suggestion-resp",
+                        "Failed to discard intake suggestion",
+                    ),
+                }
+            }
+            IpcCommand::Shutdown => {
+                self.shutdown = true;
+                IpcResponse::success("shutdown-resp", json!({"shutdown": true}))
+            }
+        }
+    }
+}
+
+/// Serialized error response with a fixed code and message (never request bytes).
+fn fixed_error_json(status: IpcStatus, code: &str, message: &str) -> String {
+    IpcResponse::error("unknown", status, code, message)
+        .to_json()
+        .unwrap_or_else(|_| "{}".to_owned())
+}
+
+/// Overwrites the string's bytes with zeros and leaves it empty.
+fn wipe_string(text: &mut String) {
+    let mut bytes = std::mem::take(text).into_bytes();
+    bytes.fill(0);
+    // Keeps the zeroing from being optimized away as a dead store.
+    std::hint::black_box(&bytes);
 }
 
 /// Why [`ServiceDaemon::apply_profile`] refused a profile; carries no payload.
