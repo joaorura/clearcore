@@ -1,8 +1,8 @@
 //! Ingestion of enrollment samples: validate the raw take, run it through the base denoiser,
 //! measure the clean speech and encode the full clean take as the stored WAV.
 
-use realtime_noise_model::speech_trim::trim_speech;
-use realtime_noise_model::wav::encode_wav_pcm16_mono;
+use realtime_noise_model::speech_trim::{active_rms_dbfs, trim_speech};
+use realtime_noise_model::wav::{decode_wav_pcm16_mono, encode_wav_pcm16_mono};
 
 use crate::enrollment_error::EnrollError;
 
@@ -25,11 +25,11 @@ pub struct IngestResult {
 }
 
 /// Zeroes the borrowed PCM when dropped, so every exit path (including unwinding) wipes it.
-struct ZeroOnDrop<'a>(&'a mut [f32]);
+struct ZeroOnDrop<B: AsMut<[f32]>>(B);
 
-impl Drop for ZeroOnDrop<'_> {
+impl<B: AsMut<[f32]>> Drop for ZeroOnDrop<B> {
     fn drop(&mut self) {
-        self.0.fill(0.0);
+        self.0.as_mut().fill(0.0);
     }
 }
 
@@ -45,36 +45,54 @@ pub fn ingest_sample(
     pcm48: &mut [f32],
 ) -> Result<IngestResult, EnrollError> {
     let guard = ZeroOnDrop(pcm48);
-    ingest_inner(denoiser, guard.0)
+    ingest_inner(denoiser, &*guard.0)
 }
 
 fn ingest_inner(denoiser: &mut dyn Denoiser, pcm48: &[f32]) -> Result<IngestResult, EnrollError> {
     if pcm48.is_empty() || pcm48.iter().any(|v| !v.is_finite()) {
         return Err(EnrollError::InvalidAudio);
     }
-    if pcm48.iter().fold(0.0_f32, |m, v| m.max(v.abs())) >= MAX_PEAK {
+    if peak_of(pcm48) >= MAX_PEAK {
         return Err(EnrollError::Clipping);
     }
-    let clean = denoiser.denoise(pcm48)?;
-    if clean.len() != pcm48.len() || clean.iter().any(|v| !v.is_finite()) {
+    let clean = ZeroOnDrop(denoiser.denoise(pcm48)?);
+    if clean.0.len() != pcm48.len() || clean.0.iter().any(|v| !v.is_finite()) {
         return Err(EnrollError::Failed);
     }
-    let peak = clean.iter().fold(0.0_f32, |m, v| m.max(v.abs()));
-    let trimmed = trim_speech(&clean, SAMPLE_RATE);
-    let rms_dbfs = realtime_noise_model::speech_trim::active_rms_dbfs(&clean, SAMPLE_RATE);
+    if peak_of(&clean.0) >= MAX_PEAK {
+        return Err(EnrollError::Clipping);
+    }
+    // Everything is measured on the PCM16-quantized signal, i.e. exactly what the stored WAV
+    // decodes to, so the ingest budget matches what the profile build re-measures from the files.
+    // The stored take is the full (untrimmed) denoised take: its size is bounded by the caller's
+    // payload limit, and trimming is recomputed at build time.
+    let wav_bytes = encode_wav_pcm16_mono(&clean.0, SAMPLE_RATE);
+    let (stored, rate) = decode_wav_pcm16_mono(&wav_bytes).map_err(|_| EnrollError::Failed)?;
+    let stored = ZeroOnDrop(stored);
+    if rate != SAMPLE_RATE {
+        return Err(EnrollError::Failed);
+    }
+    // The ingest threshold is strict (< -40 dBFS rejects); the enroll validator accepts <= -40
+    // on the joined audio, so the two leave a small slack on purpose.
+    let rms_dbfs = active_rms_dbfs(&stored.0, SAMPLE_RATE);
     if rms_dbfs < MIN_SPEECH_RMS_DBFS {
         return Err(EnrollError::TooQuiet);
     }
-    if trimmed.samples.is_empty() || trimmed.speech_seconds <= 0.0 {
+    let trimmed = trim_speech(&stored.0, SAMPLE_RATE);
+    if trimmed.speech_seconds <= 0.0 {
         return Err(EnrollError::TooLittleSpeech);
     }
     Ok(IngestResult {
-        wav_bytes: encode_wav_pcm16_mono(&clean, SAMPLE_RATE),
+        wav_bytes,
         speech_seconds: trimmed.speech_seconds,
-        peak,
+        peak: peak_of(&stored.0),
         rms_dbfs,
         active_fraction: trimmed.active_fraction,
     })
+}
+
+fn peak_of(samples: &[f32]) -> f32 {
+    samples.iter().fold(0.0_f32, |m, v| m.max(v.abs()))
 }
 
 #[cfg(feature = "tract")]
@@ -106,18 +124,23 @@ impl Denoiser for TractDenoiser {
             .map_err(|_| EnrollError::Failed)?;
         let delay = usize::try_from(ALGORITHM_LATENCY_SAMPLES).map_err(|_| EnrollError::Failed)?;
         let pad = delay + (HOP_SAMPLES - pcm48.len() % HOP_SAMPLES) % HOP_SAMPLES;
-        let mut padded = Vec::with_capacity(pcm48.len() + pad);
-        padded.extend_from_slice(pcm48);
-        padded.resize(pcm48.len() + pad, 0.0);
-        let mut out = Vec::with_capacity(padded.len());
-        for chunk in padded.chunks_exact(HOP_SAMPLES) {
-            let mut frame = [0.0_f32; HOP_SAMPLES];
-            frame.copy_from_slice(chunk);
-            let processed = backend.process(&frame).map_err(|_| EnrollError::Failed)?;
-            out.extend_from_slice(&processed.samples);
+        // Every buffer holding raw or denoised voice is wiped on all exits (including `?`).
+        // tract's internal state is outside our reach and cannot be zeroed by us.
+        let mut padded = ZeroOnDrop(Vec::with_capacity(pcm48.len() + pad));
+        padded.0.extend_from_slice(pcm48);
+        padded.0.resize(pcm48.len() + pad, 0.0);
+        let mut out = ZeroOnDrop(Vec::with_capacity(padded.0.len()));
+        let mut frame = ZeroOnDrop([0.0_f32; HOP_SAMPLES]);
+        for chunk in padded.0.chunks_exact(HOP_SAMPLES) {
+            frame.0.copy_from_slice(chunk);
+            let processed = backend.process(&frame.0).map_err(|_| EnrollError::Failed)?;
+            out.0.extend_from_slice(&processed.samples);
         }
-        let mut result: Vec<f32> = out.into_iter().skip(delay).collect();
-        result.truncate(pcm48.len());
+        let result: Vec<f32> = out
+            .0
+            .get(delay..delay + pcm48.len())
+            .ok_or(EnrollError::Failed)?
+            .to_vec();
         Ok(result)
     }
 }
@@ -245,5 +268,76 @@ mod tests {
         eprintln!("DFNET3_COST: {:?} for 2.0 s audio", start.elapsed());
         assert_eq!(out.len(), noise.len());
         assert!(out.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn denoised_peak_over_the_ceiling_is_clipping() {
+        let mut pcm = bursts(1.0, 0.9);
+        let r = ingest_sample(&mut Gain(1.2), &mut pcm);
+        assert_eq!(r.unwrap_err(), EnrollError::Clipping);
+        assert!(pcm.iter().all(|v| *v == 0.0));
+    }
+
+    #[test]
+    fn speech_seconds_matches_the_stored_wav() {
+        // Frames whose level sits within +-0.1 dB of the -30 dB relative threshold, so PCM16
+        // quantization can flip them; the reported figures must come from the stored signal.
+        let loud = 0.5_f32;
+        let thr = loud * 10f32.powf(-30.0 / 20.0 * 0.0) * 10f32.powf(-1.5);
+        let mut pcm = Vec::new();
+        for f in 0..300_usize {
+            let offset_db = -0.1 + 0.2 * (f % 50) as f32 / 49.0;
+            let amp = if f == 0 {
+                loud
+            } else {
+                thr * 10f32.powf(offset_db / 20.0)
+            };
+            for i in 0..960_usize {
+                pcm.push(if i % 2 == 0 { amp } else { -amp });
+            }
+        }
+        let r = ingest_sample(&mut Gain(1.0), &mut pcm).unwrap();
+        let (decoded, _) = decode_wav_pcm16_mono(&r.wav_bytes).unwrap();
+        let t = realtime_noise_model::speech_trim::trim_speech(&decoded, 48_000);
+        assert_eq!(t.speech_seconds, r.speech_seconds);
+        assert_eq!(t.active_fraction, r.active_fraction);
+    }
+
+    #[test]
+    fn zero_on_drop_wipes_borrowed_and_owned_buffers() {
+        let mut buf = vec![0.25_f32; 64];
+        {
+            let _g = ZeroOnDrop(&mut buf[..]);
+        }
+        assert!(buf.iter().all(|v| *v == 0.0));
+        let owned = vec![0.5_f32; 8];
+        let g = ZeroOnDrop(owned);
+        assert!(g.0.iter().all(|v| *v == 0.5));
+    }
+
+    #[cfg(feature = "tract")]
+    #[test]
+    #[ignore = "uses the approved DFNet3 asset; run locally"]
+    fn tract_denoiser_latency_is_compensated() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let input = bursts(2.0, 0.3);
+        let out = TractDenoiser::new(root).denoise(&input).unwrap();
+        let mut best = (0_i32, f32::MIN);
+        for lag in -480_i32..=480 {
+            let mut acc = 0.0_f32;
+            for (i, a) in input.iter().enumerate() {
+                let j = i as i64 + i64::from(lag);
+                if j >= 0 {
+                    if let Some(b) = out.get(j as usize) {
+                        acc += a * b;
+                    }
+                }
+            }
+            if acc > best.1 {
+                best = (lag, acc);
+            }
+        }
+        eprintln!("ALIGNMENT_BEST_LAG: {} (corr {})", best.0, best.1);
+        assert!(best.0.abs() <= 2, "lag {}", best.0);
     }
 }
