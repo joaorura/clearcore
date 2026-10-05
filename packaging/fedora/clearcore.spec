@@ -5,6 +5,8 @@ Summary:        Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3
 License:        PolyForm Noncommercial 1.0.0
 URL:            https://github.com/joaorura/clearcore
 Source0:        LICENSE
+Source1:        clearcore.desktop
+Source2:        clearcore.png
 
 ExclusiveArch:  x86_64 aarch64
 AutoReqProv:    no
@@ -38,24 +40,10 @@ WRAPPER
 chmod 0755 %{buildroot}/usr/bin/clearcore
 
 mkdir -p %{buildroot}/usr/share/applications
-cat << 'DESKTOP' > %{buildroot}/usr/share/applications/clearcore.desktop
-[Desktop Entry]
-Type=Application
-Name=Clearcore
-GenericName=Noise Suppression Virtual Microphone
-Comment=Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
-Exec=/opt/clearcore/clearcore
-Icon=clearcore
-Terminal=false
-Categories=AudioVideo;Audio;
-Keywords=audio;microphone;noise;filter;clearcore;pipewire;
-StartupWMClass=clearcore
-DESKTOP
+cp %{SOURCE1} %{buildroot}/usr/share/applications/clearcore.desktop
 
 mkdir -p %{buildroot}/usr/share/icons/hicolor/512x512/apps
-if [ -f "clearcore.png" ]; then
-    cp "clearcore.png" %{buildroot}/usr/share/icons/hicolor/512x512/apps/clearcore.png
-fi
+cp %{SOURCE2} %{buildroot}/usr/share/icons/hicolor/512x512/apps/clearcore.png
 
 %files
 /opt/clearcore

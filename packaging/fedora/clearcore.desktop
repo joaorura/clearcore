@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Clearcore
+GenericName=Noise Suppression Virtual Microphone
+Comment=Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
+Exec=clearcore
+Icon=clearcore
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=audio;microphone;noise;filter;clearcore;pipewire;
+StartupWMClass=clearcore
