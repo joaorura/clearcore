@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { JobAbortScope, isAbortError } from '../jobAbort';
 import { invokeBridge } from '../../bridge';
 import type { VoiceProfileStatus } from '../../types';
 import type { EnrollmentLabels, SampleList } from '../enrollmentTypes';
@@ -41,6 +42,11 @@ export function useProfileBuild(opts: {
   const { t, labels, jobs, refreshSamples } = opts;
   const [profileStatus, setProfileStatus] = useState<VoiceProfileStatus>({ is_enrolled: false, active_samples_count: 0 });
   const [idsAtBuild, setIdsAtBuild] = useState<string[] | null>(null);
+  // The build poller stops when the card unmounts.
+  const jobScopeRef = useRef<JobAbortScope | null>(null);
+  if (jobScopeRef.current === null) jobScopeRef.current = new JobAbortScope();
+  const jobScope = jobScopeRef.current;
+  useEffect(() => () => jobScope.abortAll(), [jobScope]);
 
   // Main-process pushes (same merged payload as the set_voice_profile reply).
   useEffect(() => {
@@ -72,13 +78,20 @@ export function useProfileBuild(opts: {
       if (startError !== null || !('jobId' in start)) {
         jobs.setEnrollErrorText(errorLabelForJob(startError ?? 'ENROLL_FAILED', 'build', labels, t));
       } else {
-        const job = await waitForJob(start.jobId, { onUpdate: jobs.setCurrentJob });
+        const signal = jobScope.signal();
+        let job;
+        try {
+          job = await waitForJob(start.jobId, { onUpdate: jobs.setCurrentJob, signal });
+        } finally {
+          jobScope.release(signal);
+        }
         jobs.setCurrentJob(job);
         const outcome = nextStepAfterJob(job);
         if (outcome.kind === 'done') done = true;
         else jobs.applyOutcome(outcome, 'build');
       }
     } catch (err) {
+      if (isAbortError(err)) return false; // unmounted: nothing more to show
       jobs.failWith(err);
     } finally {
       jobs.setJobBusy(false);

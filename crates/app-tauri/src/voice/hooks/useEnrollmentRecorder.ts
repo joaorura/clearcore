@@ -7,6 +7,7 @@ import { addSample, waitForJob } from '../enrollmentClient';
 import { acquireRawPhysicalStream, PhysicalMicUnavailableError } from '../captureDevice';
 import { PcmRecorder } from '../pcmCapture';
 import { CaptureController } from '../captureController';
+import { JobAbortScope, isAbortError } from '../jobAbort';
 import { nextStepAfterJob, shouldReportUnstartedCapture, type JobOutcome, type Translate } from './voiceProfileLogic';
 import type { JobFeedback, JobOrigin } from './useJobFeedback';
 
@@ -79,6 +80,12 @@ export function useEnrollmentRecorder(opts: {
   }, [controller]);
 
   useEffect(() => cleanupRecording, [cleanupRecording]);
+
+  // Every job poller started here stops when the card unmounts.
+  const jobScopeRef = useRef<JobAbortScope | null>(null);
+  if (jobScopeRef.current === null) jobScopeRef.current = new JobAbortScope();
+  const jobScope = jobScopeRef.current;
+  useEffect(() => () => jobScope.abortAll(), [jobScope]);
 
   /**
    * Opens the raw physical microphone and starts the PCM recorder. Single-flight: a second call
@@ -157,14 +164,21 @@ export function useEnrollmentRecorder(opts: {
           : { kind: 'show-error', code: startError ?? 'ENROLL_FAILED' };
       } else {
         captured.pcm.fill(0); // sent: drop the raw audio from memory
-        const job = await waitForJob(start.jobId, { onUpdate: jobs.setCurrentJob });
-        jobs.setCurrentJob(job);
-        outcome = nextStepAfterJob(job);
-        sampleId = job.sampleId;
+        const signal = jobScope.signal();
+        try {
+          const job = await waitForJob(start.jobId, { onUpdate: jobs.setCurrentJob, signal });
+          jobs.setCurrentJob(job);
+          outcome = nextStepAfterJob(job);
+          sampleId = job.sampleId;
+        } finally {
+          jobScope.release(signal);
+        }
       }
       jobs.applyOutcome(outcome);
     } catch (err) {
       outcome = { kind: 'show-error', code: 'SERVICE_UNAVAILABLE' };
+      // Unmounted: no state update and no refresh.
+      if (isAbortError(err)) return { outcome, sampleId };
       jobs.failWith(err);
     } finally {
       jobs.setJobBusy(false);
