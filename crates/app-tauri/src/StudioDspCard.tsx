@@ -4,7 +4,6 @@ import { invokeBridge } from './bridge';
 import type { StudioPreset } from './types';
 
 const STORAGE_PRESET_KEY = 'clearcore_studio_preset';
-const STORAGE_ENROLLED_KEY = 'clearcore_voice_profile_enrolled';
 
 interface DspBlockInfo {
   id: string;
@@ -96,11 +95,19 @@ const DSP_BLOCKS: DspBlockInfo[] = [
   },
 ];
 
+/**
+ * The microphone EQ counts as calibrated only when the SERVICE says so (`neural_eq_calibrated`
+ * in the profile status pushed by the voice profile card). Never inferred from local storage.
+ */
+export function neuralEqCalibratedFrom(detail: unknown): boolean {
+  return typeof detail === 'object' && detail !== null && (detail as { neural_eq_calibrated?: unknown }).neural_eq_calibrated === true;
+}
+
 export const StudioDspCard: React.FC = () => {
   const { t } = useI18n();
 
   const [activePreset, setActivePreset] = useState<StudioPreset>('Natural');
-  const [isNeuralEqCalibrated, setIsNeuralEqCalibrated] = useState<boolean>(true);
+  const [isNeuralEqCalibrated, setIsNeuralEqCalibrated] = useState<boolean>(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   // Load preset on startup
@@ -115,18 +122,22 @@ export const StudioDspCard: React.FC = () => {
           if (saved) setActivePreset(saved);
         }
 
-        const enrolled = localStorage.getItem(STORAGE_ENROLLED_KEY) === 'true';
-        setIsNeuralEqCalibrated(enrolled);
       } catch {
         // Fallback
+      }
+      try {
+        // Calibration as the service reports it now (flat or { profile } envelope).
+        const res = await invokeBridge<unknown>('get_voice_profile');
+        const status = (res as { profile?: unknown } | null)?.profile ?? res;
+        setIsNeuralEqCalibrated(neuralEqCalibratedFrom(status));
+      } catch {
+        // unreachable service: stays not calibrated
       }
     };
     loadPreset();
 
     const handleProfileUpdate = (e: Event) => {
-      const custom = e as CustomEvent<{ is_enrolled?: boolean; neural_eq_calibrated?: boolean }>;
-      const isCalibrated = custom.detail?.neural_eq_calibrated ?? (localStorage.getItem(STORAGE_ENROLLED_KEY) === 'true');
-      setIsNeuralEqCalibrated(Boolean(isCalibrated));
+      setIsNeuralEqCalibrated(neuralEqCalibratedFrom((e as CustomEvent<unknown>).detail));
     };
     window.addEventListener('clearcore_profile_updated', handleProfileUpdate);
     return () => window.removeEventListener('clearcore_profile_updated', handleProfileUpdate);
@@ -304,37 +315,7 @@ export const StudioDspCard: React.FC = () => {
           </span>
         </div>
 
-        <div className="neural-eq-spectrum-visual">
-          <div className="spectrum-label-row">
-            <span>80 Hz (Rumble)</span>
-            <span>250 Hz (Corpo)</span>
-            <span>1 kHz (Presença)</span>
-            <span>3.5 kHz (Clareza)</span>
-            <span>10 kHz (Ar)</span>
-          </div>
-          <div className="spectrum-bars-row">
-            <div className="spectrum-band">
-              <div className="spectrum-bar" style={{ height: isNeuralEqCalibrated ? '40%' : '50%' }} />
-              <span className="band-val">{isNeuralEqCalibrated ? '-1.5 dB' : '0.0 dB'}</span>
-            </div>
-            <div className="spectrum-band">
-              <div className="spectrum-bar" style={{ height: isNeuralEqCalibrated ? '65%' : '50%' }} />
-              <span className="band-val">{isNeuralEqCalibrated ? '+1.8 dB' : '0.0 dB'}</span>
-            </div>
-            <div className="spectrum-band">
-              <div className="spectrum-bar" style={{ height: isNeuralEqCalibrated ? '55%' : '50%' }} />
-              <span className="band-val">{isNeuralEqCalibrated ? '+0.6 dB' : '0.0 dB'}</span>
-            </div>
-            <div className="spectrum-band">
-              <div className="spectrum-bar" style={{ height: isNeuralEqCalibrated ? '72%' : '50%' }} />
-              <span className="band-val">{isNeuralEqCalibrated ? '+2.4 dB' : '0.0 dB'}</span>
-            </div>
-            <div className="spectrum-band">
-              <div className="spectrum-bar" style={{ height: isNeuralEqCalibrated ? '60%' : '50%' }} />
-              <span className="band-val">{isNeuralEqCalibrated ? '+1.1 dB' : '0.0 dB'}</span>
-            </div>
-          </div>
-        </div>
+        {/* No per-band values: the service does not report them, and none are invented here. */}
 
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '10px 0 0 0', lineHeight: 1.4 }}>
           {t('studioDsp.neuralEqDetail')}
