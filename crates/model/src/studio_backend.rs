@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use realtime_noise_contracts::AudioFrame;
 use studio_dsp::{Preset, StudioChain, StudioControl};
 
-use crate::{BackendDescriptor, InferenceBackend, InferenceError, ProcessedFrame};
+use crate::{BackendDescriptor, InferenceBackend, InferenceError, ProcessedFrame, VoiceProfile};
 
 /// Cloneable handle that asks a [`StudioBackend`] to reset its DSP state before the next frame.
 ///
@@ -111,6 +111,10 @@ impl<B: InferenceBackend> InferenceBackend for StudioBackend<B> {
             .algorithmic_latency_samples()
             .saturating_add(self.chain.latency_samples())
     }
+
+    fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
+        self.inner.set_voice_profile(profile)
+    }
 }
 
 #[cfg(test)]
@@ -154,6 +158,13 @@ mod tests {
 
         fn algorithmic_latency_samples(&self) -> u32 {
             INNER_LATENCY
+        }
+
+        fn set_voice_profile(
+            &mut self,
+            profile: Option<&VoiceProfile>,
+        ) -> Result<(), InferenceError> {
+            crate::reject_unsupported_voice_profile(profile)
         }
     }
 

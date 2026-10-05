@@ -278,4 +278,11 @@ impl InferenceBackend for TensorRtBackend {
     fn algorithmic_latency_samples(&self) -> u32 {
         ALGORITHM_LATENCY_SAMPLES
     }
+
+    fn set_voice_profile(
+        &mut self,
+        profile: Option<&realtime_noise_model::VoiceProfile>,
+    ) -> Result<(), realtime_noise_model::InferenceError> {
+        realtime_noise_model::reject_unsupported_voice_profile(profile)
+    }
 }

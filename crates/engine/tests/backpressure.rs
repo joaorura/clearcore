@@ -42,6 +42,13 @@ impl InferenceBackend for PassthroughBackend {
     fn algorithmic_latency_samples(&self) -> u32 {
         0
     }
+
+    fn set_voice_profile(
+        &mut self,
+        profile: Option<&realtime_noise_model::VoiceProfile>,
+    ) -> Result<(), realtime_noise_model::InferenceError> {
+        realtime_noise_model::reject_unsupported_voice_profile(profile)
+    }
 }
 
 #[test]

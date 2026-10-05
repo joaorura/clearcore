@@ -124,6 +124,20 @@ pub trait InferenceBackend: Send {
     fn descriptor(&self) -> BackendDescriptor;
     fn process(&mut self, input: &AudioFrame) -> Result<ProcessedFrame, InferenceError>;
     fn algorithmic_latency_samples(&self) -> u32;
+    fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError>;
+}
+
+/// Policy for backends that cannot condition on a voice profile: `None` is
+/// accepted, `Some` is rejected explicitly instead of being silently ignored.
+pub fn reject_unsupported_voice_profile(
+    profile: Option<&VoiceProfile>,
+) -> Result<(), InferenceError> {
+    match profile {
+        None => Ok(()),
+        Some(_) => Err(InferenceError::UnsupportedFeature(
+            "voice profile conditioning".into(),
+        )),
+    }
 }
 
 impl<T: InferenceBackend + ?Sized> InferenceBackend for Box<T> {
@@ -138,11 +152,23 @@ impl<T: InferenceBackend + ?Sized> InferenceBackend for Box<T> {
     fn algorithmic_latency_samples(&self) -> u32 {
         (**self).algorithmic_latency_samples()
     }
+
+    fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
+        (**self).set_voice_profile(profile)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsupported_policy_accepts_none_and_rejects_some() {
+        assert!(reject_unsupported_voice_profile(None).is_ok());
+        let p = VoiceProfile::identity("id", "n", "2026-10-05T00:00:00Z").unwrap();
+        let err = reject_unsupported_voice_profile(Some(&p)).unwrap_err();
+        assert!(matches!(err, InferenceError::UnsupportedFeature(_)));
+    }
 
     fn descriptor() -> BackendDescriptor {
         BackendDescriptor {

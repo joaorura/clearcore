@@ -7,6 +7,7 @@ use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES, SAMPLE_RATE_HZ};
 
 use crate::{
     ALGORITHM_LATENCY_SAMPLES, BackendDescriptor, InferenceBackend, InferenceError, ProcessedFrame,
+    VoiceProfile,
 };
 
 pub const DEFAULT_FFT_SIZE: usize = 960;
@@ -380,6 +381,10 @@ impl<B: SpectralModelBackend> InferenceBackend for AgnosticDspBackend<B> {
 
     fn algorithmic_latency_samples(&self) -> u32 {
         ALGORITHM_LATENCY_SAMPLES
+    }
+
+    fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
+        crate::reject_unsupported_voice_profile(profile)
     }
 }
 

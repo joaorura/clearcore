@@ -12,6 +12,7 @@ pub enum InferenceError {
     DeadlineMeasurement(String),
     GoldenPending(String),
     GoldenValidation(String),
+    UnsupportedFeature(String),
     Io(std::io::Error),
 }
 
@@ -35,6 +36,9 @@ impl fmt::Display for InferenceError {
             Self::GoldenPending(message) => write!(formatter, "BLOCKED_PENDING_GOLDEN: {message}"),
             Self::GoldenValidation(message) => {
                 write!(formatter, "golden validation failed: {message}")
+            }
+            Self::UnsupportedFeature(feature) => {
+                write!(formatter, "unsupported feature: {feature}")
             }
             Self::Io(error) => write!(formatter, "I/O failed: {error}"),
         }
