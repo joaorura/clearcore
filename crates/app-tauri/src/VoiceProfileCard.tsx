@@ -5,6 +5,10 @@ import type { VoiceSample, CallSuggestionTake, VoiceProfileStatus, InputDeviceIn
 import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels, Quality } from './voice/enrollmentTypes';
 import { enrollmentErrorCode, isBudgetError } from './voice/enrollmentErrors';
 import { formatSeconds } from './voice/speechBudget';
+import { MAX_RECORD_SECONDS, MIN_RECORD_SECONDS } from './voice/enrollmentTypes';
+import type { CapturedPcm, DeviceInfo } from './voice/enrollmentTypes';
+import { acquireRawPhysicalStream, PhysicalMicUnavailableError } from './voice/captureDevice';
+import { PcmRecorder } from './voice/pcmCapture';
 
 export interface VoiceProfileCardProps {
   selectedInputId?: string;
@@ -12,217 +16,11 @@ export interface VoiceProfileCardProps {
   inputDevices?: InputDeviceInfo[];
 }
 
-/**
- * Detect if a media device label represents a virtual microphone, monitor sink, or loopback device.
- */
-export const isVirtualOrLoopbackAudioDevice = (label: string): boolean => {
-  const l = (label || '').toLowerCase();
-  return (
-    l.includes('realtime') ||
-    l.includes('clearcore') ||
-    l.includes('virtual') ||
-    l.includes('monitor') ||
-    l.includes('loopback')
-  );
-};
+// Capture helpers live in ./voice/captureDevice; re-exported so existing imports keep working.
+export { isVirtualOrLoopbackAudioDevice, resolvePhysicalAudioDevice } from './voice/captureDevice';
 
-/**
- * Resolves the true physical microphone device from enumerated MediaDeviceInfo list,
- * matching against the PipeWire/system device info and filtering out virtual/loopback devices.
- */
-export const resolvePhysicalAudioDevice = (
-  audioInputs: MediaDeviceInfo[],
-  selectedInputId?: string,
-  inputDevices?: InputDeviceInfo[]
-): MediaDeviceInfo | undefined => {
-  const physicalCandidates = audioInputs.filter(
-    (d) => !isVirtualOrLoopbackAudioDevice(d.label)
-  );
-
-  // 1. Direct match on Chromium deviceId (if it's not 'default' or 'communications')
-  if (selectedInputId && selectedInputId !== 'default' && selectedInputId !== 'communications') {
-    const directMatch = physicalCandidates.find((d) => d.deviceId === selectedInputId);
-    if (directMatch) return directMatch;
-  }
-
-  // 2. Match known physical device from inputDevices by name/label
-  const knownPhysical = inputDevices?.find((d) => d.id === selectedInputId);
-  if (knownPhysical?.name) {
-    const cleanKnownName = knownPhysical.name.toLowerCase().trim();
-    const nameMatch = physicalCandidates.find((d) => {
-      const devLabel = d.label.toLowerCase().trim();
-      return (
-        devLabel.length > 0 &&
-        (devLabel.includes(cleanKnownName) || cleanKnownName.includes(devLabel))
-      );
-    });
-    if (nameMatch) return nameMatch;
-  }
-
-  // 3. Fallback to any physical device that is NOT default or communications and has a label
-  const specificPhysical = physicalCandidates.find(
-    (d) =>
-      d.deviceId !== 'default' &&
-      d.deviceId !== 'communications' &&
-      d.label.length > 0
-  );
-  if (specificPhysical) return specificPhysical;
-
-  // 4. Any physical candidate with deviceId not default/communications
-  const nonDefault = physicalCandidates.find(
-    (d) => d.deviceId !== 'default' && d.deviceId !== 'communications'
-  );
-  if (nonDefault) return nonDefault;
-
-  // 5. Any candidate in physicalCandidates
-  if (physicalCandidates.length > 0) return physicalCandidates[0];
-
-  return undefined;
-};
-
-/**
- * Identifies the best supported MediaRecorder MIME type for optimal audio fidelity.
- */
-export const getPreferredAudioMimeType = (): string => {
-  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
-    return 'audio/webm';
-  }
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/mp4',
-  ];
-  for (const candidate of candidates) {
-    if (MediaRecorder.isTypeSupported(candidate)) {
-      return candidate;
-    }
-  }
-  return 'audio/webm';
-};
-
-/**
- * Standard base audio constraints for voice profile capture.
- * Browser native echo cancellation, noise suppression, and auto gain control are disabled
- * to capture clean, uncolored, and un-clipped raw microphone input.
- */
-export const PURE_VOICE_CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
-  echoCancellation: false,
-  noiseSuppression: false,
-  autoGainControl: false,
-  channelCount: 1,
-};
-
-/**
- * Cleanly acquires a physical microphone MediaStream without virtual loops or browser audio filtering.
- */
-export const acquireCleanPhysicalStream = async (
-  selectedInputId?: string,
-  inputDevices?: InputDeviceInfo[]
-): Promise<MediaStream> => {
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-    throw new Error('navigator.mediaDevices.getUserMedia is unavailable');
-  }
-
-  let devs: MediaDeviceInfo[] = [];
-  if (navigator.mediaDevices.enumerateDevices) {
-    try {
-      devs = await navigator.mediaDevices.enumerateDevices();
-      if (devs.length > 0 && devs.every((d) => !d.label)) {
-        try {
-          const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
-          probe.getTracks().forEach((t) => t.stop());
-          devs = await navigator.mediaDevices.enumerateDevices();
-        } catch {}
-      }
-    } catch {}
-  }
-
-  const audioInputs = devs.filter((d) => d.kind === 'audioinput');
-  const physicalDev = resolvePhysicalAudioDevice(audioInputs, selectedInputId, inputDevices);
-
-  let stream: MediaStream | null = null;
-
-  if (physicalDev?.deviceId && physicalDev.deviceId !== 'default' && physicalDev.deviceId !== 'communications') {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: { exact: physicalDev.deviceId },
-          ...PURE_VOICE_CAPTURE_CONSTRAINTS,
-        },
-        video: false,
-      });
-    } catch (err) {
-      console.warn('Could not acquire microphone with deviceId.exact, trying ideal:', err);
-    }
-
-    if (!stream) {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            deviceId: physicalDev.deviceId,
-            ...PURE_VOICE_CAPTURE_CONSTRAINTS,
-          },
-          video: false,
-        });
-      } catch (err) {
-        console.warn('Could not acquire microphone with ideal deviceId:', err);
-      }
-    }
-  }
-
-  if (!stream) {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: PURE_VOICE_CAPTURE_CONSTRAINTS,
-      video: false,
-    });
-  }
-
-  return stream;
-};
-
-/**
- * Safely stops a MediaRecorder and awaits the final onstop callback to assemble complete audio chunks.
- */
-export const stopMediaRecorderAsync = (
-  recorder: MediaRecorder | null,
-  chunks: Blob[]
-): Promise<Blob | null> => {
-  return new Promise((resolve) => {
-    if (!recorder || recorder.state === 'inactive') {
-      if (chunks.length > 0) {
-        resolve(new Blob(chunks, { type: recorder?.mimeType || 'audio/webm' }));
-      } else {
-        resolve(null);
-      }
-      return;
-    }
-
-    recorder.onstop = () => {
-      if (chunks.length > 0) {
-        resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
-      } else {
-        resolve(null);
-      }
-    };
-
-    try {
-      if (typeof recorder.requestData === 'function') {
-        recorder.requestData();
-      }
-      recorder.stop();
-    } catch {
-      if (chunks.length > 0) {
-        resolve(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
-      } else {
-        resolve(null);
-      }
-    }
-  });
-};
-
-const MIN_RECORDING_SECONDS = 1.5;
-const MAX_RECORDING_SECONDS = 30;
+const MIN_RECORDING_SECONDS = MIN_RECORD_SECONDS;
+const MAX_RECORDING_SECONDS = MAX_RECORD_SECONDS;
 
 const STORAGE_ENROLLED_KEY = 'clearcore_voice_profile_enrolled';
 const STORAGE_SAMPLES_KEY = 'clearcore_voice_profile_samples';
@@ -446,7 +244,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   virtualMicPresent: _virtualMicPresent,
   inputDevices,
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   // Profile Status
   const [profileStatus, setProfileStatus] = useState<VoiceProfileStatus>({
@@ -460,7 +258,9 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   // Guided Multi-Sampling State (5 Steps)
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [isReadingMode, setIsReadingMode] = useState<boolean>(false);
-  const [completedSteps, setCompletedSteps] = useState<{ [step: number]: { audioUrl?: string; duration: number } }>({});
+  // Captured PCM stays in memory only (never persisted) so the user can hear the take before it is sent.
+  const [completedSteps, setCompletedSteps] = useState<{ [step: number]: { duration: number; captured?: CapturedPcm } }>({});
+  const [captureError, setCaptureError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   // Active Tab: 'samples' (Galeria Cumulativa) | 'intake' (Sugestões de Chamadas)
@@ -478,23 +278,19 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   // Modal for "+ Adicionar Nova Amostra"
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [modalSampleName, setModalSampleName] = useState<string>('');
-  const [modalRecordedUrl, setModalRecordedUrl] = useState<string | null>(null);
-  const [modalDuration, setModalDuration] = useState<number>(0);
+  const [modalCaptured, setModalCaptured] = useState<CapturedPcm | null>(null);
 
   // Audio Playback State
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
 
-  // Audio Recording & Web Audio references
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const vuIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Raw PCM capture (physical microphone only, no fallback) and in-memory preview playback.
+  const recorderRef = useRef<PcmRecorder | null>(null);
+  const deviceRef = useRef<DeviceInfo | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartTimeRef = useRef<number>(0);
-  const recordedChunksRef = useRef<Blob[]>([]);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
 
   // Step Question metadata definition
   const stepQuestions = [
@@ -609,194 +405,143 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     initVoiceData();
   }, []);
 
-  // Cleanup Web Audio & Recorders
+  // Stops any capture in progress and discards its PCM.
   const cleanupRecording = useCallback(() => {
-    if (animationFrameRef.current !== null) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    if (vuIntervalRef.current) {
-      clearInterval(vuIntervalRef.current);
-      vuIntervalRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
+    const recorder = recorderRef.current;
+    const device = deviceRef.current;
+    recorderRef.current = null;
+    deviceRef.current = null;
+    if (recorder && device) recorder.stop(device).catch(() => undefined);
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
     setIsRecording(false);
     setLiveVoiceLevel(0);
+  }, []);
+
+  const stopPlayback = useCallback(() => {
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current = null;
+    }
+    if (playbackCtxRef.current && playbackCtxRef.current.state !== 'closed') {
+      playbackCtxRef.current.close().catch(() => undefined);
+    }
+    playbackCtxRef.current = null;
   }, []);
 
   useEffect(() => {
     return () => {
       cleanupRecording();
-      if (audioElementRef.current) {
-        audioElementRef.current.pause();
-      }
+      stopPlayback();
     };
-  }, [cleanupRecording]);
+  }, [cleanupRecording, stopPlayback]);
 
-  // Create synthetic preview beep/tone if no native audio recorded
-  const createSyntheticAudioUrl = useCallback((durationSec: number = 5.0): string => {
-    try {
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const sampleRate = ctx.sampleRate;
-      const duration = Math.max(MIN_RECORDING_SECONDS, durationSec);
-      const totalFrames = Math.floor(sampleRate * duration);
-      const buffer = ctx.createBuffer(1, totalFrames, sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < totalFrames; i++) {
-        // Harmonic voice-like simulation (fundamental ~150Hz with harmonics)
-        const tSec = i / sampleRate;
-        const envelope = Math.sin((Math.PI * tSec) / duration);
-        const wave =
-          0.5 * Math.sin(2 * Math.PI * 150 * tSec) +
-          0.3 * Math.sin(2 * Math.PI * 300 * tSec) +
-          0.2 * Math.sin(2 * Math.PI * 450 * tSec);
-        data[i] = wave * envelope * 0.4;
-      }
-      ctx.close();
-
-      // Encode minimal WAV
-      const wavBytes = encodeWav(data, sampleRate);
-      const blob = new Blob([wavBytes], { type: 'audio/wav' });
-      return URL.createObjectURL(blob);
-    } catch {
-      return '';
-    }
-  }, []);
-
-  // Helper WAV encoder
-  function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
-    const buffer = new ArrayBuffer(44 + samples.length * 2);
-    const view = new DataView(buffer);
-    const writeString = (offset: number, string: string) => {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    };
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + samples.length * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM
-    view.setUint16(22, 1, true); // Mono
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, samples.length * 2, true);
-    let offset = 44;
-    for (let i = 0; i < samples.length; i++, offset += 2) {
-      const s = Math.max(-1, Math.min(1, samples[i]));
-      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-    }
-    return new Uint8Array(buffer);
-  }
-
-  // Start Guided Step Recording (up to MAX_RECORDING_SECONDS with manual stop)
-  const handleStartStepRecording = async (stepNum: number) => {
+  /**
+   * Opens the raw physical microphone and starts the PCM recorder. If no physical microphone
+   * opens, shows the error and does NOT start recording (spec D1: no fallback).
+   */
+  const startCapture = async (onLimit: () => void): Promise<boolean> => {
     cleanupRecording();
-    recordedChunksRef.current = [];
-    setIsRecording(true);
-    setRecordingElapsedSeconds(0);
-    recordingStartTimeRef.current = Date.now();
-
-    let stream: MediaStream | null = null;
-    let audioCtx: AudioContext | null = null;
-
+    setCaptureError(null);
+    let acquired: { stream: MediaStream; device: DeviceInfo };
     try {
-      stream = await acquireCleanPhysicalStream(selectedInputId, inputDevices);
-      mediaStreamRef.current = stream;
-
-      audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      audioContextRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const updateVuMeter = () => {
-        if (!analyserRef.current) return;
-        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-        analyserRef.current.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / dataArray.length;
-        const percent = Math.min(100, Math.round((avg / 128) * 100));
-        setLiveVoiceLevel(percent);
-        animationFrameRef.current = requestAnimationFrame(updateVuMeter);
-      };
-      updateVuMeter();
-
-      const preferredMime = getPreferredAudioMimeType();
-      const recorderOptions = preferredMime ? { mimeType: preferredMime } : undefined;
-      const recorder = new MediaRecorder(stream, recorderOptions);
-      mediaRecorderRef.current = recorder;
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          recordedChunksRef.current.push(e.data);
-        }
-      };
-      recorder.start(100);
+      acquired = await acquireRawPhysicalStream(selectedInputId, inputDevices);
     } catch (err) {
-      console.warn('Could not acquire physical microphone, using simulated VU meter fallback:', err);
-      // Fallback simulated VU meter for environments without mic permissions
-      let simLevel = 35;
-      const simInterval = setInterval(() => {
-        simLevel = Math.max(15, Math.min(95, simLevel + (Math.random() * 30 - 15)));
-        setLiveVoiceLevel(Math.round(simLevel));
-      }, 100);
-      vuIntervalRef.current = simInterval;
+      if (!(err instanceof PhysicalMicUnavailableError)) console.warn('Physical microphone capture failed');
+      setCaptureError(t('voiceProfile.physicalMicUnavailable'));
+      return false;
     }
-
-    // Elapsed timer up to MAX_RECORDING_SECONDS
+    streamRef.current = acquired.stream;
+    const recorder = new PcmRecorder({ maxSeconds: MAX_RECORDING_SECONDS });
+    try {
+      await recorder.start(acquired.stream, (level01) => setLiveVoiceLevel(Math.round(level01 * 100)));
+    } catch {
+      acquired.stream.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      setCaptureError(t('voiceProfile.physicalMicUnavailable'));
+      return false;
+    }
+    recorderRef.current = recorder;
+    deviceRef.current = acquired.device;
+    recordingStartTimeRef.current = Date.now();
+    setRecordingElapsedSeconds(0);
+    setIsRecording(true);
     const timer = setInterval(() => {
       const elapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
-      const rounded = Math.round(elapsed * 10) / 10;
-      setRecordingElapsedSeconds(rounded);
+      setRecordingElapsedSeconds(Math.round(elapsed * 10) / 10);
       if (elapsed >= MAX_RECORDING_SECONDS) {
         clearInterval(timer);
-        finishStepRecording(stepNum);
+        onLimit();
       }
     }, 100);
     timerRef.current = timer;
+    return true;
+  };
+
+  /** Stops the recorder and returns the captured PCM (null if nothing was recording). */
+  const stopCapture = async (): Promise<CapturedPcm | null> => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    const recorder = recorderRef.current;
+    const device = deviceRef.current;
+    recorderRef.current = null;
+    deviceRef.current = null;
+    streamRef.current = null;
+    setIsRecording(false);
+    setLiveVoiceLevel(0);
+    if (!recorder || !device) return null;
+    try {
+      return await recorder.stop(device);
+    } catch {
+      return null;
+    }
+  };
+
+  // Plays a captured take from memory (no blob URL, nothing written anywhere).
+  const playCaptured = (id: string, captured: CapturedPcm) => {
+    const wasPlaying = playingAudioId === id;
+    stopPlayback();
+    setPlayingAudioId(null);
+    if (wasPlaying || captured.pcm.length === 0) return;
+    try {
+      const ctx = new AudioContext({ sampleRate: captured.sampleRate });
+      const buffer = ctx.createBuffer(1, captured.pcm.length, captured.sampleRate);
+      buffer.getChannelData(0).set(captured.pcm);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      src.onended = () => {
+        if (playbackCtxRef.current === ctx) stopPlayback();
+        setPlayingAudioId((cur) => (cur === id ? null : cur));
+      };
+      playbackCtxRef.current = ctx;
+      setPlayingAudioId(id);
+      src.start();
+    } catch {
+      setPlayingAudioId(null);
+    }
+  };
+
+  // Start Guided Step Recording (up to MAX_RECORDING_SECONDS with manual stop)
+  const handleStartStepRecording = async (stepNum: number) => {
+    await startCapture(() => {
+      void finishStepRecording(stepNum);
+    });
   };
 
   const finishStepRecording = async (stepNum: number) => {
-    const rawElapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
-    const exactDuration = Math.min(
-      MAX_RECORDING_SECONDS,
-      Math.max(MIN_RECORDING_SECONDS, Math.round(rawElapsed * 10) / 10)
-    );
-
-    let finalUrl = '';
-    const blob = await stopMediaRecorderAsync(mediaRecorderRef.current, recordedChunksRef.current);
-    if (blob && blob.size > 0) {
-      finalUrl = URL.createObjectURL(blob);
-    }
-    if (!finalUrl) {
-      finalUrl = createSyntheticAudioUrl(exactDuration);
-    }
-
-    cleanupRecording();
+    const captured = await stopCapture();
+    if (!captured) return;
 
     setCompletedSteps((prev) => ({
       ...prev,
-      [stepNum]: { audioUrl: finalUrl, duration: exactDuration },
+      [stepNum]: { duration: captured.durationSec, captured },
     }));
 
     setFeedbackMessage(t('voiceProfile.sampleCompleted'));
@@ -836,8 +581,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       title: `${t(q.categoryKey)}`,
       category: t(q.categoryKey),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      durationSec: completedSteps[idx + 1]?.duration || 5.0,
-      audioUrl: completedSteps[idx + 1]?.audioUrl,
+      durationSec: completedSteps[idx + 1]?.duration ?? 0,
       isInitialStep: true,
     }));
 
@@ -874,34 +618,19 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     setCurrentStep(1);
   };
 
-  // Playback handling
+  // Playback of audio the service points to (call takes). Nothing is synthesized when absent.
   const handlePlayAudio = (id: string, audioUrl?: string) => {
-    if (playingAudioId === id) {
-      if (audioElementRef.current) {
-        audioElementRef.current.pause();
-      }
-      setPlayingAudioId(null);
-      return;
-    }
+    const wasPlaying = playingAudioId === id;
+    stopPlayback();
+    setPlayingAudioId(null);
+    if (wasPlaying || !audioUrl) return;
 
-    if (audioElementRef.current) {
-      audioElementRef.current.pause();
-    }
-
-    const urlToPlay = audioUrl || createSyntheticAudioUrl();
-    const audio = new Audio(urlToPlay);
+    const audio = new Audio(audioUrl);
     audioElementRef.current = audio;
     setPlayingAudioId(id);
-
-    audio.onended = () => {
-      setPlayingAudioId(null);
-    };
-    audio.onerror = () => {
-      setPlayingAudioId(null);
-    };
-    audio.play().catch(() => {
-      setPlayingAudioId(null);
-    });
+    audio.onended = () => setPlayingAudioId(null);
+    audio.onerror = () => setPlayingAudioId(null);
+    audio.play().catch(() => setPlayingAudioId(null));
   };
 
   // Sends the local profile (never service keys) and applies the fresh service status from the reply.
@@ -991,86 +720,15 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   };
 
   const finishModalRecording = async () => {
-    const rawElapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
-    const exactDuration = Math.min(
-      MAX_RECORDING_SECONDS,
-      Math.max(MIN_RECORDING_SECONDS, Math.round(rawElapsed * 10) / 10)
-    );
-
-    let finalUrl = '';
-    const blob = await stopMediaRecorderAsync(mediaRecorderRef.current, recordedChunksRef.current);
-    if (blob && blob.size > 0) {
-      finalUrl = URL.createObjectURL(blob);
-    }
-    if (!finalUrl) {
-      finalUrl = createSyntheticAudioUrl(exactDuration);
-    }
-
-    cleanupRecording();
-    setModalRecordedUrl(finalUrl);
-    setModalDuration(exactDuration);
+    const captured = await stopCapture();
+    if (captured) setModalCaptured(captured);
   };
 
   // Modal: Start Recording voluntary sample
   const handleStartModalRecording = async () => {
-    cleanupRecording();
-    recordedChunksRef.current = [];
-    setIsRecording(true);
-    setRecordingElapsedSeconds(0);
-    recordingStartTimeRef.current = Date.now();
-
-    try {
-      const stream = await acquireCleanPhysicalStream(selectedInputId, inputDevices);
-      mediaStreamRef.current = stream;
-
-      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      audioContextRef.current = audioCtx;
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const updateVuMeter = () => {
-        if (!analyserRef.current) return;
-        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-        analyserRef.current.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        const avg = sum / dataArray.length;
-        setLiveVoiceLevel(Math.min(100, Math.round((avg / 128) * 100)));
-        animationFrameRef.current = requestAnimationFrame(updateVuMeter);
-      };
-      updateVuMeter();
-
-      const preferredMime = getPreferredAudioMimeType();
-      const recorderOptions = preferredMime ? { mimeType: preferredMime } : undefined;
-      const recorder = new MediaRecorder(stream, recorderOptions);
-      mediaRecorderRef.current = recorder;
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
-      };
-      recorder.start(100);
-    } catch (err) {
-      console.warn('Could not acquire physical microphone for modal recording, using simulated fallback:', err);
-      let simLevel = 35;
-      const simInterval = setInterval(() => {
-        simLevel = Math.max(15, Math.min(95, simLevel + (Math.random() * 30 - 15)));
-        setLiveVoiceLevel(Math.round(simLevel));
-      }, 100);
-      vuIntervalRef.current = simInterval;
-    }
-
-    const timer = setInterval(() => {
-      const elapsed = (Date.now() - recordingStartTimeRef.current) / 1000;
-      const rounded = Math.round(elapsed * 10) / 10;
-      setRecordingElapsedSeconds(rounded);
-      if (elapsed >= MAX_RECORDING_SECONDS) {
-        clearInterval(timer);
-        finishModalRecording();
-      }
-    }, 100);
-    timerRef.current = timer;
+    await startCapture(() => {
+      void finishModalRecording();
+    });
   };
 
   // Modal: Save Voluntary Sample to Gallery
@@ -1081,8 +739,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       title: sampleTitle,
       category: 'Adição Voluntária',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      durationSec: modalDuration,
-      audioUrl: modalRecordedUrl || undefined,
+      durationSec: modalCaptured?.durationSec ?? 0,
     };
 
     const updated = [newSample, ...samples];
@@ -1104,7 +761,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
     setIsModalOpen(false);
     setModalSampleName('');
-    setModalRecordedUrl(null);
+    setModalCaptured(null);
     setFeedbackMessage(t('voiceProfile.sampleCompleted'));
     setTimeout(() => setFeedbackMessage(null), 3500);
   };
@@ -1273,6 +930,12 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             </div>
           </div>
 
+          {captureError && !isModalOpen && (
+            <div role="alert" className="feedback-banner" style={{ color: '#f87171', marginBottom: 10 }}>
+              {captureError}
+            </div>
+          )}
+
           {/* Action Row for the Step */}
           <div className="stepper-action-row">
             {!isRecording ? (
@@ -1280,7 +943,11 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <button
                     className="action-btn play-sample-btn"
-                    onClick={() => handlePlayAudio(`step-${currentStep}`, completedSteps[currentStep].audioUrl)}
+                    disabled={!completedSteps[currentStep].captured}
+                    onClick={() => {
+                      const c = completedSteps[currentStep].captured;
+                      if (c) playCaptured(`step-${currentStep}`, c);
+                    }}
                   >
                     {playingAudioId === `step-${currentStep}` ? t('voiceProfile.stopSample') : t('voiceProfile.playSample')}
                   </button>
@@ -1313,7 +980,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                   <span className="recording-pulsing-dot" />
                   <span style={{ fontWeight: 600, color: '#f87171' }}>
                     {t('voiceProfile.recordingStatus', {
-                      elapsed: recordingElapsedSeconds.toFixed(1),
+                      elapsed: formatSecondsForLocale(recordingElapsedSeconds, locale),
                       max: String(MAX_RECORDING_SECONDS),
                     })}
                   </span>
@@ -1328,7 +995,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                   onClick={() => finishStepRecording(currentStep)}
                   title={
                     recordingElapsedSeconds < MIN_RECORDING_SECONDS
-                      ? `Mínimo de ${MIN_RECORDING_SECONDS}s`
+                      ? t('voiceProfile.minRecordingTitle', { min: formatSecondsForLocale(MIN_RECORDING_SECONDS, locale) })
                       : t('voiceProfile.stopRecordingBtn')
                   }
                 >
@@ -1517,13 +1184,19 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
               </div>
             </div>
 
+            {captureError && (
+              <div role="alert" className="feedback-banner" style={{ color: '#f87171', marginBottom: 12 }}>
+                {captureError}
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
               {!isRecording ? (
                 <button
                   className="record-btn-trigger"
                   onClick={handleStartModalRecording}
                 >
-                  🎙️ {modalRecordedUrl ? t('voiceProfile.redoSample') : t('voiceProfile.recordSample')}
+                  🎙️ {modalCaptured ? t('voiceProfile.redoSample') : t('voiceProfile.recordSample')}
                 </button>
               ) : (
                 <div className="recording-active-container">
@@ -1531,7 +1204,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                     <span className="recording-pulsing-dot" />
                     <span style={{ fontWeight: 600, color: '#f87171' }}>
                       {t('voiceProfile.recordingStatus', {
-                        elapsed: recordingElapsedSeconds.toFixed(1),
+                        elapsed: formatSecondsForLocale(recordingElapsedSeconds, locale),
                         max: String(MAX_RECORDING_SECONDS),
                       })}
                     </span>
@@ -1543,7 +1216,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                     onClick={finishModalRecording}
                     title={
                       recordingElapsedSeconds < MIN_RECORDING_SECONDS
-                        ? `Mínimo de ${MIN_RECORDING_SECONDS}s`
+                        ? t('voiceProfile.minRecordingTitle', { min: formatSecondsForLocale(MIN_RECORDING_SECONDS, locale) })
                         : t('voiceProfile.stopRecordingBtn')
                     }
                   >
@@ -1553,16 +1226,16 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
               )}
             </div>
 
-            {modalRecordedUrl && !isRecording && (
+            {modalCaptured && !isRecording && (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <button
                   className="action-btn"
-                  onClick={() => handlePlayAudio('modal-preview', modalRecordedUrl)}
+                  onClick={() => playCaptured('modal-preview', modalCaptured)}
                 >
                   {playingAudioId === 'modal-preview' ? t('voiceProfile.stopSample') : t('voiceProfile.playSample')}
                 </button>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  ({modalDuration.toFixed(1)}s)
+                  {t('voiceProfile.recordedDuration', { sec: formatSecondsForLocale(modalCaptured.durationSec, locale) })}
                 </span>
               </div>
             )}
@@ -1572,15 +1245,17 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                 className="action-btn"
                 onClick={() => {
                   cleanupRecording();
+                  stopPlayback();
                   setIsModalOpen(false);
-                  setModalRecordedUrl(null);
+                  setModalCaptured(null);
+                  setCaptureError(null);
                 }}
               >
                 {t('voiceProfile.modalCancel')}
               </button>
               <button
                 className="action-btn primary-next-btn"
-                disabled={!modalRecordedUrl}
+                disabled={!modalCaptured}
                 onClick={handleSaveModalSample}
               >
                 {t('voiceProfile.modalSave')}

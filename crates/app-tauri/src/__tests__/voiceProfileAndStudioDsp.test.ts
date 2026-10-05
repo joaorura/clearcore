@@ -5,9 +5,6 @@ import type { StudioPreset, VoiceSample, CallSuggestionTake, VoiceProfileStatus,
 import {
   isVirtualOrLoopbackAudioDevice,
   resolvePhysicalAudioDevice,
-  getPreferredAudioMimeType,
-  PURE_VOICE_CAPTURE_CONSTRAINTS,
-  stopMediaRecorderAsync,
 } from '../VoiceProfileCard';
 
 describe('Voice Profile & Speaker Isolation UI Specs', () => {
@@ -256,29 +253,14 @@ describe('Voice Profile Microphone Capture & Audio Anti-Loopback Specs', () => {
     expect(['chromium-uuid-physical-yeti', 'chromium-uuid-internal-mic']).toContain(fallback?.deviceId);
   });
 
-  it('guarantees pure uncolored voice capture constraints without native browser noise processing', () => {
-    expect(PURE_VOICE_CAPTURE_CONSTRAINTS.echoCancellation).toBe(false);
-    expect(PURE_VOICE_CAPTURE_CONSTRAINTS.noiseSuppression).toBe(false);
-    expect(PURE_VOICE_CAPTURE_CONSTRAINTS.autoGainControl).toBe(false);
-    expect(PURE_VOICE_CAPTURE_CONSTRAINTS.channelCount).toBe(1);
-  });
-
-  it('provides supported audio mime type and handles async recorder stop', async () => {
-    const mime = getPreferredAudioMimeType();
-    expect(typeof mime).toBe('string');
-    expect(mime.length).toBeGreaterThan(0);
-
-    // Test stopMediaRecorderAsync with inactive recorder
-    const mockRecorder = {
-      state: 'inactive',
-      mimeType: 'audio/webm',
-      stop: () => {},
-    } as unknown as MediaRecorder;
-
-    const chunks = [new Blob(['test-audio'], { type: 'audio/webm' })];
-    const blob = await stopMediaRecorderAsync(mockRecorder, chunks);
-    expect(blob).toBeInstanceOf(Blob);
-    expect(blob?.size).toBeGreaterThan(0);
+  it('re-exports the capture helpers of voice/captureDevice and no longer exposes MediaRecorder helpers', async () => {
+    const card = await import('../VoiceProfileCard');
+    const capture = await import('../voice/captureDevice');
+    expect(card.isVirtualOrLoopbackAudioDevice).toBe(capture.isVirtualOrLoopbackAudioDevice);
+    expect(card.resolvePhysicalAudioDevice).toBe(capture.resolvePhysicalAudioDevice);
+    // Raw PCM capture (processing off, no fallback) is covered in voice/__tests__/capture.test.ts.
+    for (const gone of ['getPreferredAudioMimeType', 'PURE_VOICE_CAPTURE_CONSTRAINTS', 'stopMediaRecorderAsync', 'acquireCleanPhysicalStream']) {
+      expect(gone in card, gone).toBe(false);
+    }
   });
 });
-
