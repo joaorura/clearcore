@@ -95,8 +95,12 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   sampleListRef.current = sampleList;
   const beforeSend = (captured: Parameters<typeof confirmDeviceSwitchBeforeSend>[1]) => {
     const list = sampleListRef.current;
-    return confirmDeviceSwitchBeforeSend(list?.selectedDeviceIdHash ?? null, captured, () =>
-      deviceSwitch.ask({ newLabel: captured.device.label, oldLabel: list?.selectedDeviceLabel ?? '' }));
+    return confirmDeviceSwitchBeforeSend(
+      list?.selectedDeviceIdHash ?? null,
+      captured,
+      () => deviceSwitch.ask({ newLabel: captured.device.label, oldLabel: list?.selectedDeviceLabel ?? '' }),
+      list?.selectedDeviceLabel ?? null,
+    );
   };
   const rec = useEnrollmentRecorder({ selectedInputId, inputDevices, t, jobs, refreshSamples, beforeSend });
   const { isRecording, isStarting, recordingElapsedSeconds, liveVoiceLevel, captureError } = rec;

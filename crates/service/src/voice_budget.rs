@@ -30,9 +30,25 @@ pub fn selected_device_hash(samples: &[VoiceSample]) -> Option<String> {
 
 #[must_use]
 pub fn budget_for(samples: &[VoiceSample], device_hash: &str) -> Budget {
-    let used: f32 = samples
+    let target_label = samples
         .iter()
         .filter(|s| s.is_active && s.device_id_hash == device_hash && s.audio_path.is_some())
+        .max_by_key(|s| s.timestamp.parse::<u64>().unwrap_or(0))
+        .map(|s| s.device_label.trim().to_ascii_lowercase());
+
+    let used: f32 = samples
+        .iter()
+        .filter(|s| {
+            s.is_active
+                && s.audio_path.is_some()
+                && (s.device_id_hash == device_hash
+                    || match &target_label {
+                        Some(lbl) if !lbl.is_empty() => {
+                            s.device_label.trim().to_ascii_lowercase() == *lbl
+                        }
+                        _ => false,
+                    })
+        })
         .map(|s| {
             let v = s.speech_seconds;
             if v.is_finite() && v > 0.0 { v } else { 0.0 }

@@ -124,7 +124,8 @@ export async function acquireRawPhysicalStream(
   const viaAlias = isAlias(physical.deviceId);
 
   // Computed before opening so a failure here cannot leave an open stream behind.
-  const idHash = await sha256Hex(`${physical.deviceId}|${physical.groupId}`);
+  const cleanPreLabel = (physical.label || '').trim().toLowerCase();
+  const preHash = await sha256Hex(cleanPreLabel.length > 0 ? `mic:${cleanPreLabel}` : `${physical.deviceId}|${physical.groupId}`);
 
   let stream: MediaStream;
   try {
@@ -153,7 +154,15 @@ export async function acquireRawPhysicalStream(
         throw new PhysicalMicUnavailableError('Default device resolves to a virtual or loopback source');
       }
       label = track?.label || label;
+    } else if (!label && track?.label) {
+      label = track.label;
     }
+    const cleanLabel = (label || physical.label || '').trim().toLowerCase();
+    // A stable hash of the physical device identifier: the normalized OS hardware label is persistent
+    // across Chromium reloads and sessions, unlike ephemeral WebRTC deviceId/groupId.
+    const idHash = cleanLabel.length > 0 && cleanLabel !== cleanPreLabel
+      ? await sha256Hex(`mic:${cleanLabel}`)
+      : preHash;
     return { stream, device: { label: label.slice(0, 128), idHash } };
   } catch (err) {
     stopAll(stream);

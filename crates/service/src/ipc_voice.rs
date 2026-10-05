@@ -936,10 +936,26 @@ impl ServiceDaemon {
         let Some(device) = selected_device_hash(samples) else {
             return enroll_error(REQUEST_ID, &EnrollError::TooLittleSpeech);
         };
-        let mut group: Vec<(u64, usize, &VoiceSample)> = samples
+        let selected_label = samples
             .iter()
             .enumerate()
             .filter(|(_, s)| s.is_active && s.audio_path.is_some() && s.device_id_hash == device)
+            .max_by_key(|(i, s)| (s.timestamp.parse::<u64>().unwrap_or(0), *i))
+            .map(|(_, s)| s.device_label.trim().to_ascii_lowercase());
+        let mut group: Vec<(u64, usize, &VoiceSample)> = samples
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                s.is_active
+                    && s.audio_path.is_some()
+                    && (s.device_id_hash == device
+                        || match selected_label.as_ref() {
+                            Some(lbl) if !lbl.is_empty() => {
+                                s.device_label.trim().to_ascii_lowercase() == *lbl
+                            }
+                            _ => false,
+                        })
+            })
             .map(|(i, s)| (s.timestamp.parse::<u64>().unwrap_or(0), i, s))
             .collect();
         group.sort_by_key(|(ts, i, _)| (*ts, *i));
@@ -1010,10 +1026,32 @@ impl ServiceDaemon {
     pub(crate) fn list_voice_samples(&self) -> IpcResponse {
         let samples = self.voice_samples.list_samples();
         let selected = selected_device_hash(samples);
+        // Label of the most recent eligible sample of the selected group (same ordering as
+        // `selected_device_hash`), so the UI can warn before another microphone switches it.
+        let selected_label = selected.as_deref().and_then(|device| {
+            samples
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| {
+                    s.is_active && s.audio_path.is_some() && s.device_id_hash == device
+                })
+                .max_by_key(|(i, s)| (s.timestamp.parse::<u64>().unwrap_or(0), *i))
+                .map(|(_, s)| s.device_label.clone())
+        });
+        let target_label_norm = selected_label
+            .as_ref()
+            .map(|l| l.trim().to_ascii_lowercase());
         let items: Vec<Value> = samples
             .iter()
             .map(|s| {
-                let in_group = selected.as_deref() == Some(s.device_id_hash.as_str());
+                let in_group = match (selected.as_deref(), target_label_norm.as_ref()) {
+                    (Some(sel_hash), Some(lbl)) if !lbl.is_empty() => {
+                        s.device_id_hash == sel_hash
+                            || s.device_label.trim().to_ascii_lowercase() == *lbl
+                    }
+                    (Some(sel_hash), _) => s.device_id_hash == sel_hash,
+                    _ => false,
+                };
                 json!({
                     "id": s.id,
                     "name": s.name,
@@ -1029,18 +1067,6 @@ impl ServiceDaemon {
             })
             .collect();
         let budget = budget_for(samples, selected.as_deref().unwrap_or_default());
-        // Label of the most recent eligible sample of the selected group (same ordering as
-        // `selected_device_hash`), so the UI can warn before another microphone switches it.
-        let selected_label = selected.as_deref().and_then(|device| {
-            samples
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| {
-                    s.is_active && s.audio_path.is_some() && s.device_id_hash == device
-                })
-                .max_by_key(|(i, s)| (s.timestamp.parse::<u64>().unwrap_or(0), *i))
-                .map(|(_, s)| s.device_label.clone())
-        });
         IpcResponse::success(
             "list-voice-samples-resp",
             json!({

@@ -56,6 +56,9 @@ export function useGuidedSteps(opts: {
       return take ? { ...prev, [step]: take } : prev;
     });
     flash(t('voiceProfile.sampleCompleted'), 3500);
+    if (step < GUIDED_STEP_COUNT) {
+      setCurrentStep(step + 1);
+    }
     // Known limit: the new sample is added BEFORE the old one is deleted, so the old one still
     // counts against the 90 s budget while the new one is checked. With the budget almost full,
     // the new take is refused with ENROLL_BUDGET_EXCEEDED: safe (nothing is lost, the old sample
