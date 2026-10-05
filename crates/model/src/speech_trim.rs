@@ -114,6 +114,8 @@ pub fn active_rms_dbfs(samples: &[f32], sample_rate: u32) -> f32 {
     (10.0 * (sum / count as f64 + 1e-12).log10()) as f32
 }
 
+/// Applies gain with clamping to maximum absolute value.
+///
 /// Multiply by `10^(gain_db/20)` with `gain_db` clamped to `±max_abs_db` (a negative
 /// `max_abs_db` is used as its absolute value). If `gain_db` or `max_abs_db` is not finite, no
 /// gain is applied and the input is returned unchanged. Peak headroom is not considered: the
