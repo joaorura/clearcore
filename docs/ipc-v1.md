@@ -155,7 +155,7 @@ Returns the backend to the neutral voice and removes the stored profile. Idempot
 
 Status: **development-integrated.** The pipeline runs on the service backend, but the packaged virtual microphone (`filter-capi` / helper) does not apply the profile yet, and there is no claim of improved isolation. The enrollment model is a development asset (section 3.1.6), not a distributed one.
 
-Overview: the app sends a recording with `AddVoiceSample`; the service denoises it with the base DFNet3 in memory, measures its quality, stores the **denoised** WAV (16-bit, 48 kHz, mono) and answers through a job. `BuildVoiceProfile` then joins the active samples of one microphone into a profile and applies it through the `SetVoiceProfile` transaction. Raw audio is never written to disk.
+Overview: the app sends a recording with `AddVoiceSample`; the service denoises it with the base DFNet3 in memory, measures its quality, stores the **denoised** WAV (16-bit, 48 kHz, mono) and answers through a job. `BuildVoiceProfile` then joins the active samples of one microphone into a profile and applies it through the `SetVoiceProfile` transaction. The service never writes raw audio to disk (section 3.1.8).
 
 #### 3.1.1 `AddVoiceSample`
 Stores one recording as a gallery sample. Replaces the previous embedding-carrying form.
@@ -282,7 +282,8 @@ The enrollment model is loaded only when both environment variables are set for 
 The hash is checked over the whole file and only an allowlisted archive member (`enrollment.onnx`) is read. Without a valid configuration (variables unset, archive missing, unreadable or oversized, or a hash mismatch), `BuildVoiceProfile` jobs fail with `ENROLL_MODEL_NOT_CONFIGURED`; sample ingestion does not need the model. The asset is not pinned in the registry, not signed and not distributed. Denoising uses the approved base DFNet3. Scope: development-integrated; the packaged virtual microphone does not apply the profile yet, and no improvement of voice isolation is claimed.
 
 #### 3.1.8 Privacy
-- Raw PCM exists only in memory and is zeroed after denoising; **raw audio never goes to disk**. The stored WAV is the **denoised** one.
+- Raw PCM exists only in memory and is zeroed after denoising; **the service never writes raw audio to disk**. The stored WAV is the **denoised** one.
+- Core dumps of the service are disabled in the supported launches (they would copy the in-memory PCM to disk): the systemd user unit sets `LimitCORE=0`, and the Electron app, `start-realtime-noise.sh` and `dev.sh` start the daemon with `RLIMIT_CORE=0` (`prlimit --core=0`, or `ulimit -c 0` where `prlimit` is missing). A daemon started by hand, or a system-wide crash handler that overrides the limit, is outside this guarantee.
 - WAVs (`samples/<sample-id>.wav`), the sample manifest and profiles are created with mode `0600` in directories `0700`; symlinks are refused.
 - Voice samples, WAVs and profiles are excluded from diagnostics and logs, and are deleted with their sample or when the profile is cleared.
 

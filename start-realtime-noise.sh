@@ -43,8 +43,14 @@ if systemctl --user is-enabled realtime-noise.service >/dev/null 2>&1 || [[ -f "
     fi
 fi
 
-# Fallback: Run daemon in background via nohup
-nohup "${BIN_PATH}" --run > /tmp/realtime-noise-service.log 2>&1 &
+# Fallback: Run daemon in background via nohup, with core dumps disabled (the daemon holds
+# raw PCM in memory during voice enrollment; the systemd unit sets LimitCORE=0 itself).
+if command -v prlimit >/dev/null 2>&1; then
+    NO_CORE=(prlimit --core=0 --)
+else
+    NO_CORE=(sh -c 'ulimit -c 0; exec "$0" "$@"')
+fi
+nohup "${NO_CORE[@]}" "${BIN_PATH}" --run > /tmp/realtime-noise-service.log 2>&1 &
 SERVICE_PID=$!
 disown "${SERVICE_PID}" 2>/dev/null || true
 

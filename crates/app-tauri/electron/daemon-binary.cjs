@@ -75,4 +75,24 @@ function isDevModeArgv(argv) {
   return Array.isArray(argv) && argv.includes('--dev');
 }
 
-module.exports = { isDevModeArgv, daemonBinaryCandidates, pickDaemonBinary, shouldReplaceExistingDaemon };
+const PRLIMIT_PATHS = ['/usr/bin/prlimit', '/bin/prlimit'];
+
+/**
+ * Comando para iniciar o daemon com core dump desligado (RLIMIT_CORE=0): durante o cadastro
+ * de voz ele segura PCM cru em memória, e um core dump o levaria ao disco.
+ * - Linux com prlimit: `prlimit --core=0 -- <bin> <args>` (prlimit faz exec: mesmo PID).
+ * - Outro POSIX: `/bin/sh -c 'ulimit -c 0; exec "$0" "$@"' <bin> <args>` (caminho e argumentos
+ *   chegam como $0/$@, nunca interpolados no script).
+ * - Windows: sem wrapper (não há RLIMIT_CORE).
+ */
+function noCoreDumpSpawn(bin, args, { platform = process.platform, exists = fs.existsSync } = {}) {
+  const rest = Array.isArray(args) ? [...args] : [];
+  if (platform === 'win32') return { command: bin, args: rest };
+  if (platform === 'linux') {
+    const prlimit = PRLIMIT_PATHS.find((p) => exists(p));
+    if (prlimit) return { command: prlimit, args: ['--core=0', '--', bin, ...rest] };
+  }
+  return { command: '/bin/sh', args: ['-c', 'ulimit -c 0; exec "$0" "$@"', bin, ...rest] };
+}
+
+module.exports = { isDevModeArgv, daemonBinaryCandidates, pickDaemonBinary, shouldReplaceExistingDaemon, noCoreDumpSpawn };

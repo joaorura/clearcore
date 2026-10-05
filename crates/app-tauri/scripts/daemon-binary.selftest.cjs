@@ -7,6 +7,7 @@ const {
   pickDaemonBinary,
   shouldReplaceExistingDaemon,
   isDevModeArgv,
+  noCoreDumpSpawn,
 } = require('../electron/daemon-binary.cjs');
 
 const base = {
@@ -88,5 +89,18 @@ assert.strictEqual(shouldReplaceExistingDaemon({ env: { CLEARCORE_DEV_OWN_DAEMON
 
 assert.strictEqual(isDevModeArgv(['electron', 'electron/main.cjs', '--dev']), true);
 assert.strictEqual(isDevModeArgv(['electron', 'electron/main.cjs']), false);
+
+// core dump desligado: o daemon segura PCM cru em memória durante o cadastro de voz
+const withPrlimit = noCoreDumpSpawn('/b/svc', ['--run'], { platform: 'linux', exists: (p) => p === '/usr/bin/prlimit' });
+assert.deepStrictEqual(withPrlimit, { command: '/usr/bin/prlimit', args: ['--core=0', '--', '/b/svc', '--run'] });
+const viaSh = noCoreDumpSpawn('/b/a b/svc', ['--run'], { platform: 'darwin', exists: () => false });
+assert.strictEqual(viaSh.command, '/bin/sh');
+// O caminho e os argumentos vão como $0/$@ (nunca interpolados no script).
+assert.deepStrictEqual(viaSh.args, ['-c', 'ulimit -c 0; exec "$0" "$@"', '/b/a b/svc', '--run']);
+assert.deepStrictEqual(noCoreDumpSpawn('C:\\svc.exe', ['--run'], { platform: 'win32', exists: () => true }), { command: 'C:\\svc.exe', args: ['--run'] });
+// Os argumentos de entrada não são alterados.
+const inArgs = ['--run'];
+noCoreDumpSpawn('/b/svc', inArgs, { platform: 'linux', exists: () => false });
+assert.deepStrictEqual(inArgs, ['--run']);
 
 console.log('daemon-binary selftest OK');

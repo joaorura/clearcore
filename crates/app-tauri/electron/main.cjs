@@ -136,7 +136,7 @@ function sendIpcRequest(command, payload = {}, timeoutMs = 3000) {
   });
 }
 
-const { pickDaemonBinary, shouldReplaceExistingDaemon, isDevModeArgv } = require('./daemon-binary.cjs');
+const { pickDaemonBinary, shouldReplaceExistingDaemon, isDevModeArgv, noCoreDumpSpawn } = require('./daemon-binary.cjs');
 
 // Sidecar Daemon Discovery & Supervision
 function findDaemonBinaryPath() {
@@ -214,7 +214,9 @@ async function ensureDaemonRunning() {
     const logFile = path.join(userData, 'service.log');
     const logFd = fs.openSync(logFile, 'a');
 
-    daemonChildProcess = spawn(daemonBin, ['--run'], {
+    // Core dump desligado: o daemon segura PCM cru em memória durante o cadastro de voz.
+    const launch = noCoreDumpSpawn(daemonBin, ['--run']);
+    daemonChildProcess = spawn(launch.command, launch.args, {
       detached: false,
       stdio: ['ignore', logFd, logFd],
       windowsHide: true,

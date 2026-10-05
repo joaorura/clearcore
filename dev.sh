@@ -19,6 +19,11 @@ fi
 export CLEARCORE_DAEMON_BIN="${SCRIPT_DIR}/target/debug/realtime-noise-service"
 export CLEARCORE_DEV_OWN_DAEMON=1
 
+# Core dump desligado neste shell e em tudo que ele inicia (Electron e o daemon, que
+# segura PCM cru em memória durante o cadastro de voz). O Electron também aplica
+# RLIMIT_CORE=0 ao iniciar o daemon.
+ulimit -c 0
+
 # Rede de segurança (crash do Electron): encerra só o daemon deste worktree.
 # O padrão é regex ancorado, com o caminho escapado.
 # Limitação: o npm roda em primeiro plano (sem exec, para o trap rodar; em
