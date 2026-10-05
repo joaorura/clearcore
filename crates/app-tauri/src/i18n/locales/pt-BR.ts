@@ -326,6 +326,7 @@ export const ptBR: Translations = {
         ENROLL_INVALID_AUDIO: 'O áudio capturado é inválido.',
         ENROLL_PAYLOAD_TOO_LARGE: 'A gravação é grande demais para ser enviada.',
         ENROLL_JOB_NOT_FOUND: 'O serviço não encontrou o processamento (talvez tenha reiniciado).',
+        ENROLL_BUSY: 'O serviço está ocupado processando outro áudio. Aguarde alguns segundos e tente de novo.',
         ENROLL_FAILED: 'O serviço não conseguiu processar o áudio.',
         SERVICE_UNAVAILABLE: 'O serviço não está acessível.',
         UNKNOWN: 'Erro desconhecido.',

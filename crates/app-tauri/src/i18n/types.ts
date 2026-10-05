@@ -324,6 +324,7 @@ export interface Translations {
         ENROLL_INVALID_AUDIO: string;
         ENROLL_PAYLOAD_TOO_LARGE: string;
         ENROLL_JOB_NOT_FOUND: string;
+        ENROLL_BUSY: string;
         ENROLL_FAILED: string;
         SERVICE_UNAVAILABLE: string;
         UNKNOWN: string;

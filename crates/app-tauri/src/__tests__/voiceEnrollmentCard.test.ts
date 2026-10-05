@@ -29,7 +29,7 @@ const strictT = (translations: unknown) => (path: string): string => getNested(t
 const ERROR_CODES: Array<EnrollErrorCode | 'UNKNOWN'> = [
   'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE',
-  'ENROLL_JOB_NOT_FOUND', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'UNKNOWN',
+  'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'UNKNOWN',
 ];
 
 const LABEL_KEYS: Array<Exclude<keyof EnrollmentLabels, 'errors'>> = [
@@ -68,6 +68,15 @@ describe('buildEnrollmentLabels', () => {
     expect(labels.budgetExceededBody).toBe('Restam {remaining} s. Apague algum áudio da galeria para adicionar este.');
     expect(labels.otherMicrophone).toBe('Outro microfone (não usado)');
     expect(labels.needsReenroll).toBe('Regravar');
+    expect(labels.errors.ENROLL_BUSY).toBe('O serviço está ocupado processando outro áudio. Aguarde alguns segundos e tente de novo.');
+  });
+
+  it('gives ENROLL_BUSY its own label, distinct from the generic failure', () => {
+    for (const translations of [ptBR, enUS]) {
+      const labels = buildEnrollmentLabels(strictT(translations));
+      expect(labels.errors.ENROLL_BUSY).not.toBe(labels.errors.ENROLL_FAILED);
+    }
+    expect(buildEnrollmentLabels(strictT(enUS)).errors.ENROLL_BUSY).toBe('The service is busy with another recording. Wait a few seconds and try again.');
   });
 });
 

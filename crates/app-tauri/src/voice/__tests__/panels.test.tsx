@@ -19,7 +19,7 @@ const LABEL_KEYS = ['budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', '
   'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply', 'jobDone', 'jobFailed',
   'devModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech'];
 const ERROR_CODES = ['ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
-  'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE', 'ENROLL_JOB_NOT_FOUND', 'ENROLL_FAILED',
+  'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE', 'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED',
   'SERVICE_UNAVAILABLE', 'UNKNOWN'];
 const labels = {
   ...Object.fromEntries(LABEL_KEYS.map((k) => [k, k])),

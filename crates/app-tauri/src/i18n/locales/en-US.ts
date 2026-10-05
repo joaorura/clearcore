@@ -326,6 +326,7 @@ export const enUS: Translations = {
         ENROLL_INVALID_AUDIO: 'The captured audio is invalid.',
         ENROLL_PAYLOAD_TOO_LARGE: 'The recording is too large to send.',
         ENROLL_JOB_NOT_FOUND: 'The service could not find the processing job (it may have restarted).',
+        ENROLL_BUSY: 'The service is busy with another recording. Wait a few seconds and try again.',
         ENROLL_FAILED: 'The service could not process the audio.',
         SERVICE_UNAVAILABLE: 'The service is not reachable.',
         UNKNOWN: 'Unknown error.',

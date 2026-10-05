@@ -2,13 +2,17 @@ import { it, expect } from 'vitest';
 import { enrollmentErrorCode, isBudgetError, errorLabel } from '../enrollmentErrors';
 import type { EnrollmentLabels, EnrollErrorCode } from '../enrollmentTypes';
 
-const codes: Array<EnrollErrorCode | 'UNKNOWN'> = ['ENROLL_CLIPPING','ENROLL_TOO_QUIET','ENROLL_TOO_LITTLE_SPEECH','ENROLL_MODEL_NOT_CONFIGURED','ENROLL_BUDGET_EXCEEDED','ENROLL_INVALID_AUDIO','ENROLL_PAYLOAD_TOO_LARGE','ENROLL_JOB_NOT_FOUND','ENROLL_FAILED','SERVICE_UNAVAILABLE','UNKNOWN'];
+const codes: Array<EnrollErrorCode | 'UNKNOWN'> = ['ENROLL_CLIPPING','ENROLL_TOO_QUIET','ENROLL_TOO_LITTLE_SPEECH','ENROLL_MODEL_NOT_CONFIGURED','ENROLL_BUDGET_EXCEEDED','ENROLL_INVALID_AUDIO','ENROLL_PAYLOAD_TOO_LARGE','ENROLL_JOB_NOT_FOUND','ENROLL_BUSY','ENROLL_FAILED','SERVICE_UNAVAILABLE','UNKNOWN'];
 const labels = { errors: Object.fromEntries(codes.map((c) => [c, `label:${c}`])) } as unknown as EnrollmentLabels;
 
 it('unknown service codes never leak as text', () => {
   expect(enrollmentErrorCode({ errorCode: 'ENROLL_BUDGET_EXCEEDED' })).toBe('ENROLL_BUDGET_EXCEEDED');
   expect(enrollmentErrorCode({ errorCode: 'something <script>' })).toBe('ENROLL_FAILED');
   expect(enrollmentErrorCode({ ok: true })).toBeNull();
+});
+it('keeps ENROLL_BUSY (two jobs already running) as its own code', () => {
+  expect(enrollmentErrorCode({ errorCode: 'ENROLL_BUSY' })).toBe('ENROLL_BUSY');
+  expect(enrollmentErrorCode({ state: 'failed', errorCode: 'ENROLL_BUSY' })).toBe('ENROLL_BUSY');
 });
 it('reads the errorCode of a failed job and ignores null/non-objects', () => {
   expect(enrollmentErrorCode({ state: 'failed', errorCode: 'ENROLL_TOO_QUIET' })).toBe('ENROLL_TOO_QUIET');

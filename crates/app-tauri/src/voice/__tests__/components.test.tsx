@@ -10,7 +10,7 @@ import { DevModelNotice } from '../DevModelNotice';
 const codes: Array<EnrollErrorCode | 'UNKNOWN'> = [
   'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE',
-  'ENROLL_JOB_NOT_FOUND', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'UNKNOWN',
+  'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'UNKNOWN',
 ];
 function makeLabels(): EnrollmentLabels {
   const l: Record<string, unknown> = {};
