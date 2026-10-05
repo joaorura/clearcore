@@ -1,6 +1,4 @@
 //! Owned by task S3; see docs/superpowers/plans/2026-10-05-voice-enrollment-pipeline-service.md
-// removed when Task S6 wires the module
-#![allow(dead_code)]
 
 use crate::voice_samples::{SAMPLES_FILE_NAME, VoiceSampleManager, is_valid_sample_id};
 use std::fmt;

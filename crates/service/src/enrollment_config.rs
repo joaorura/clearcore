@@ -1,6 +1,4 @@
 //! Owned by task S2; see docs/superpowers/plans/2026-10-05-voice-enrollment-pipeline-service.md
-#![allow(dead_code)]
-// removed when Task S6 wires the module
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -59,8 +57,6 @@ impl EnrollmentConfig {
     /// Constructs from environment variables.
     /// Uses `std::env::var_os` for the asset path (handles non-UTF8 gracefully)
     /// and `std::env::var` for the SHA256.
-    #[allow(dead_code)]
-    // removed when Task S6 wires the module
     #[must_use]
     pub fn from_env() -> Self {
         let archive_path = std::env::var_os(ENV_ASSET)

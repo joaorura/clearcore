@@ -21,6 +21,8 @@ mod voice_storage_migration;
 
 pub use enrollment_error::EnrollError;
 pub use enrollment_ingest::Denoiser;
+#[doc(hidden)]
+pub use ipc_voice::{DenoiserFactory, EnrollmentHooks, ModelFactory};
 
 pub use voice_intake::{IntakeTake, VoiceIntakeEngine, VoiceIntakeError};
 pub use voice_samples::{
@@ -28,7 +30,9 @@ pub use voice_samples::{
     VoiceSampleError, VoiceSampleManager,
 };
 
-use realtime_noise_ipc::enrollment_codes::{ENROLL_PAYLOAD_TOO_LARGE, MAX_REQUEST_LINE_BYTES};
+use realtime_noise_ipc::enrollment_codes::{
+    ENROLL_FAILED, ENROLL_PAYLOAD_TOO_LARGE, MAX_REQUEST_LINE_BYTES,
+};
 use realtime_noise_ipc::line_limit::{LineRead, is_invalid_utf8, read_line_limited};
 use realtime_noise_ipc::{IpcCommand, IpcResponse, IpcServer, IpcStatus};
 use realtime_noise_model::{ProfileStore, VoiceProfile};
@@ -56,6 +60,8 @@ pub struct ServiceDaemon {
     settings_path: Option<PathBuf>,
     model_dir: Option<PathBuf>,
     repo_root: Option<PathBuf>,
+    /// Enrollment jobs, seams and the legacy-migration source (see `ipc_voice`).
+    enrollment: ipc_voice::EnrollmentState,
 }
 
 /// Generic messages only: voice profiles are biometric data and neither their content nor the
@@ -88,6 +94,7 @@ impl ServiceDaemon {
         let default_dir = VoiceSampleManager::default_dir();
         let voice_samples = VoiceSampleManager::load(&default_dir)
             .unwrap_or_else(|_| VoiceSampleManager::new(&default_dir));
+        let default_dir_for_migration = default_dir.clone();
         let voice_intake = VoiceIntakeEngine::new(Some(default_dir));
         Self {
             supervisor,
@@ -102,6 +109,7 @@ impl ServiceDaemon {
             settings_path: None,
             model_dir,
             repo_root,
+            enrollment: ipc_voice::EnrollmentState::from_env(Some(default_dir_for_migration)),
         }
     }
 
@@ -128,6 +136,8 @@ impl ServiceDaemon {
             settings_path: None,
             model_dir: None,
             repo_root: None,
+            // Embedding/test seam: no legacy migration from `$HOME`.
+            enrollment: ipc_voice::EnrollmentState::from_env(None),
         }
     }
 
@@ -182,6 +192,14 @@ impl ServiceDaemon {
             }
         }
         let dir = store.dir().to_path_buf();
+        // One-shot migration of the pre-pipeline gallery (spec 6.3): legacy samples arrive
+        // without audio (needs_reenroll). A failure never stops the daemon and logs no detail.
+        if let Some(legacy) = self.enrollment.legacy_samples_dir.clone()
+            && legacy != dir
+            && voice_storage_migration::migrate_legacy_into_dir(&legacy, &dir).is_err()
+        {
+            eprintln!("Legacy voice samples were not migrated");
+        }
         self.voice_samples =
             VoiceSampleManager::load(&dir).unwrap_or_else(|_| VoiceSampleManager::new(&dir));
         self.voice_intake = VoiceIntakeEngine::new(Some(dir));
@@ -318,6 +336,7 @@ impl ServiceDaemon {
                     if trimmed.is_empty() {
                         continue;
                     }
+                    self.drain_enrollment_jobs();
                     let resp = IpcServer::new()
                         .handle_line(trimmed, |cmd, _payload| self.handle_command(cmd));
                     // The line may carry raw PCM (base64): wipe it before the next read.
@@ -371,7 +390,8 @@ impl ServiceDaemon {
                         "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
                         "voice_profile_error": self.voice_profile_error,
                         "voice_samples_count": self.voice_samples.list_samples().len(),
-                        "has_voice_profile": self.voice_samples.compute_profile_embedding().is_some(),
+                        // A stored profile, not the obsolete averaged sample embedding.
+                        "has_voice_profile": self.stored_voice_profile_id.is_some(),
                         "intake_pending_count": self.voice_intake.list_pending().len(),
                         "active_backend": self.supervisor.active_backend_name(),
                         "requested_backend": self.supervisor.requested_backend_name(),
@@ -490,80 +510,47 @@ impl ServiceDaemon {
                 &mut self.stored_voice_profile_id,
                 &mut self.voice_profile_error,
             ),
-            IpcCommand::ListVoiceSamples => {
-                let samples = self.voice_samples.list_samples();
-                let samples_json: Vec<_> = samples
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "id": s.id,
-                            "timestamp": s.timestamp,
-                            "name": s.name,
-                            "audio_path": s.audio_path,
-                            "is_active": s.is_active,
-                        })
-                    })
-                    .collect();
-                IpcResponse::success(
-                    "list-voice-samples-resp",
-                    json!({
-                        "samples": samples_json,
-                        "total_count": samples.len(),
-                        "has_profile": self.voice_samples.compute_profile_embedding().is_some(),
-                    }),
-                )
-            }
-            // Provisional until task S6 wires the ingest/build/job handlers.
-            IpcCommand::AddVoiceSample { .. }
-            | IpcCommand::BuildVoiceProfile { .. }
-            | IpcCommand::GetEnrollmentJob { .. } => IpcResponse::error(
-                "enrollment-resp",
-                IpcStatus::InternalError,
-                realtime_noise_ipc::enrollment_codes::ENROLL_FAILED,
-                "not implemented",
+            IpcCommand::ListVoiceSamples => self.list_voice_samples(),
+            IpcCommand::AddVoiceSample {
+                name,
+                pcm_f32_le_b64,
+                sample_rate,
+                device_label,
+                device_id_hash,
+            } => self.add_voice_sample(
+                name,
+                pcm_f32_le_b64,
+                *sample_rate,
+                device_label,
+                device_id_hash,
             ),
+            IpcCommand::BuildVoiceProfile { name } => self.build_voice_profile(name),
+            IpcCommand::GetEnrollmentJob { job_id } => self.get_enrollment_job(job_id),
             IpcCommand::DeleteVoiceSample { id } => {
                 match self.voice_samples.delete_sample(id, true) {
-                    Ok(deleted) => {
-                        let has_profile = self.voice_samples.compute_profile_embedding().is_some();
-                        IpcResponse::success(
-                            "delete-voice-sample-resp",
-                            json!({
-                                "success": true,
-                                "deleted": deleted,
-                                "has_profile": has_profile,
-                            }),
-                        )
-                    }
+                    // The WAV goes with the sample (confined to `samples/`); the client rebuilds.
+                    Ok(deleted) => IpcResponse::success(
+                        "delete-voice-sample-resp",
+                        json!({
+                            "success": true,
+                            "deleted": deleted,
+                            "has_profile": self.stored_voice_profile_id.is_some(),
+                        }),
+                    ),
                     Err(_) => IpcResponse::internal_error(
                         "delete-voice-sample-resp",
                         "Failed to delete voice sample",
                     ),
                 }
             }
-            IpcCommand::GetVoiceProfileEmbedding => {
-                self.voice_samples.compute_profile_embedding().map_or_else(
-                    || {
-                        IpcResponse::success(
-                            "get-voice-profile-embedding-resp",
-                            json!({
-                                "has_profile": false,
-                                "embedding": null,
-                            }),
-                        )
-                    },
-                    |embedding| {
-                        IpcResponse::success(
-                            "get-voice-profile-embedding-resp",
-                            json!({
-                                "has_profile": true,
-                                "dimension": voice_samples::VOICE_EMBEDDING_DIM,
-                                "embedding": embedding.as_slice(),
-                            }),
-                        )
-                    },
-                )
-            }
+            // Deprecated (spec 5): it exposed the obsolete averaged embedding. Kept answering a
+            // fixed error until the command is removed from the protocol.
+            IpcCommand::GetVoiceProfileEmbedding => IpcResponse::error(
+                "get-voice-profile-embedding-resp",
+                IpcStatus::InternalError,
+                ENROLL_FAILED,
+                "deprecated",
+            ),
             IpcCommand::ListIntakeSuggestions => {
                 let pending = self.voice_intake.list_pending();
                 let suggestions_json: Vec<_> = pending
@@ -574,7 +561,8 @@ impl ServiceDaemon {
                             "timestamp": t.timestamp,
                             "duration_secs": t.duration_secs,
                             "snr": t.snr,
-                            "audio_path": t.audio_path,
+                            "speech_seconds": t.speech_seconds,
+                            "device_label": t.device_label,
                         })
                     })
                     .collect();
@@ -586,58 +574,9 @@ impl ServiceDaemon {
                     }),
                 )
             }
-            IpcCommand::AddIntakeSuggestion { take_json } => {
-                match serde_json::from_str::<voice_intake::IntakeTake>(take_json) {
-                    Ok(take) => {
-                        let take_id = take.id.clone();
-                        match self.voice_intake.add_take(take) {
-                            Ok(()) => IpcResponse::success(
-                                "add-intake-suggestion-resp",
-                                json!({
-                                    "success": true,
-                                    "take_id": take_id,
-                                }),
-                            ),
-                            Err(_) => IpcResponse::internal_error(
-                                "add-intake-suggestion-resp",
-                                "Failed to add intake suggestion",
-                            ),
-                        }
-                    }
-                    Err(_) => IpcResponse::invalid_command(
-                        "add-intake-suggestion-resp",
-                        "Invalid intake suggestion payload",
-                    ),
-                }
-            }
+            IpcCommand::AddIntakeSuggestion { take_json } => self.add_intake_suggestion(take_json),
             IpcCommand::ApproveIntakeSuggestion { id, name } => {
-                match self
-                    .voice_intake
-                    .approve_take(id, &mut self.voice_samples, name.as_deref())
-                {
-                    Ok(sample) => {
-                        let has_profile = self.voice_samples.compute_profile_embedding().is_some();
-                        IpcResponse::success(
-                            "approve-intake-suggestion-resp",
-                            json!({
-                                "success": true,
-                                "approved": true,
-                                "sample_id": sample.id,
-                                "has_profile": has_profile,
-                            }),
-                        )
-                    }
-                    Err(voice_intake::VoiceIntakeError::TakeNotFound(_)) => IpcResponse::error(
-                        "approve-intake-suggestion-resp",
-                        IpcStatus::InvalidCommand,
-                        "TAKE_NOT_FOUND",
-                        "Intake suggestion not found",
-                    ),
-                    Err(_) => IpcResponse::internal_error(
-                        "approve-intake-suggestion-resp",
-                        "Failed to approve intake suggestion",
-                    ),
-                }
+                self.approve_intake_suggestion(id, name.as_deref())
             }
             IpcCommand::DiscardIntakeSuggestion { id } => {
                 match self.voice_intake.discard_take(id) {

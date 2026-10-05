@@ -1,9 +1,6 @@
 //! Ingestion of enrollment samples: validate the raw take, run it through the base denoiser,
 //! measure the clean speech and encode the full clean take as the stored WAV.
 
-// removed when Task S6 wires the module
-#![allow(dead_code)]
-
 use realtime_noise_model::speech_trim::trim_speech;
 use realtime_noise_model::wav::encode_wav_pcm16_mono;
 

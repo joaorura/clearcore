@@ -57,10 +57,13 @@ fn test_voice_samples_and_intake_ipc_lifecycle() {
     assert_eq!(list_resp.payload["total_count"], 0);
     assert_eq!(list_resp.payload["has_profile"], false);
 
-    // Get embedding when empty
+    // The averaged-embedding command is deprecated: a fixed error, never an embedding.
     let emb_resp = send(&mut daemon, IpcCommand::GetVoiceProfileEmbedding);
-    assert_eq!(emb_resp.status, IpcStatus::Ok);
-    assert_eq!(emb_resp.payload["has_profile"], false);
+    assert_eq!(emb_resp.status, IpcStatus::InternalError);
+    assert_eq!(
+        emb_resp.error.as_ref().expect("error").code,
+        "ENROLL_FAILED"
+    );
 
     // Add first sample via IPC
     let sample1 = VoiceSample::new(
@@ -71,23 +74,17 @@ fn test_voice_samples_and_intake_ipc_lifecycle() {
         make_unit_vector(0),
     )
     .expect("sample1");
-    // `AddVoiceSample` now ingests raw PCM through a background job (task S6); until then this
-    // test seeds the stored sample directly through the manager.
+    // `AddVoiceSample` ingests raw PCM through a background job (see `enrollment_flow.rs`);
+    // this test seeds a legacy stored sample directly through the manager.
     daemon
         .voice_samples_mut()
         .add_sample(sample1)
         .expect("add sample1");
 
-    // Status after adding sample 1
+    // Status after adding sample 1: a sample is not a profile (none is stored).
     let status2 = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status2.payload["voice_samples_count"], 1);
-    assert_eq!(status2.payload["has_voice_profile"], true);
-
-    // Get embedding now has profile
-    let emb_resp2 = send(&mut daemon, IpcCommand::GetVoiceProfileEmbedding);
-    assert_eq!(emb_resp2.status, IpcStatus::Ok);
-    assert_eq!(emb_resp2.payload["has_profile"], true);
-    assert_eq!(emb_resp2.payload["dimension"], 192);
+    assert_eq!(status2.payload["has_voice_profile"], false);
 
     // Add candidate intake take via IPC
     let take1 = IntakeTake::new(
@@ -99,17 +96,12 @@ fn test_voice_samples_and_intake_ipc_lifecycle() {
         make_unit_vector(1),
     )
     .expect("take1");
-    let take1_json = serde_json::to_string(&take1).expect("ser");
-
-    let add_take_resp = send(
-        &mut daemon,
-        IpcCommand::AddIntakeSuggestion {
-            take_json: take1_json,
-        },
-    );
-    assert_eq!(add_take_resp.status, IpcStatus::Ok);
-    assert_eq!(add_take_resp.payload["success"], true);
-    assert_eq!(add_take_resp.payload["take_id"], "take-100");
+    // Takes now arrive as audio through a job (see `enrollment_flow.rs`); a legacy take is
+    // seeded through the engine.
+    daemon
+        .voice_intake_mut()
+        .add_take(take1)
+        .expect("seed take1");
 
     // Status shows 1 pending take
     let status3 = send(&mut daemon, IpcCommand::GetStatus);
@@ -132,7 +124,7 @@ fn test_voice_samples_and_intake_ipc_lifecycle() {
     assert_eq!(approve_resp.status, IpcStatus::Ok);
     assert_eq!(approve_resp.payload["approved"], true);
     assert_eq!(approve_resp.payload["sample_id"], "take-100");
-    assert_eq!(approve_resp.payload["has_profile"], true);
+    assert_eq!(approve_resp.payload["has_profile"], false);
 
     // Status: now 2 samples in gallery, 0 pending takes
     let status4 = send(&mut daemon, IpcCommand::GetStatus);
@@ -152,7 +144,7 @@ fn test_voice_samples_and_intake_ipc_lifecycle() {
     );
     assert_eq!(del_resp.status, IpcStatus::Ok);
     assert_eq!(del_resp.payload["deleted"], true);
-    assert_eq!(del_resp.payload["has_profile"], true);
+    assert_eq!(del_resp.payload["has_profile"], false);
 
     let status5 = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status5.payload["voice_samples_count"], 1);
@@ -180,12 +172,7 @@ fn test_intake_discard_via_ipc() {
     )
     .expect("take");
 
-    send(
-        &mut daemon,
-        IpcCommand::AddIntakeSuggestion {
-            take_json: serde_json::to_string(&take).expect("ser"),
-        },
-    );
+    daemon.voice_intake_mut().add_take(take).expect("seed take");
 
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["intake_pending_count"], 1);
@@ -212,7 +199,7 @@ fn test_invalid_json_payloads_rejected_safely() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut daemon = daemon_with_store(&temp.path().join("profiles"));
 
-    // Until task S6 wires the ingest job, the new AddVoiceSample answers a fixed error and stores nothing.
+    // Invalid base64 is rejected with the fixed audio code and stores nothing.
     let bad_sample = send(
         &mut daemon,
         IpcCommand::AddVoiceSample {
@@ -223,7 +210,11 @@ fn test_invalid_json_payloads_rejected_safely() {
             device_id_hash: "h".to_string(),
         },
     );
-    assert_ne!(bad_sample.status, IpcStatus::Ok);
+    assert_eq!(bad_sample.status, IpcStatus::InvalidCommand);
+    assert_eq!(
+        bad_sample.error.as_ref().expect("error").code,
+        "ENROLL_INVALID_AUDIO"
+    );
     assert_eq!(daemon.voice_samples().list_samples().len(), 0);
 
     let bad_take = send(

@@ -1,5 +1,3 @@
-// removed when Task S6 wires the module
-#![allow(dead_code)]
 //! Thread-backed enrollment job table (task S5, spec 4.3).
 //!
 //! The table itself lives on the daemon thread; only the result channel
