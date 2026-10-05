@@ -61,6 +61,15 @@ export function resolvePhysicalAudioDevice(
   return candidates[0];
 }
 
+export function normalizeDeviceLabel(label: string | null | undefined): string {
+  if (!label) return '';
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/^(default|padrão)\s*[-:]\s*/i, '')
+    .trim();
+}
+
 export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -124,7 +133,7 @@ export async function acquireRawPhysicalStream(
   const viaAlias = isAlias(physical.deviceId);
 
   // Computed before opening so a failure here cannot leave an open stream behind.
-  const cleanPreLabel = (physical.label || '').trim().toLowerCase();
+  const cleanPreLabel = normalizeDeviceLabel(physical.label);
   const preHash = await sha256Hex(cleanPreLabel.length > 0 ? `mic:${cleanPreLabel}` : `${physical.deviceId}|${physical.groupId}`);
 
   let stream: MediaStream;
@@ -157,10 +166,10 @@ export async function acquireRawPhysicalStream(
     } else if (!label && track?.label) {
       label = track.label;
     }
-    const cleanLabel = (label || physical.label || '').trim().toLowerCase();
+    const cleanLabel = normalizeDeviceLabel(label || physical.label);
     // A stable hash of the physical device identifier: the normalized OS hardware label is persistent
     // across Chromium reloads and sessions, unlike ephemeral WebRTC deviceId/groupId.
-    const idHash = cleanLabel.length > 0 && cleanLabel !== cleanPreLabel
+    const idHash = cleanLabel.length > 0
       ? await sha256Hex(`mic:${cleanLabel}`)
       : preHash;
     return { stream, device: { label: label.slice(0, 128), idHash } };

@@ -17,6 +17,14 @@ describe('needsDeviceSwitchConfirm', () => {
     expect(needsDeviceSwitchConfirm(undefined, B)).toBe(false);
     expect(needsDeviceSwitchConfirm('', B)).toBe(false);
   });
+
+  it('does not ask when labels match despite different hashes or Default prefix', () => {
+    const label = 'Core Ultra 200H/200V Series Processors HD Audio Headset Microphone';
+    expect(needsDeviceSwitchConfirm(A, B, label, label)).toBe(false);
+    expect(needsDeviceSwitchConfirm(A, B, label, `Default - ${label}`)).toBe(false);
+    expect(needsDeviceSwitchConfirm(A, B, `Padrão: ${label}`, label)).toBe(false);
+    expect(needsDeviceSwitchConfirm(A, B, 'Realtek Audio', 'USB Microphone')).toBe(true);
+  });
 });
 
 describe('confirmDeviceSwitchBeforeSend', () => {

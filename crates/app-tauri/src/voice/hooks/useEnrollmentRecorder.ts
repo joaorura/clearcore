@@ -151,7 +151,10 @@ export function useEnrollmentRecorder(opts: {
 
   /** Sends one captured sample to the service and follows its job until done/failed. */
   const submitSample = async (captured: CapturedPcm, name: string, origin: JobOrigin): Promise<SubmitResult> => {
-    if (beforeSend && !(await beforeSend(captured))) return { outcome: { kind: 'cancelled' }, sampleId: null };
+    if (beforeSend && !(await beforeSend(captured))) {
+      console.warn('[VoiceRecorder] submitSample aborted before send (device switch cancelled)');
+      return { outcome: { kind: 'cancelled' }, sampleId: null };
+    }
     jobs.begin(origin);
     let outcome: JobOutcome;
     let sampleId: string | null = null;
@@ -159,6 +162,7 @@ export function useEnrollmentRecorder(opts: {
       const start = await addSample(captured, name);
       const startError = enrollmentErrorCode(start);
       if (startError !== null || !('jobId' in start)) {
+        console.error('[VoiceRecorder] addSample rejected:', startError, start);
         outcome = isBudgetError(startError)
           ? { kind: 'show-budget-error', remainingSeconds: null }
           : { kind: 'show-error', code: startError ?? 'ENROLL_FAILED' };
@@ -170,12 +174,14 @@ export function useEnrollmentRecorder(opts: {
           jobs.setCurrentJob(job);
           outcome = nextStepAfterJob(job);
           sampleId = job.sampleId;
+          console.log('[VoiceRecorder] waitForJob completed:', job.state, outcome);
         } finally {
           jobScope.release(signal);
         }
       }
       jobs.applyOutcome(outcome);
     } catch (err) {
+      console.error('[VoiceRecorder] submitSample error:', err);
       outcome = { kind: 'show-error', code: 'SERVICE_UNAVAILABLE' };
       // Unmounted: no state update and no refresh.
       if (isAbortError(err)) return { outcome, sampleId };

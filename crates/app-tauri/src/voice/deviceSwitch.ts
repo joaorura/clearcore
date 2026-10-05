@@ -5,6 +5,15 @@ import type { CapturedPcm } from './enrollmentTypes';
  * samples stop being used. Ask only when the service reported a current group AND the new take's
  * device differs; an older service that sends no group is never asked about.
  */
+export function normalizeDeviceLabel(label: string | null | undefined): string {
+  if (!label) return '';
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/^(default|padrão)\s*[-:]\s*/i, '')
+    .trim();
+}
+
 export function needsDeviceSwitchConfirm(
   currentGroupHash: string | null | undefined,
   newDeviceIdHash: string,
@@ -14,14 +23,12 @@ export function needsDeviceSwitchConfirm(
   if (!currentGroupHash || currentGroupHash.length === 0 || currentGroupHash === newDeviceIdHash) {
     return false;
   }
-  // If both labels are non-empty and match case-insensitively, it is the EXACT same microphone.
-  // Never prompt the user to switch microphones when the label is identical!
+  const normCurrent = normalizeDeviceLabel(currentGroupLabel);
+  const normNew = normalizeDeviceLabel(newDeviceLabel);
   if (
-    typeof currentGroupLabel === 'string' &&
-    typeof newDeviceLabel === 'string' &&
-    currentGroupLabel.trim().length > 0 &&
-    newDeviceLabel.trim().length > 0 &&
-    currentGroupLabel.trim().toLowerCase() === newDeviceLabel.trim().toLowerCase()
+    normCurrent.length > 0 &&
+    normNew.length > 0 &&
+    (normCurrent === normNew || normCurrent.includes(normNew) || normNew.includes(normCurrent))
   ) {
     return false;
   }

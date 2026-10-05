@@ -50,7 +50,10 @@ export function useGuidedSteps(opts: {
     const previous = completedRef.current[step];
     const { outcome, sampleId } = await recorder.submitSample(captured, t(STEP_QUESTIONS[step - 1].categoryKey), 'enroll');
     // A failed take keeps the step (and its sample in the service) as it was.
-    if (outcome.kind !== 'done') return;
+    if (outcome.kind !== 'done') {
+      console.warn('[VoiceProfile] finishStep not done:', outcome);
+      return;
+    }
     setCompletedSteps((prev) => {
       const take = stepAfterSubmit(prev[step], outcome, sampleId, captured);
       return take ? { ...prev, [step]: take } : prev;

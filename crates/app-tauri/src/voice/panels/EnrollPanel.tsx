@@ -120,10 +120,20 @@ export function EnrollPanel(p: EnrollPanelProps) {
               {p.captureError}
             </div>
           )}
+          {!isRecording && !p.jobBusy && p.feedback?.enrollErrorText && (
+            <div role="alert" className="feedback-banner" style={{ color: '#f87171', marginBottom: 10, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.12)', borderRadius: 6 }}>
+              ⚠️ {p.feedback.enrollErrorText}
+            </div>
+          )}
 
           <div className="stepper-action-row">
             {isRecording ? (
               <RecordingIndicator t={t} locale={p.locale} elapsed={p.recordingElapsedSeconds} onStop={() => p.onFinishStep(currentStep)} showHint />
+            ) : p.jobBusy ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: 'rgba(59, 130, 246, 0.15)', borderRadius: 8, color: '#93c5fd' }}>
+                <span style={{ fontSize: '1.1rem' }}>⏳</span>
+                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{t('voiceProfile.sendingSample')}</span>
+              </div>
             ) : currentTake ? (
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 {/* No "Ouvir": the raw take was zeroed once sent to the service. */}
