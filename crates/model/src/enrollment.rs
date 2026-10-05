@@ -29,6 +29,10 @@ pub const ENROLLMENT_MAX_DURATION_SECS: f32 = 90.0;
 /// 6 s at 16 kHz.
 pub const ENROLLMENT_MIN_SAMPLES: usize = 96_000;
 /// 90 s at 16 kHz.
+///
+/// The validator accepts exactly this many samples, while the service's speech budget may leave a
+/// one-sample slack at the 90 s boundary; the caller (the service) must map
+/// [`EnrollmentError::TooLong`] to `ENROLL_BUDGET_EXCEEDED`.
 pub const ENROLLMENT_MAX_SAMPLES: usize = 1_440_000;
 /// Highest accepted absolute sample value; above it the recording is considered clipped.
 pub const ENROLLMENT_MAX_PEAK: f32 = 0.99;
@@ -365,6 +369,11 @@ mod onnx {
     const MEMBER: &str = "enrollment.onnx";
     /// Members a development archive may contain; anything else is rejected.
     const DEV_ARCHIVE_MEMBER_ALLOWLIST: &[&str] = &["enrollment.onnx"];
+    /// The real member is about 85 MB; anything above this is treated as hostile.
+    const MAX_ONNX_BYTES: u64 = 256 * 1024 * 1024;
+    /// Ceiling on the total decompressed bytes the tar walk may consume.
+    const MAX_ARCHIVE_DECOMPRESSED_BYTES: u64 = 300 * 1024 * 1024;
+    const MAX_ARCHIVE_ENTRIES: usize = 16;
     const OUTPUTS: [&str; 4] = ["gamma_enc", "beta_enc", "gamma_df", "beta_df"];
 
     /// Runs the `voice-enrollment-asset-v1` ONNX through tract.
@@ -433,12 +442,16 @@ mod onnx {
             if expected_sha256_hex.len() != 64 || actual != expected_sha256_hex {
                 return Err(fail("development archive hash mismatch"));
             }
-            let mut archive = Archive::new(GzDecoder::new(archive_tar_gz));
+            let mut archive =
+                Archive::new(GzDecoder::new(archive_tar_gz).take(MAX_ARCHIVE_DECOMPRESSED_BYTES));
             let entries = archive
                 .entries()
                 .map_err(|_| fail("development archive is unreadable"))?;
-            let mut onnx_bytes = None;
-            for entry in entries {
+            let mut onnx_bytes: Option<Vec<u8>> = None;
+            for (index, entry) in entries.enumerate() {
+                if index >= MAX_ARCHIVE_ENTRIES {
+                    return Err(fail("development archive has too many entries"));
+                }
                 let mut entry = entry.map_err(|_| fail("development archive is unreadable"))?;
                 let path = entry
                     .path()
@@ -451,16 +464,33 @@ mod onnx {
                     return Err(fail("development archive has an unsafe member path"));
                 }
                 let name = path.to_str().map(|n| n.trim_start_matches("./"));
+                if entry.header().entry_type().is_dir()
+                    && name.is_some_and(|n| n.is_empty() || n == ".")
+                {
+                    continue;
+                }
                 if !name.is_some_and(|n| DEV_ARCHIVE_MEMBER_ALLOWLIST.contains(&n)) {
                     return Err(fail("development archive has an unlisted member"));
                 }
-                if name == Some(MEMBER) {
-                    let mut bytes = Vec::new();
-                    entry
-                        .read_to_end(&mut bytes)
-                        .map_err(|_| fail("development archive member is unreadable"))?;
-                    onnx_bytes = Some(bytes);
+                if !entry.header().entry_type().is_file() {
+                    return Err(fail("development archive member is not a regular file"));
                 }
+                if onnx_bytes.is_some() {
+                    return Err(fail("development archive has a duplicate member"));
+                }
+                if entry.size() > MAX_ONNX_BYTES {
+                    return Err(fail("development archive member is too large"));
+                }
+                let mut bytes = Vec::new();
+                entry
+                    .by_ref()
+                    .take(MAX_ONNX_BYTES + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|_| fail("development archive member is unreadable"))?;
+                if bytes.len() as u64 > MAX_ONNX_BYTES {
+                    return Err(fail("development archive member is too large"));
+                }
+                onnx_bytes = Some(bytes);
             }
             let bytes =
                 onnx_bytes.ok_or_else(|| fail("development archive has no model member"))?;
@@ -874,7 +904,7 @@ mod tests {
 #[cfg(all(test, feature = "tract"))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod onnx_tests {
-    use std::{fs, path::PathBuf};
+    use std::{fs, io::Write, path::PathBuf};
 
     use flate2::{Compression, write::GzEncoder};
     use tar::{Builder, Header};
@@ -1078,6 +1108,115 @@ mod onnx_tests {
             OnnxEnrollmentModel::from_dev_archive(&good, &sha256_hex(&good).to_uppercase())
                 .is_err()
         );
+    }
+
+    /// Gzipped tar built by hand so hostile names and types are not validated by the builder.
+    fn raw_archive(entries: &[(&str, u8, &str, &[u8])]) -> Vec<u8> {
+        let mut gz = GzEncoder::new(Vec::new(), Compression::fast());
+        for (name, kind, link, data) in entries {
+            raw_entry(&mut gz, name, *kind, link, data.len() as u64);
+            gz.write_all(data).expect("data");
+            gz.write_all(&vec![0; (512 - data.len() % 512) % 512])
+                .expect("pad");
+        }
+        gz.write_all(&[0; 1024]).expect("end");
+        gz.finish().expect("gzip")
+    }
+
+    fn raw_entry(out: &mut impl Write, name: &str, kind: u8, link: &str, size: u64) {
+        let mut h = [0_u8; 512];
+        h[..name.len()].copy_from_slice(name.as_bytes());
+        h[100..107].copy_from_slice(b"0000644");
+        h[108..115].copy_from_slice(b"0000000");
+        h[116..123].copy_from_slice(b"0000000");
+        h[124..135].copy_from_slice(format!("{size:011o}").as_bytes());
+        h[136..147].copy_from_slice(b"00000000000");
+        h[156] = kind;
+        h[157..157 + link.len()].copy_from_slice(link.as_bytes());
+        h[257..263].copy_from_slice(b"ustar\0");
+        h[263..265].copy_from_slice(b"00");
+        h[148..156].copy_from_slice(b"        ");
+        let sum: u32 = h.iter().map(|b| u32::from(*b)).sum();
+        h[148..155].copy_from_slice(format!("{sum:06o}\0").as_bytes());
+        h[155] = b' ';
+        out.write_all(&h).expect("header");
+    }
+
+    fn assert_fixed_error(archive: &[u8], hash: &str) {
+        match OnnxEnrollmentModel::from_dev_archive(archive, hash) {
+            Err(EnrollmentError::Model(message)) => {
+                assert!(!message.contains(hash));
+                assert!(!message.contains("enrollment.onnx"));
+                assert!(!message.contains("evil"));
+            }
+            other => panic!("expected a Model error, got ok={}", other.is_ok()),
+        }
+    }
+
+    #[test]
+    fn dev_archive_rejects_duplicate_and_unsafe_and_non_file_members() {
+        let onnx = onnx_bytes();
+        let cases = [
+            raw_archive(&[
+                ("enrollment.onnx", b'0', "", &onnx),
+                ("enrollment.onnx", b'0', "", &onnx),
+            ]),
+            raw_archive(&[("../enrollment.onnx", b'0', "", &onnx)]),
+            raw_archive(&[("/enrollment.onnx", b'0', "", &onnx)]),
+            raw_archive(&[("a/../enrollment.onnx", b'0', "", &onnx)]),
+            raw_archive(&[("enrollment.onnx", b'2', "/etc/passwd", b"")]),
+            raw_archive(&[("enrollment.onnx", b'1', "other", b"")]),
+            raw_archive(&[("enrollment.onnx", b'5', "", b"")]),
+        ];
+        for archive in &cases {
+            assert_fixed_error(archive, &sha256_hex(archive));
+        }
+    }
+
+    #[test]
+    fn dev_archive_rejects_an_oversized_member_quickly() {
+        let started = std::time::Instant::now();
+        let mut gz = GzEncoder::new(Vec::new(), Compression::fast());
+        let size = 300_u64 * 1024 * 1024;
+        raw_entry(&mut gz, "enrollment.onnx", b'0', "", size);
+        let chunk = vec![0_u8; 1024 * 1024];
+        for _ in 0..300 {
+            gz.write_all(&chunk).expect("zeros");
+        }
+        gz.write_all(&[0; 1024]).expect("end");
+        let archive = gz.finish().expect("gzip");
+        assert!(archive.len() < 10 * 1024 * 1024);
+        assert_fixed_error(&archive, &sha256_hex(&archive));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn dev_archive_rejects_too_many_entries() {
+        let entries: Vec<(&str, u8, &str, &[u8])> =
+            (0..17).map(|_| ("./", b'5', "", &b""[..])).collect();
+        let archive = raw_archive(&entries);
+        assert_fixed_error(&archive, &sha256_hex(&archive));
+    }
+
+    #[test]
+    fn dev_archive_checks_the_hash_before_decompressing() {
+        let junk = b"this is not gzip".to_vec();
+        match OnnxEnrollmentModel::from_dev_archive(&junk, &"00".repeat(32)) {
+            Err(EnrollmentError::Model(message)) => {
+                assert_eq!(message, "development archive hash mismatch");
+            }
+            other => panic!("expected hash mismatch, got ok={}", other.is_ok()),
+        }
+    }
+
+    #[test]
+    fn dev_archive_tolerates_a_root_directory_entry() -> TestResult {
+        let archive = raw_archive(&[
+            ("./", b'5', "", b""),
+            ("./enrollment.onnx", b'0', "", &onnx_bytes()),
+        ]);
+        OnnxEnrollmentModel::from_dev_archive(&archive, &sha256_hex(&archive))?;
+        Ok(())
     }
 
     #[test]
