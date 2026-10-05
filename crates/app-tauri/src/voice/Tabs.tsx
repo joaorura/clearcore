@@ -56,7 +56,8 @@ export function Tabs(p: {
               role="tab"
               id={`${prefix}-tab-${t.id}`}
               aria-selected={selected}
-              aria-controls={`${prefix}-panel-${t.id}`}
+              // Only the active tab's panel is in the DOM, so only it can be referenced.
+              aria-controls={selected ? `${prefix}-panel-${t.id}` : undefined}
               aria-disabled={t.disabled ? true : undefined}
               disabled={t.disabled}
               tabIndex={selected ? 0 : -1}
@@ -74,6 +75,7 @@ export function Tabs(p: {
           role="tabpanel"
           id={`${prefix}-panel-${activeId}`}
           aria-labelledby={`${prefix}-tab-${activeId}`}
+          tabIndex={0}
           className="tab-pane-content"
         >
           {p.renderPanel(activeId)}

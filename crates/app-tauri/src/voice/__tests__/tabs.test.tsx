@@ -63,6 +63,12 @@ describe('Tabs markup', () => {
     expect(out).toContain('id="vp-panel-c"');
     expect(out).toContain('aria-labelledby="vp-tab-c"');
   });
+  it('aria-controls only points at the rendered panel, which is focusable', () => {
+    const out = render('c');
+    expect((out.match(/aria-controls=/g) ?? []).length).toBe(1);
+    for (const id of ['a', 'b', 'd']) expect(out).not.toContain(`aria-controls="vp-panel-${id}"`);
+    expect(out).toMatch(/<div[^>]*role="tabpanel"[^>]*tabindex="0"/);
+  });
   it('renders only the active panel', () => {
     const spy = vi.fn((id: string) => <p>panel-{id}</p>);
     const out = render('d', spy);
