@@ -1,5 +1,9 @@
 //! Enrollment profile builder: from already trimmed, level-matched and joined 48 kHz speech to a
 //! sealed `VoiceProfile` (microphone EQ + speaker conditioning).
+//!
+//! The caller must limit the peak of the joined audio (about 0.95 or less): the decimation
+//! low-pass can overshoot the 48 kHz peak on transients, and `enroll` rejects a 16 kHz peak
+//! above 0.99.
 
 use std::fmt;
 
@@ -193,6 +197,48 @@ mod tests {
         let (mut engine, _) = engine();
         let result = build_profile(&mut engine, &[], &metadata());
         assert!(matches!(result, Err(BuildError::Eq(_))), "{result:?}");
+    }
+
+    #[test]
+    fn one_sample_over_the_ceiling_is_too_much() {
+        let (mut engine, seen_len) = engine();
+        let joined = vec![0.1_f32; 90 * RATE_48K + 1];
+        assert_eq!(joined.len(), 4_320_001);
+        let result = build_profile(&mut engine, &joined, &metadata());
+        assert!(matches!(result, Err(BuildError::TooMuchSpeech)));
+        assert_eq!(seen_len.get(), None);
+    }
+
+    #[test]
+    fn silence_is_a_too_quiet_eq_error() {
+        // All-zero audio has a mean RMS far below -80 dBFS, which `compute_ltas` reports as
+        // `TooQuiet` before it looks for speech frames.
+        let (mut engine, seen_len) = engine();
+        let result = build_profile(&mut engine, &vec![0.0_f32; 10 * RATE_48K], &metadata());
+        assert!(
+            matches!(
+                result,
+                Err(BuildError::Eq(MicrophoneEqError::TooQuiet { .. }))
+            ),
+            "{result:?}"
+        );
+        assert_eq!(seen_len.get(), None);
+    }
+
+    #[test]
+    fn display_never_prints_samples() {
+        let errors = [
+            BuildError::TooMuchSpeech,
+            BuildError::Eq(MicrophoneEqError::TooQuiet { rms_dbfs: -90.0 }),
+            BuildError::Enroll(EnrollmentError::TooShort { samples: 48_000 }),
+        ];
+        for error in errors {
+            let text = error.to_string();
+            assert!(!text.is_empty());
+            assert!(!text.contains('['), "{text}");
+            assert!(!text.contains("0.1234"), "{text}");
+            assert!(text.len() < 300, "{text}");
+        }
     }
 
     #[cfg(feature = "tract")]
