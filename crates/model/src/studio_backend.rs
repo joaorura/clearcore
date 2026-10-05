@@ -118,7 +118,12 @@ impl<B: InferenceBackend> InferenceBackend for StudioBackend<B> {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[allow(
+    clippy::float_cmp,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 mod tests {
     use super::*;
     use realtime_noise_contracts::HOP_SAMPLES;
