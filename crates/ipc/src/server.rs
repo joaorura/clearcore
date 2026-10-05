@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
 use crate::enrollment_codes::{ENROLL_PAYLOAD_TOO_LARGE, MAX_REQUEST_LINE_BYTES};
-use crate::line_limit::{LineRead, read_line_limited};
-use crate::protocol::{IpcCommand, IpcRequest, IpcResponse, IpcStatus, handle_request};
+use crate::line_limit::{LineRead, is_invalid_utf8, read_line_limited};
+use crate::protocol::{
+    IpcCommand, IpcRequest, IpcResponse, IpcStatus, handle_request, truncate_request_id,
+};
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 
@@ -43,7 +45,7 @@ impl IpcServer {
     where
         F: FnMut(&IpcCommand, &Value) -> IpcResponse,
     {
-        let resp = IpcRequest::from_json(line).map_or_else(
+        let mut resp = IpcRequest::from_json(line).map_or_else(
             |_| {
                 IpcResponse::error(
                     "unknown",
@@ -54,6 +56,7 @@ impl IpcServer {
             },
             |req| handle_request(&req, handler),
         );
+        resp.request_id = truncate_request_id(&resp.request_id);
         resp.to_json().unwrap_or_else(|_| "{}".to_string())
     }
 
@@ -98,7 +101,7 @@ impl IpcServer {
                 .to_json()
                 .unwrap_or_else(|_| "{}".to_string()),
                 // Invalid UTF-8: the line was fully consumed, keep serving.
-                Err(e) if e.kind() == io::ErrorKind::InvalidData => IpcResponse::error(
+                Err(e) if is_invalid_utf8(&e) => IpcResponse::error(
                     "unknown",
                     IpcStatus::InvalidCommand,
                     "JSON_PARSE_ERROR",

@@ -161,3 +161,87 @@ fn invalid_utf8_does_not_kill_the_server() {
     assert_eq!(rs[0].error.as_ref().unwrap().code, "JSON_PARSE_ERROR");
     assert_eq!(rs[1].status, IpcStatus::Ok);
 }
+
+#[test]
+fn version_mismatch_does_not_echo_version() {
+    let server = IpcServer::new();
+    let line = r#"{"version":"TOKEN123","request_id":"r1","command":"GetStatus","payload":{}}"#;
+    let out = server.handle_line(line, |_c, _p| IpcResponse::success("x", json!({})));
+    assert!(!out.contains("TOKEN123"), "echoed: {out}");
+    let resp = IpcResponse::from_json(&out).unwrap();
+    assert_eq!(resp.status, IpcStatus::VersionMismatch);
+    let err = resp.error.unwrap();
+    assert_eq!(err.code, "VERSION_MISMATCH");
+    assert_eq!(err.message, "unsupported protocol version");
+}
+
+#[test]
+fn giant_request_id_is_truncated_in_the_response() {
+    let server = IpcServer::new();
+    let id = "i".repeat(100_000);
+    let bad_version =
+        format!(r#"{{"version":"x","request_id":"{id}","command":"GetStatus","payload":{{}}}}"#);
+    let out = server.handle_line(&bad_version, |_c, _p| IpcResponse::success("x", json!({})));
+    let resp = IpcResponse::from_json(&out).unwrap();
+    assert_eq!(resp.request_id.chars().count(), 64);
+
+    let ok = format!(
+        r#"{{"version":"{}","request_id":"{id}","command":"GetStatus","payload":{{}}}}"#,
+        realtime_noise_ipc::PROTOCOL_VERSION
+    );
+    let out = server.handle_line(&ok, |_c, _p| IpcResponse::success(id.clone(), json!({})));
+    let resp = IpcResponse::from_json(&out).unwrap();
+    assert_eq!(resp.request_id.chars().count(), 64);
+}
+
+struct AlwaysInvalidData;
+
+impl std::io::Read for AlwaysInvalidData {
+    fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "transport",
+        ))
+    }
+}
+
+impl std::io::BufRead for AlwaysInvalidData {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "transport",
+        ))
+    }
+    fn consume(&mut self, _: usize) {}
+}
+
+#[test]
+fn transport_invalid_data_ends_the_connection() {
+    let server = IpcServer::new();
+    let mut out = Vec::new();
+    let res = server.handle_stream(AlwaysInvalidData, &mut out, |_c, _p| {
+        IpcResponse::success("x", json!({}))
+    });
+    assert!(res.is_err());
+    assert!(out.is_empty());
+}
+
+#[test]
+fn handle_stream_uses_the_production_limit() {
+    let server = IpcServer::new();
+    let max = realtime_noise_ipc::enrollment_codes::MAX_REQUEST_LINE_BYTES;
+    // `max` bytes plus the newline exceeds the cap; the next line must still be served.
+    let mut input = vec![b'a'; max];
+    input.push(b'\n');
+    input.extend_from_slice(get_status_line().as_bytes());
+    let mut out = Vec::new();
+    server
+        .handle_stream(Cursor::new(input), &mut out, |_c, _p| {
+            IpcResponse::success("ok-1", json!({}))
+        })
+        .unwrap();
+    let rs = responses(&out);
+    assert_eq!(rs.len(), 2);
+    assert_eq!(rs[0].error.as_ref().unwrap().code, ENROLL_PAYLOAD_TOO_LARGE);
+    assert_eq!(rs[1].status, IpcStatus::Ok);
+}

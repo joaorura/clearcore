@@ -25,7 +25,7 @@ fn incompatible_ipc_version_is_rejected_closed() {
     assert_eq!(response.request_id, "req-test-1");
     let error = response.error.expect("error detail should be present");
     assert_eq!(error.code, "VERSION_MISMATCH");
-    assert!(error.message.contains("Incompatible protocol version"));
+    assert!(error.message == "unsupported protocol version");
 }
 
 #[test]

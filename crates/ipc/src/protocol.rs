@@ -285,7 +285,7 @@ impl IpcResponse {
     #[must_use]
     pub fn version_mismatch(request_id: impl Into<String>, message: impl Into<String>) -> Self {
         Self::error(
-            request_id,
+            truncate_request_id(&request_id.into()),
             IpcStatus::VersionMismatch,
             "VERSION_MISMATCH",
             message,
@@ -321,19 +321,23 @@ impl IpcResponse {
     }
 }
 
+/// Maximum number of characters of a client-supplied `request_id` that is echoed
+/// back in responses (the id is attacker-controlled and may be huge).
+pub const MAX_ECHOED_REQUEST_ID_CHARS: usize = 64;
+
+/// Truncates a client-supplied request id to [`MAX_ECHOED_REQUEST_ID_CHARS`] characters.
+#[must_use]
+pub fn truncate_request_id(id: &str) -> String {
+    id.chars().take(MAX_ECHOED_REQUEST_ID_CHARS).collect()
+}
+
 /// Dispatches an IPC request to a handler, enforcing strict protocol version checks.
 pub fn handle_request<F>(req: &IpcRequest, mut handler: F) -> IpcResponse
 where
     F: FnMut(&IpcCommand, &Value) -> IpcResponse,
 {
     if req.version != PROTOCOL_VERSION {
-        return IpcResponse::version_mismatch(
-            &req.request_id,
-            format!(
-                "Incompatible protocol version '{}', expected '{}'",
-                req.version, PROTOCOL_VERSION
-            ),
-        );
+        return IpcResponse::version_mismatch(&req.request_id, "unsupported protocol version");
     }
     handler(&req.command, &req.payload)
 }
