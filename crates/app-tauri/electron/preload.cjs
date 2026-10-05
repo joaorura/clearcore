@@ -24,6 +24,21 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
   setStartActivatedConfig: (enabled) => ipcRenderer.invoke('set_start_activated_config', enabled),
   getStudioPreset: () => ipcRenderer.invoke('get_studio_preset'),
   setStudioPreset: (preset) => ipcRenderer.invoke('set_studio_preset', preset),
+  getVoiceProfile: () => ipcRenderer.invoke('get_voice_profile'),
+  getVoiceProfileStatus: () => ipcRenderer.invoke('get_voice_profile_status'),
+  setVoiceProfile: (profile) => ipcRenderer.invoke('set_voice_profile', { profile }),
+  getVoiceSamples: () => ipcRenderer.invoke('get_voice_samples'),
+  addVoiceSample: (sample) => ipcRenderer.invoke('add_voice_sample', { sample }),
+  deleteVoiceSample: (id) => ipcRenderer.invoke('delete_voice_sample', { id }),
+  getCallTakes: () => ipcRenderer.invoke('get_call_takes'),
+  approveCallTake: (id, name, take) => ipcRenderer.invoke('approve_call_take', { id, name, take }),
+  dismissCallTake: (id) => ipcRenderer.invoke('dismiss_call_take', { id }),
+  exportDiagnostics: () => ipcRenderer.invoke('export_diagnostics'),
+  onVoiceProfileUpdate: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('voice-profile-update', handler);
+    return () => ipcRenderer.removeListener('voice-profile-update', handler);
+  },
   onServiceStateUpdate: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('service-state-update', handler);

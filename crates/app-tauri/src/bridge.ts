@@ -1,4 +1,4 @@
-import type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo, StudioPreset, VoiceProfileStatus } from './types';
+import type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo, StudioPreset, VoiceProfileStatus, VoiceSample, CallSuggestionTake } from './types';
 import type { DiagnosticsData } from './diagnostics';
 
 export interface HardwareBackendItem {
@@ -49,8 +49,17 @@ export interface ClearcoreApi {
   setStartActivatedConfig?: (enabled: boolean) => Promise<boolean>;
   getStudioPreset?: () => Promise<StudioPreset>;
   setStudioPreset?: (preset: StudioPreset) => Promise<{ success: boolean; preset: StudioPreset }>;
+  getVoiceProfile?: () => Promise<VoiceProfileStatus & { success: boolean; profile: VoiceProfileStatus }>;
   getVoiceProfileStatus?: () => Promise<VoiceProfileStatus>;
-  setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean }>;
+  setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean; profile?: VoiceProfileStatus }>;
+  getVoiceSamples?: () => Promise<{ success: boolean; samples: VoiceSample[] } | VoiceSample[]>;
+  addVoiceSample?: (sample: unknown) => Promise<{ success: boolean; sample?: VoiceSample; samples?: VoiceSample[] }>;
+  deleteVoiceSample?: (id: string) => Promise<{ success: boolean; id: string; samples?: VoiceSample[] }>;
+  getCallTakes?: () => Promise<{ success: boolean; takes: CallSuggestionTake[] } | CallSuggestionTake[]>;
+  approveCallTake?: (id: string, name?: string, take?: unknown) => Promise<{ success: boolean; id: string; sample?: VoiceSample }>;
+  dismissCallTake?: (id: string) => Promise<{ success: boolean; id: string; takes?: CallSuggestionTake[] }>;
+  exportDiagnostics?: () => Promise<string>;
+  onVoiceProfileUpdate?: (cb: (profile: VoiceProfileStatus) => void) => () => void;
   onServiceStateUpdate?: (cb: (data: { isRunning: boolean }) => void) => () => void;
   onStartActivatedConfigUpdate?: (cb: (enabled: boolean) => void) => () => void;
   onStatusUpdate: (cb: (data: { mode?: DenoiseMode }) => void) => () => void;
@@ -120,14 +129,52 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
         return (await api.setStudioPreset(args?.preset as StudioPreset)) as unknown as T;
       }
     }
-    if (cmd === 'get_voice_profile_status') {
+    if (cmd === 'get_voice_profile' || cmd === 'get_voice_profile_status') {
+      if (typeof api.getVoiceProfile === 'function') {
+        return (await api.getVoiceProfile()) as unknown as T;
+      }
       if (typeof api.getVoiceProfileStatus === 'function') {
         return (await api.getVoiceProfileStatus()) as unknown as T;
       }
     }
     if (cmd === 'set_voice_profile') {
       if (typeof api.setVoiceProfile === 'function') {
-        return (await api.setVoiceProfile(args?.profile)) as unknown as T;
+        return (await api.setVoiceProfile(args?.profile ?? args)) as unknown as T;
+      }
+    }
+    if (cmd === 'get_voice_samples') {
+      if (typeof api.getVoiceSamples === 'function') {
+        return (await api.getVoiceSamples()) as unknown as T;
+      }
+    }
+    if (cmd === 'add_voice_sample') {
+      if (typeof api.addVoiceSample === 'function') {
+        return (await api.addVoiceSample(args?.sample ?? args)) as unknown as T;
+      }
+    }
+    if (cmd === 'delete_voice_sample') {
+      if (typeof api.deleteVoiceSample === 'function') {
+        return (await api.deleteVoiceSample(String(args?.id ?? ''))) as unknown as T;
+      }
+    }
+    if (cmd === 'get_call_takes') {
+      if (typeof api.getCallTakes === 'function') {
+        return (await api.getCallTakes()) as unknown as T;
+      }
+    }
+    if (cmd === 'approve_call_take') {
+      if (typeof api.approveCallTake === 'function') {
+        return (await api.approveCallTake(String(args?.id ?? ''), args?.name as string | undefined, args?.take)) as unknown as T;
+      }
+    }
+    if (cmd === 'dismiss_call_take') {
+      if (typeof api.dismissCallTake === 'function') {
+        return (await api.dismissCallTake(String(args?.id ?? ''))) as unknown as T;
+      }
+    }
+    if (cmd === 'export_diagnostics') {
+      if (typeof api.exportDiagnostics === 'function') {
+        return (await api.exportDiagnostics()) as unknown as T;
       }
     }
   }
@@ -175,22 +222,58 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     }
     return { success: true, preset } as unknown as T;
   }
-  if (cmd === 'get_voice_profile_status') {
+  if (cmd === 'get_voice_profile' || cmd === 'get_voice_profile_status') {
     const enrolled = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_profile_enrolled') === 'true' : false;
     const count = typeof localStorage !== 'undefined' ? Number(localStorage.getItem('clearcore_voice_sample_count') || (enrolled ? '5' : '0')) : 0;
-    return {
+    const profile: VoiceProfileStatus = {
       is_enrolled: enrolled,
       active_samples_count: count,
       embedding_dim: 192,
       neural_eq_calibrated: enrolled,
       gain_boost_db: 1.8,
-    } as unknown as T;
+    };
+    return { success: true, profile, ...profile } as unknown as T;
   }
   if (cmd === 'set_voice_profile') {
+    const p = (args?.profile ?? args) as VoiceProfileStatus;
+    const enrolled = p && typeof p.is_enrolled === 'boolean' ? p.is_enrolled : true;
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('clearcore_voice_profile_enrolled', 'true');
+      localStorage.setItem('clearcore_voice_profile_enrolled', String(enrolled));
     }
-    return { success: true } as unknown as T;
+    const profile: VoiceProfileStatus = {
+      is_enrolled: enrolled,
+      active_samples_count: p?.active_samples_count ?? 5,
+      embedding_dim: 192,
+      neural_eq_calibrated: enrolled,
+      gain_boost_db: 1.8,
+    };
+    return { success: true, profile, ...profile } as unknown as T;
+  }
+  if (cmd === 'get_voice_samples') {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_profile_samples') : null;
+    const samples = raw ? JSON.parse(raw) : [];
+    return samples as unknown as T;
+  }
+  if (cmd === 'add_voice_sample') {
+    const sample = (args?.sample ?? args) as VoiceSample;
+    return { success: true, sample } as unknown as T;
+  }
+  if (cmd === 'delete_voice_sample') {
+    return { success: true, id: String(args?.id ?? '') } as unknown as T;
+  }
+  if (cmd === 'get_call_takes') {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_intake_takes') : null;
+    const takes = raw ? JSON.parse(raw) : [];
+    return takes as unknown as T;
+  }
+  if (cmd === 'approve_call_take') {
+    return { success: true, id: String(args?.id ?? '') } as unknown as T;
+  }
+  if (cmd === 'dismiss_call_take') {
+    return { success: true, id: String(args?.id ?? '') } as unknown as T;
+  }
+  if (cmd === 'export_diagnostics') {
+    return JSON.stringify({ app: 'ClearCore', version: '0.1.0-beta.1' }) as unknown as T;
   }
 
   return {} as T;

@@ -5,6 +5,7 @@ import {
   interpretSelectionResult,
   isBackendSelectable,
   isPreviewBackend,
+  getBackendHelpDetails,
 } from './hardwareBackend';
 
 export const HardwareAcceleratorCard: React.FC = () => {
@@ -15,7 +16,9 @@ export const HardwareAcceleratorCard: React.FC = () => {
   const [autoResolvedBackend, setAutoResolvedBackend] = useState<{ id: string; name: string } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedHelpBackend, setSelectedHelpBackend] = useState<HardwareBackendItem | null>(null);
+  const [selectedOsTab, setSelectedOsTab] = useState<'ubuntu' | 'fedora' | 'arch' | 'python' | 'windows'>('ubuntu');
   const [copied, setCopied] = useState<boolean>(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [detectionError, setDetectionError] = useState<string | null>(null);
@@ -76,7 +79,7 @@ export const HardwareAcceleratorCard: React.FC = () => {
     }
   };
 
-  const handleCopyCommand = async (command: string) => {
+  const handleCopyCommand = async (command: string, key?: string) => {
     if (!command) return;
     try {
       if (navigator.clipboard?.writeText) {
@@ -90,7 +93,11 @@ export const HardwareAcceleratorCard: React.FC = () => {
         document.body.removeChild(textarea);
       }
       setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      if (key) setCopiedKey(key);
+      setTimeout(() => {
+        setCopied(false);
+        setCopiedKey(null);
+      }, 2500);
     } catch (err) {
       console.error('Failed to copy command:', err);
     }
@@ -524,183 +531,424 @@ export const HardwareAcceleratorCard: React.FC = () => {
       </div>
 
       {/* Installation Help Modal */}
-      {selectedHelpBackend && (
-        <div
-          className="modal-overlay"
-          onClick={() => setSelectedHelpBackend(null)}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.75)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: 16,
-          }}
-        >
+      {selectedHelpBackend && (() => {
+        const helpDetails = getBackendHelpDetails(selectedHelpBackend.id);
+        const activeCmd = helpDetails?.nativeCommands.find((c) => c.id === selectedOsTab) || helpDetails?.nativeCommands[0];
+
+        return (
           <div
-            className="modal-content"
-            onClick={(e) => e.stopPropagation()}
+            className="modal-overlay"
+            onClick={() => setSelectedHelpBackend(null)}
             style={{
-              backgroundColor: '#1e2330',
-              border: '1px solid #334155',
-              borderRadius: 10,
-              maxWidth: 580,
-              width: '100%',
-              padding: 24,
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: 'blur(4px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: 16,
             }}
           >
-            {/* Modal Header */}
             <div
+              className="modal-content"
+              onClick={(e) => e.stopPropagation()}
               style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 16,
-                borderBottom: '1px solid var(--border-color)',
-                paddingBottom: 12,
+                backgroundColor: '#1e2330',
+                border: '1px solid #334155',
+                borderRadius: 10,
+                maxWidth: 680,
+                width: '100%',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                padding: 24,
+                boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: '1.4rem' }}>⚠️</span>
-                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#fef08a' }}>
-                  {t('hardwareBackend.modalTitle')}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedHelpBackend(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-muted)',
-                  fontSize: '1.25rem',
-                  cursor: 'pointer',
-                  padding: 4,
-                }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Hardware & Runtime Summary */}
-            <div
-              style={{
-                background: 'rgba(234, 179, 8, 0.1)',
-                border: '1px solid rgba(234, 179, 8, 0.3)',
-                borderRadius: 6,
-                padding: '12px 16px',
-                marginBottom: 16,
-                fontSize: '0.9rem',
-                lineHeight: 1.5,
-              }}
-            >
-              <div style={{ marginBottom: 6 }}>
-                <strong>{t('hardwareBackend.hardwareDetectedTitle')}</strong>
-                <div style={{ color: '#fef08a', marginTop: 2 }}>
-                  🖥️ {selectedHelpBackend.device_info}
-                </div>
-              </div>
-              <div>
-                <strong>{t('hardwareBackend.runtimeRequiredTitle')}</strong>
-                <div style={{ color: '#93c5fd', marginTop: 2 }}>
-                  📦 {selectedHelpBackend.runtime_name}
-                </div>
-              </div>
-            </div>
-
-            {/* Step-by-Step Instructions */}
-            <div style={{ marginBottom: 16 }}>
+              {/* Modal Header */}
               <div
                 style={{
-                  fontWeight: 600,
-                  fontSize: '0.9rem',
-                  marginBottom: 6,
-                  color: 'var(--text-main)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 16,
+                  borderBottom: '1px solid var(--border-color)',
+                  paddingBottom: 12,
                 }}
               >
-                {t('hardwareBackend.installGuideTitle')}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: '1.4rem' }}>{getBackendIcon(selectedHelpBackend.id)}</span>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#fef08a' }}>
+                    {t('hardwareBackend.modalTitle')}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setSelectedHelpBackend(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '1.25rem',
+                    cursor: 'pointer',
+                    padding: 4,
+                  }}
+                >
+                  ✕
+                </button>
               </div>
-              <p
+
+              {/* Hardware & Runtime Summary */}
+              <div
                 style={{
-                  fontSize: '0.85rem',
-                  color: 'var(--text-muted)',
+                  background: 'rgba(234, 179, 8, 0.08)',
+                  border: '1px solid rgba(234, 179, 8, 0.25)',
+                  borderRadius: 6,
+                  padding: '12px 16px',
+                  marginBottom: 16,
+                  fontSize: '0.88rem',
                   lineHeight: 1.5,
                 }}
               >
-                {selectedHelpBackend.install_instruction}
-              </p>
-            </div>
+                <div style={{ marginBottom: 6 }}>
+                  <strong>{t('hardwareBackend.hardwareDetectedTitle')}</strong>
+                  <div style={{ color: '#fef08a', marginTop: 2 }}>
+                    🖥️ {selectedHelpBackend.device_info}
+                  </div>
+                </div>
+                <div style={{ marginBottom: 6 }}>
+                  <strong>{t('hardwareBackend.runtimeRequiredTitle')}</strong>
+                  <div style={{ color: '#93c5fd', marginTop: 2 }}>
+                    📦 {selectedHelpBackend.runtime_name}
+                  </div>
+                </div>
+                <div>
+                  <strong>{t('hardwareBackend.librarySearchedTitle')}</strong>
+                  <div style={{ color: '#86efac', marginTop: 2, fontFamily: 'Consolas, monospace', fontSize: '0.82rem' }}>
+                    🔍 {helpDetails
+                      ? `${helpDetails.librarySearched.linux} (Linux) / ${helpDetails.librarySearched.windows} (Windows)`
+                      : selectedHelpBackend.runtime_name}
+                  </div>
+                  {helpDetails?.librarySearched.description && (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 2 }}>
+                      {helpDetails.librarySearched.description}
+                    </div>
+                  )}
+                </div>
+              </div>
 
-            {/* Run Command Section */}
-            {selectedHelpBackend.install_command && (
-              <div style={{ marginBottom: 20 }}>
+              {/* Official Documentation Link */}
+              {helpDetails?.officialDocs && (
                 <div
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 6,
+                    background: 'rgba(56, 189, 248, 0.08)',
+                    border: '1px solid rgba(56, 189, 248, 0.25)',
+                    borderRadius: 6,
+                    padding: '12px 16px',
+                    marginBottom: 16,
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      color: 'var(--text-muted)',
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {t('hardwareBackend.commandToRun')}
-                  </span>
-                  <button
-                    className="action-btn"
-                    onClick={() => handleCopyCommand(selectedHelpBackend.install_command)}
-                    style={{
-                      fontSize: '0.75rem',
-                      padding: '4px 10px',
-                      backgroundColor: copied ? '#15803d' : '#2b3140',
-                      color: copied ? '#ffffff' : 'var(--text-main)',
-                    }}
-                  >
-                    {copied ? t('hardwareBackend.copiedBtn') : t('hardwareBackend.copyCommandBtn')}
-                  </button>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                    <div>
+                      <strong style={{ color: '#7dd3fc', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        🌐 {t('hardwareBackend.officialDocsTitle')}
+                      </strong>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                        {t('hardwareBackend.officialDocsDesc')}
+                      </div>
+                    </div>
+                    <a
+                      href={helpDetails.officialDocs.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        color: '#0f172a',
+                        backgroundColor: '#38bdf8',
+                        textDecoration: 'none',
+                        fontWeight: 600,
+                        fontSize: '0.8rem',
+                        padding: '6px 12px',
+                        borderRadius: 4,
+                      }}
+                    >
+                      {t('hardwareBackend.openDocLink')} ↗
+                    </a>
+                  </div>
                 </div>
-                <pre
+              )}
+
+              {/* Native Commands by Operating System */}
+              {helpDetails?.nativeCommands && helpDetails.nativeCommands.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '0.88rem',
+                      marginBottom: 8,
+                      color: 'var(--text-main)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <span>💻</span>
+                    <span>{t('hardwareBackend.nativeCommandsTitle')}</span>
+                  </div>
+
+                  {/* Tabs */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 6,
+                      marginBottom: 10,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    {helpDetails.nativeCommands.map((cmd) => {
+                      const isActive = selectedOsTab === cmd.id;
+                      return (
+                        <button
+                          key={cmd.id}
+                          onClick={() => setSelectedOsTab(cmd.id)}
+                          style={{
+                            background: isActive ? '#38bdf8' : '#0f172a',
+                            color: isActive ? '#0f172a' : '#cbd5e1',
+                            border: `1px solid ${isActive ? '#38bdf8' : '#334155'}`,
+                            borderRadius: 6,
+                            padding: '5px 12px',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                            fontWeight: isActive ? 700 : 500,
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          {cmd.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Tab Panel */}
+                  {activeCmd && (
+                    <div
+                      style={{
+                        backgroundColor: '#0f172a',
+                        border: '1px solid #334155',
+                        borderRadius: 6,
+                        padding: '12px 14px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600 }}>
+                          {activeCmd.label}
+                        </span>
+                        <button
+                          className="action-btn"
+                          onClick={() => handleCopyCommand(activeCmd.command, `tab-${activeCmd.id}`)}
+                          style={{
+                            fontSize: '0.75rem',
+                            padding: '3px 10px',
+                            backgroundColor: copiedKey === `tab-${activeCmd.id}` ? '#15803d' : '#2b3140',
+                            color: copiedKey === `tab-${activeCmd.id}` ? '#ffffff' : 'var(--text-main)',
+                          }}
+                        >
+                          {copiedKey === `tab-${activeCmd.id}` ? t('hardwareBackend.copiedBtn') : t('hardwareBackend.copyCommandBtn')}
+                        </button>
+                      </div>
+                      <pre
+                        style={{
+                          margin: 0,
+                          fontSize: '0.82rem',
+                          color: '#38bdf8',
+                          overflowX: 'auto',
+                          fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {activeCmd.command}
+                      </pre>
+                      {activeCmd.note && (
+                        <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#94a3b8' }}>
+                          💡 {activeCmd.note}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Fallback / Detector Suggested Command if available */}
+              {selectedHelpBackend.install_command && (
+                <div style={{ marginBottom: 16 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: 6,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        color: 'var(--text-muted)',
+                      }}
+                    >
+                      ⚡ {t('hardwareBackend.commandToRun')}
+                    </span>
+                    <button
+                      className="action-btn"
+                      onClick={() => handleCopyCommand(selectedHelpBackend.install_command, 'detected-cmd')}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '3px 10px',
+                        backgroundColor: copiedKey === 'detected-cmd' ? '#15803d' : '#2b3140',
+                        color: copiedKey === 'detected-cmd' ? '#ffffff' : 'var(--text-main)',
+                      }}
+                    >
+                      {copiedKey === 'detected-cmd' ? t('hardwareBackend.copiedBtn') : t('hardwareBackend.copyCommandBtn')}
+                    </button>
+                  </div>
+                  <pre
+                    style={{
+                      backgroundColor: '#0f172a',
+                      border: '1px solid #334155',
+                      borderRadius: 6,
+                      padding: '10px 14px',
+                      fontSize: '0.82rem',
+                      color: '#4ade80',
+                      overflowX: 'auto',
+                      fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                      margin: 0,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {selectedHelpBackend.install_command}
+                  </pre>
+                </div>
+              )}
+
+              {/* Diagnostic Guide */}
+              {helpDetails?.diagnosticGuide && helpDetails.diagnosticGuide.length > 0 && (
+                <div
                   style={{
-                    backgroundColor: '#0f172a',
+                    background: 'rgba(15, 23, 42, 0.6)',
                     border: '1px solid #334155',
                     borderRadius: 6,
-                    padding: '10px 14px',
-                    fontSize: '0.85rem',
-                    color: '#38bdf8',
-                    overflowX: 'auto',
-                    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                    padding: '12px 16px',
+                    marginBottom: 20,
                   }}
                 >
-                  {selectedHelpBackend.install_command}
-                </pre>
-              </div>
-            )}
+                  <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#f8fafc', marginBottom: 4 }}>
+                    🔍 {t('hardwareBackend.diagnosticGuideTitle')}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 10 }}>
+                    {t('hardwareBackend.diagnosticGuideDesc')}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {helpDetails.diagnosticGuide.map((step, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          background: '#1e293b',
+                          border: '1px solid #334155',
+                          borderRadius: 6,
+                          padding: '8px 12px',
+                          fontSize: '0.8rem',
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, color: '#e2e8f0', marginBottom: step.command ? 4 : 0 }}>
+                          {idx + 1}. {step.title}
+                        </div>
+                        {step.command && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              background: '#0f172a',
+                              padding: '5px 10px',
+                              borderRadius: 4,
+                              gap: 8,
+                            }}
+                          >
+                            <code style={{ color: '#38bdf8', fontSize: '0.78rem', wordBreak: 'break-all' }}>
+                              {step.command}
+                            </code>
+                            <button
+                              onClick={() => handleCopyCommand(step.command!, `diag-${idx}`)}
+                              style={{
+                                background: copiedKey === `diag-${idx}` ? '#15803d' : '#334155',
+                                border: 'none',
+                                color: '#ffffff',
+                                borderRadius: 4,
+                                padding: '2px 8px',
+                                fontSize: '0.72rem',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {copiedKey === `diag-${idx}` ? t('hardwareBackend.copiedBtn') : t('hardwareBackend.copyCommandShort')}
+                            </button>
+                          </div>
+                        )}
+                        {step.tip && (
+                          <div style={{ color: '#94a3b8', fontSize: '0.74rem', marginTop: 4 }}>
+                            💡 {step.tip}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-            {/* Modal Footer */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                className="action-btn"
-                onClick={() => setSelectedHelpBackend(null)}
-                style={{ padding: '8px 18px', fontSize: '0.9rem' }}
-              >
-                {t('hardwareBackend.closeModalBtn')}
-              </button>
+              {/* Modal Footer */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, borderTop: '1px solid var(--border-color)', paddingTop: 14 }}>
+                <button
+                  className="action-btn"
+                  disabled={isLoading}
+                  onClick={async () => {
+                    await fetchBackends();
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '0.85rem',
+                    background: 'rgba(56, 189, 248, 0.15)',
+                    border: '1px solid #38bdf8',
+                    color: '#38bdf8',
+                  }}
+                >
+                  {isLoading ? t('hardwareBackend.refreshingBtn') : t('hardwareBackend.recheckBtn')}
+                </button>
+                <button
+                  className="action-btn"
+                  onClick={() => setSelectedHelpBackend(null)}
+                  style={{ padding: '8px 18px', fontSize: '0.85rem' }}
+                >
+                  {t('hardwareBackend.closeModalBtn')}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

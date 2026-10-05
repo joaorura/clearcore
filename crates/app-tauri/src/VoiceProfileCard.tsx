@@ -334,48 +334,90 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
   // Load initial persistent state
   useEffect(() => {
-    try {
-      const savedEnrolled = localStorage.getItem(STORAGE_ENROLLED_KEY) === 'true';
-      const savedReading = localStorage.getItem(STORAGE_READING_MODE_KEY) === 'true';
-      setIsReadingMode(savedReading);
+    const initVoiceData = async () => {
+      try {
+        const savedEnrolled = localStorage.getItem(STORAGE_ENROLLED_KEY) === 'true';
+        const savedReading = localStorage.getItem(STORAGE_READING_MODE_KEY) === 'true';
+        setIsReadingMode(savedReading);
 
-      const savedSamplesJson = localStorage.getItem(STORAGE_SAMPLES_KEY);
-      let loadedSamples: VoiceSample[] = [];
-      if (savedSamplesJson) {
-        loadedSamples = JSON.parse(savedSamplesJson);
-      } else if (savedEnrolled) {
-        // Generate initial 5 samples if marked enrolled
-        loadedSamples = stepQuestions.map((q, idx) => ({
-          id: `sample-${idx + 1}`,
-          title: `Amostra ${idx + 1}: ${t(q.categoryKey)}`,
-          category: t(q.categoryKey),
-          timestamp: new Date().toLocaleDateString(),
-          durationSec: 5.0,
-          isInitialStep: true,
-        }));
+        let loadedSamples: VoiceSample[] = [];
+        try {
+          const res = await invokeBridge<{ success?: boolean; samples?: VoiceSample[] } | VoiceSample[]>('get_voice_samples');
+          if (Array.isArray(res) && res.length > 0) {
+            loadedSamples = res;
+          } else if (res && typeof res === 'object' && 'samples' in res && Array.isArray(res.samples) && res.samples.length > 0) {
+            loadedSamples = res.samples;
+          }
+        } catch {}
+
+        if (loadedSamples.length === 0) {
+          const savedSamplesJson = localStorage.getItem(STORAGE_SAMPLES_KEY);
+          if (savedSamplesJson) {
+            loadedSamples = JSON.parse(savedSamplesJson);
+          } else if (savedEnrolled) {
+            // Generate initial 5 samples if marked enrolled
+            loadedSamples = stepQuestions.map((q, idx) => ({
+              id: `sample-${idx + 1}`,
+              title: `Amostra ${idx + 1}: ${t(q.categoryKey)}`,
+              category: t(q.categoryKey),
+              timestamp: new Date().toLocaleDateString(),
+              durationSec: 5.0,
+              isInitialStep: true,
+            }));
+          }
+        }
+        setSamples(loadedSamples);
+
+        let loadedTakes: CallSuggestionTake[] = [];
+        try {
+          const res = await invokeBridge<{ success?: boolean; takes?: CallSuggestionTake[] } | CallSuggestionTake[]>('get_call_takes');
+          if (Array.isArray(res) && res.length > 0) {
+            loadedTakes = res;
+          } else if (res && typeof res === 'object' && 'takes' in res && Array.isArray(res.takes) && res.takes.length > 0) {
+            loadedTakes = res.takes;
+          }
+        } catch {}
+
+        if (loadedTakes.length === 0) {
+          const savedTakesJson = localStorage.getItem(STORAGE_CALL_TAKES_KEY);
+          if (savedTakesJson) {
+            loadedTakes = JSON.parse(savedTakesJson);
+          }
+        }
+        setCallTakes(loadedTakes);
+
+        let initialProfile: VoiceProfileStatus = {
+          is_enrolled: savedEnrolled && loadedSamples.length > 0,
+          active_samples_count: loadedSamples.length,
+          embedding_dim: 192,
+          neural_eq_calibrated: savedEnrolled && loadedSamples.length > 0,
+          gain_boost_db: 1.8,
+        };
+
+        try {
+          const profileRes = await invokeBridge<{ success?: boolean; profile?: VoiceProfileStatus; is_enrolled?: boolean } | VoiceProfileStatus>('get_voice_profile');
+          if (profileRes && typeof profileRes === 'object') {
+            const prof = ('profile' in profileRes && profileRes.profile) ? profileRes.profile : profileRes;
+            if (prof && typeof prof.is_enrolled === 'boolean') {
+              initialProfile = {
+                ...initialProfile,
+                ...prof,
+                active_samples_count: loadedSamples.length > 0 ? loadedSamples.length : prof.active_samples_count,
+              };
+            }
+          }
+        } catch {}
+
+        setProfileStatus(initialProfile);
+        if (initialProfile.is_enrolled) {
+          setCurrentStep(5);
+        }
+      } catch {
+        // Ignore local storage / bridge initialization errors
       }
+    };
 
-      setSamples(loadedSamples);
-
-      const savedTakesJson = localStorage.getItem(STORAGE_CALL_TAKES_KEY);
-      if (savedTakesJson) {
-        setCallTakes(JSON.parse(savedTakesJson));
-      }
-
-      setProfileStatus({
-        is_enrolled: savedEnrolled && loadedSamples.length > 0,
-        active_samples_count: loadedSamples.length,
-        embedding_dim: 192,
-        neural_eq_calibrated: savedEnrolled && loadedSamples.length > 0,
-        gain_boost_db: 1.8,
-      });
-
-      if (savedEnrolled) {
-        setCurrentStep(5);
-      }
-    } catch {
-      // Ignore local storage errors
-    }
+    initVoiceData();
   }, []);
 
   // Cleanup Web Audio & Recorders
@@ -626,6 +668,9 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     setProfileStatus(newStatus);
 
     await invokeBridge('set_voice_profile', { profile: newStatus });
+    for (const sample of newSamples) {
+      await invokeBridge('add_voice_sample', { sample }).catch(() => {});
+    }
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: newStatus }));
     }
@@ -685,6 +730,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       neural_eq_calibrated: updated.length > 0,
     };
     setProfileStatus(newStatus);
+    invokeBridge('delete_voice_sample', { id }).catch(() => {});
     invokeBridge('set_voice_profile', { profile: newStatus });
   };
 
@@ -719,6 +765,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       neural_eq_calibrated: true,
     };
     setProfileStatus(newStatus);
+    invokeBridge('approve_call_take', { id: take.id, name: take.title, take }).catch(() => {});
     invokeBridge('set_voice_profile', { profile: newStatus });
 
     setFeedbackMessage(t('voiceProfile.takeApprovedFeedback'));
@@ -732,6 +779,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     try {
       localStorage.setItem(STORAGE_CALL_TAKES_KEY, JSON.stringify(updatedTakes));
     } catch {}
+    invokeBridge('dismiss_call_take', { id }).catch(() => {});
     setFeedbackMessage(t('voiceProfile.takeDismissedFeedback'));
     setTimeout(() => setFeedbackMessage(null), 3000);
   };
@@ -845,6 +893,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       neural_eq_calibrated: true,
     };
     setProfileStatus(newStatus);
+    invokeBridge('add_voice_sample', { sample: newSample }).catch(() => {});
     invokeBridge('set_voice_profile', { profile: newStatus });
 
     setIsModalOpen(false);

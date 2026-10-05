@@ -9,6 +9,7 @@ const { planCaptureLinks } = require('./capture-link-plan.cjs');
 const { parseHardwareJson } = require('./hardware-json.cjs');
 const { resolveBackendSelection } = require('./backend-selection.cjs');
 const updater = require('./updater.cjs');
+const voiceProfileStore = require('./voice-profile-store.cjs');
 
 // ClearCore Runtime Application Version
 const APP_VERSION = '0.1.0-beta.1';
@@ -1362,6 +1363,28 @@ function queryHardwareBackends() {
     }
   }
 
+  // Detect package commands on Linux
+  let linuxPkgTrt = 'sudo apt install -y libnvinfer10 libnvonnxparsers10 || pip install tensorrt';
+  let linuxPkgOvNpu = 'sudo apt install -y intel-npu-driver openvino || pip install openvino';
+  let linuxPkgOvGpu = 'sudo apt install -y intel-opencl-icd openvino || pip install openvino';
+  let linuxPkgOvCpu = 'sudo apt install -y openvino || pip install openvino';
+  if (isLinux) {
+    try {
+      const osRel = fs.readFileSync('/etc/os-release', 'utf8').toLowerCase();
+      if (/fedora|rhel|centos|rocky/.test(osRel)) {
+        linuxPkgTrt = 'sudo dnf install -y tensorrt || pip install tensorrt';
+        linuxPkgOvNpu = 'sudo dnf install -y intel-npu-driver openvino || pip install openvino';
+        linuxPkgOvGpu = 'sudo dnf install -y intel-compute-runtime openvino || pip install openvino';
+        linuxPkgOvCpu = 'sudo dnf install -y openvino || pip install openvino';
+      } else if (/arch|manjaro/.test(osRel)) {
+        linuxPkgTrt = 'sudo pacman -S --needed tensorrt || pip install tensorrt';
+        linuxPkgOvNpu = 'sudo pacman -S --needed intel-npu-driver-bin openvino || pip install openvino';
+        linuxPkgOvGpu = 'sudo pacman -S --needed intel-compute-runtime openvino || pip install openvino';
+        linuxPkgOvCpu = 'sudo pacman -S --needed openvino || pip install openvino';
+      }
+    } catch {}
+  }
+
   return {
     auto_resolved_backend: fallbackAutoResolved,
     backends: [
@@ -1389,9 +1412,9 @@ function queryHardwareBackends() {
         runtime_installed: false,
         device_info: hasNvidiaGpu ? 'GPU Dedicada NVIDIA Detectada' : 'Nenhuma GPU dedicada NVIDIA detectada neste sistema.',
         runtime_name: isWin ? 'TensorRT (nvinfer.dll)' : 'TensorRT (libnvinfer.so)',
-        install_script: isWin ? '.\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
-        install_command: isWin ? 'powershell .\\scripts\\install-tensorrt.ps1' : './scripts/install-tensorrt.sh',
-        install_instruction: 'GPU NVIDIA detectada. Instale o CUDA Toolkit e o NVIDIA TensorRT para acelerar na GPU.',
+        install_script: '',
+        install_command: isWin ? 'pip install tensorrt' : linuxPkgTrt,
+        install_instruction: 'GPU NVIDIA detectada. Instale o NVIDIA TensorRT (libnvinfer) pelo gerenciador de pacotes da sua distro ou Python (pip install tensorrt). Guia oficial: https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html',
       },
       {
         id: 'openvino_npu',
@@ -1403,10 +1426,10 @@ function queryHardwareBackends() {
           ? 'Intel(R) AI Boost (NPU Neural dedicada no SoC Core Ultra)'
           : `Incompatível: Processador AMD detectado (${cpuModel}). A NPU Intel AI Boost requer processador Intel Core Ultra.`,
         runtime_name: isWin ? 'OpenVINO NPU (openvino_intel_npu_plugin.dll)' : 'OpenVINO NPU (libopenvino_intel_npu_plugin.so)',
-        install_script: isWin ? '.\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
-        install_command: isWin ? 'powershell .\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
+        install_script: '',
+        install_command: isWin ? 'pip install openvino' : linuxPkgOvNpu,
         install_instruction: isIntel
-          ? 'Instale o Intel OpenVINO runtime e o driver Intel NPU para habilitar o processamento na NPU.'
+          ? 'Instale o Intel OpenVINO runtime e o driver intel-npu-driver para habilitar o processamento neural na NPU. Documentação: https://docs.openvino.ai/'
           : 'O OpenVINO não funciona em processadores AMD.',
       },
       {
@@ -1419,10 +1442,10 @@ function queryHardwareBackends() {
           ? 'GPU Integrada Intel Arc / Graphics'
           : `Incompatível: Processador AMD detectado (${cpuModel}). Requer GPU integrada Intel.`,
         runtime_name: isWin ? 'OpenVINO GPU (openvino_intel_gpu_plugin.dll)' : 'OpenVINO GPU (libopenvino_intel_gpu_plugin.so)',
-        install_script: isWin ? '.\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
-        install_command: isWin ? 'powershell .\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
+        install_script: '',
+        install_command: isWin ? 'pip install openvino' : linuxPkgOvGpu,
         install_instruction: isIntel
-          ? 'Instale o Intel OpenVINO runtime e o driver compute-runtime para acelerar na GPU integrada.'
+          ? 'Instale o Intel OpenVINO runtime e o driver compute-runtime para acelerar na GPU integrada. Documentação: https://docs.openvino.ai/'
           : 'O OpenVINO não funciona em processadores AMD.',
       },
       {
@@ -1435,10 +1458,10 @@ function queryHardwareBackends() {
           ? `${cpuModel} (Aceleração vetorial Intel AVX2 / AMX / VNNI)`
           : `Incompatível: Processador AMD detectado (${cpuModel}). OpenVINO é exclusivo para Intel.`,
         runtime_name: isWin ? 'OpenVINO CPU (openvino_intel_cpu_plugin.dll)' : 'OpenVINO CPU (libopenvino_intel_cpu_plugin.so)',
-        install_script: isWin ? '.\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
-        install_command: isWin ? 'powershell .\\scripts\\install-openvino.ps1' : './scripts/install-openvino.sh',
+        install_script: '',
+        install_command: isWin ? 'pip install openvino' : linuxPkgOvCpu,
         install_instruction: isIntel
-          ? 'Instale o Intel OpenVINO runtime para habilitar aceleração vetorial Intel na CPU.'
+          ? 'Instale o Intel OpenVINO runtime para habilitar aceleração vetorial Intel na CPU. Documentação: https://docs.openvino.ai/'
           : 'OpenVINO não é compatível com processadores AMD. Utilize o CPU Nativo (Tract Pure-Rust).',
       },
       {
@@ -1515,21 +1538,242 @@ ipcMain.handle('set_hardware_backend', (_event, backendId) => {
   return result;
 });
 
+// Studio DSP Preset Handlers
 ipcMain.handle('get_studio_preset', () => {
   if (process.platform === 'linux') {
     const current = clearcoreState.readPreset(clearcoreStatePath());
-    return current || 'Natural';
+    if (current) return current;
   }
+  const settings = readAppSettings();
+  if (settings && settings.preset) return settings.preset;
   return 'Natural';
 });
 
-ipcMain.handle('set_studio_preset', (_event, args) => {
+ipcMain.handle('set_studio_preset', async (_event, args) => {
   const preset = typeof args === 'string' ? args : (args && args.preset ? args.preset : 'Natural');
   if (clearcoreState.isPreset(preset)) {
-    writeClearcoreSharedState({ preset });
+    writeAppSettings({ preset });
+    if (process.platform === 'linux') {
+      writeClearcoreSharedState({ preset });
+    }
+    if (await isDaemonResponsive()) {
+      try {
+        await sendIpcRequest({ SetPreset: preset });
+      } catch (e) {
+        console.log('[Clearcore IPC] Daemon SetPreset forward skipped:', e.message);
+      }
+    }
     return { success: true, preset };
   }
   return { success: false, preset: 'Off' };
+});
+
+// Voice Profile & Speaker Isolation IPC Handlers
+ipcMain.handle('set_voice_profile', async (_event, args) => {
+  try {
+    const rawProfile = (args && typeof args === 'object' && args.profile) ? args.profile : (args && typeof args === 'object' ? args : {});
+    const updated = voiceProfileStore.writeVoiceProfile(rawProfile);
+
+    // Forward to daemon if running
+    if (await isDaemonResponsive()) {
+      try {
+        if (updated.is_enrolled === false) {
+          await sendIpcRequest('ClearVoiceProfile');
+        } else {
+          await sendIpcRequest({
+            SetVoiceProfile: {
+              profile_json: JSON.stringify(updated),
+            },
+          });
+        }
+      } catch (e) {
+        console.log('[Clearcore IPC] Daemon voice profile forward skipped:', e.message);
+      }
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('voice-profile-update', updated);
+    }
+
+    return { success: true, profile: updated, ...updated };
+  } catch (err) {
+    console.error('[Clearcore IPC] Error in set_voice_profile:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get_voice_profile', () => {
+  const profile = voiceProfileStore.readVoiceProfile();
+  return { success: true, profile, ...profile };
+});
+
+ipcMain.handle('get_voice_profile_status', () => {
+  const profile = voiceProfileStore.readVoiceProfile();
+  return { success: true, profile, ...profile };
+});
+
+ipcMain.handle('get_voice_samples', async () => {
+  let samples = voiceProfileStore.readVoiceSamples();
+  if (samples.length === 0 && (await isDaemonResponsive())) {
+    try {
+      const daemonResp = await sendIpcRequest('ListVoiceSamples');
+      if (daemonResp && Array.isArray(daemonResp.samples) && daemonResp.samples.length > 0) {
+        samples = daemonResp.samples.map((s) => ({
+          id: s.id,
+          title: s.name || s.id,
+          timestamp: s.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          durationSec: 5.0,
+          isInitialStep: false,
+        }));
+        voiceProfileStore.writeVoiceSamples(samples);
+      }
+    } catch (e) {
+      console.log('[Clearcore IPC] ListVoiceSamples query skipped:', e.message);
+    }
+  }
+  return { success: true, samples, total_count: samples.length };
+});
+
+ipcMain.handle('add_voice_sample', async (_event, args) => {
+  try {
+    const rawSample = (args && typeof args === 'object' && args.sample) ? args.sample : args;
+    const result = voiceProfileStore.addVoiceSample(rawSample);
+
+    if (await isDaemonResponsive()) {
+      try {
+        await sendIpcRequest({
+          AddVoiceSample: {
+            sample_json: JSON.stringify({
+              id: result.sample.id,
+              timestamp: result.sample.timestamp,
+              name: result.sample.title,
+              audio_path: result.sample.audioUrl || null,
+              embedding: new Array(192).fill(0.01),
+              is_active: true,
+            }),
+          },
+        });
+      } catch (e) {
+        console.log('[Clearcore IPC] AddVoiceSample forward skipped:', e.message);
+      }
+    }
+
+    return { success: true, ...result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('delete_voice_sample', async (_event, args) => {
+  try {
+    const sampleId = typeof args === 'string' ? args : (args && args.id ? args.id : '');
+    const result = voiceProfileStore.deleteVoiceSample(sampleId);
+
+    if (await isDaemonResponsive()) {
+      try {
+        await sendIpcRequest({
+          DeleteVoiceSample: { id: sampleId },
+        });
+      } catch (e) {
+        console.log('[Clearcore IPC] DeleteVoiceSample forward skipped:', e.message);
+      }
+    }
+
+    return { success: true, ...result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get_call_takes', async () => {
+  let takes = voiceProfileStore.readCallTakes();
+  if (takes.length === 0 && (await isDaemonResponsive())) {
+    try {
+      const daemonResp = await sendIpcRequest('ListIntakeSuggestions');
+      if (daemonResp && Array.isArray(daemonResp.suggestions) && daemonResp.suggestions.length > 0) {
+        takes = daemonResp.suggestions.map((s) => ({
+          id: s.id,
+          title: `Sugestão SNR ${Math.round(s.snr || 24)}dB`,
+          timestamp: s.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          durationSec: s.duration_secs || 5.0,
+          snrDb: s.snr || 24.0,
+          audioUrl: s.audio_path || undefined,
+        }));
+        voiceProfileStore.writeCallTakes(takes);
+      }
+    } catch (e) {
+      console.log('[Clearcore IPC] ListIntakeSuggestions query skipped:', e.message);
+    }
+  }
+  return { success: true, takes, count: takes.length };
+});
+
+ipcMain.handle('approve_call_take', async (_event, args) => {
+  try {
+    const id = args && args.id ? args.id : (typeof args === 'string' ? args : '');
+    const name = args && args.name ? args.name : (args && args.take && args.take.title ? args.take.title : undefined);
+    const take = args && args.take ? args.take : undefined;
+    const result = voiceProfileStore.approveCallTake(id, name, take);
+
+    if (await isDaemonResponsive()) {
+      try {
+        await sendIpcRequest({
+          ApproveIntakeSuggestion: { id, name: name || null },
+        });
+      } catch (e) {
+        console.log('[Clearcore IPC] ApproveIntakeSuggestion forward skipped:', e.message);
+      }
+    }
+
+    return { success: true, ...result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('dismiss_call_take', async (_event, args) => {
+  try {
+    const id = typeof args === 'string' ? args : (args && args.id ? args.id : '');
+    const result = voiceProfileStore.dismissCallTake(id);
+
+    if (await isDaemonResponsive()) {
+      try {
+        await sendIpcRequest({
+          DiscardIntakeSuggestion: { id },
+        });
+      } catch (e) {
+        console.log('[Clearcore IPC] DiscardIntakeSuggestion forward skipped:', e.message);
+      }
+    }
+
+    return { success: true, ...result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Diagnostics Export Handler
+ipcMain.handle('export_diagnostics', async () => {
+  try {
+    let diag = null;
+    if (await isDaemonResponsive()) {
+      try {
+        diag = await sendIpcRequest('GetDiagnostics');
+      } catch {}
+    }
+    const report = {
+      app_version: APP_VERSION,
+      timestamp: new Date().toISOString(),
+      platform: process.platform,
+      arch: process.arch,
+      virtual_mic: currentVirtualMicStatus,
+      status: currentStatus,
+      diagnostics: diag,
+    };
+    return JSON.stringify(report, null, 2);
+  } catch (err) {
+    return JSON.stringify({ error: err.message }, null, 2);
+  }
 });
 
 // Auto-Updater IPC Handlers

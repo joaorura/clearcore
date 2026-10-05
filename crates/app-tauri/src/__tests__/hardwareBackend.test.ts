@@ -8,6 +8,7 @@ import {
   isBackendSelectable,
   isRuntimePending,
   isPreviewBackend,
+  getBackendHelpDetails,
 } from '../hardwareBackend';
 import { ptBR } from '../i18n/locales/pt-BR';
 import { enUS } from '../i18n/locales/en-US';
@@ -125,5 +126,70 @@ describe('hardwareBackend: consistência de textos e badges de status nos idioma
     expect(enUS.hardwareBackend.switchSuccess).toContain('{name}');
     expect(ptBR.hardwareBackend.cannotSelectMissing).toBeDefined();
     expect(enUS.hardwareBackend.cannotSelectMissing).toBeDefined();
+  });
+});
+
+describe('hardwareBackend: instruções de instalação, biblioteca procurada e links oficiais', () => {
+  it('NVIDIA TensorRT provê biblioteca procurada, comandos nativos oficiais, link de doc e diagnóstico', () => {
+    const trt = getBackendHelpDetails('nvidia_tensorrt');
+    expect(trt).not.toBeNull();
+    expect(trt!.librarySearched.linux).toContain('libnvinfer.so');
+    expect(trt!.librarySearched.windows).toContain('nvinfer.dll');
+    expect(trt!.officialDocs.url).toBe('https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html');
+
+    const cmdMap = new Map(trt!.nativeCommands.map((c) => [c.id, c.command]));
+    expect(cmdMap.get('ubuntu')).toContain('apt install -y libnvinfer10');
+    expect(cmdMap.get('fedora')).toContain('dnf install -y tensorrt');
+    expect(cmdMap.get('arch')).toContain('pacman -S --needed tensorrt');
+    expect(cmdMap.get('python')).toBe('pip install tensorrt');
+    expect(cmdMap.get('windows')).toBe('pip install tensorrt');
+
+    const diagCmds = trt!.diagnosticGuide.map((d) => d.command);
+    expect(diagCmds).toContain('nvidia-smi');
+    expect(diagCmds).toContain('ldconfig -p | grep libnvinfer');
+  });
+
+  it('Intel OpenVINO NPU provê biblioteca, comandos nativos, verificação intel-npu-driver e docs', () => {
+    const ovNpu = getBackendHelpDetails('openvino_npu');
+    expect(ovNpu).not.toBeNull();
+    expect(ovNpu!.librarySearched.linux).toContain('libopenvino_intel_npu_plugin.so');
+    expect(ovNpu!.officialDocs.url).toContain('configurations-intel-npu.html');
+
+    const cmdMap = new Map(ovNpu!.nativeCommands.map((c) => [c.id, c.command]));
+    expect(cmdMap.get('ubuntu')).toContain('intel-npu-driver');
+    expect(cmdMap.get('fedora')).toContain('intel-npu-driver');
+    expect(cmdMap.get('arch')).toContain('intel-npu-driver');
+    expect(cmdMap.get('python')).toBe('pip install openvino');
+
+    const diagCmds = ovNpu!.diagnosticGuide.map((d) => d.command);
+    expect(diagCmds).toContain('ls -la /dev/accel/accel*');
+    expect(diagCmds).toContain('sudo usermod -aG render $USER');
+  });
+
+  it('Intel OpenVINO GPU e CPU possuem instruções e plugins específicos', () => {
+    const ovGpu = getBackendHelpDetails('openvino_gpu');
+    expect(ovGpu).not.toBeNull();
+    expect(ovGpu!.librarySearched.linux).toContain('libopenvino_intel_gpu_plugin.so');
+
+    const ovCpu = getBackendHelpDetails('openvino_cpu');
+    expect(ovCpu).not.toBeNull();
+    expect(ovCpu!.librarySearched.linux).toContain('libopenvino_intel_cpu_plugin.so');
+  });
+
+  it('AMD Ryzen AI NPU e GPU possuem comandos claros e links oficiais', () => {
+    const amdNpu = getBackendHelpDetails('amd_ryzenai_npu');
+    expect(amdNpu).not.toBeNull();
+    expect(amdNpu!.librarySearched.linux).toContain('libxrt_core.so');
+    expect(amdNpu!.officialDocs.url).toBe('https://ryzenai.docs.amd.com/');
+
+    const amdGpu = getBackendHelpDetails('amd_ryzenai_gpu');
+    expect(amdGpu).not.toBeNull();
+    expect(amdGpu!.officialDocs.url).toBe('https://rocm.docs.amd.com/');
+  });
+
+  it('backends baseline ou desconhecidos retornam null', () => {
+    expect(getBackendHelpDetails('cpu_tract')).toBeNull();
+    expect(getBackendHelpDetails('auto')).toBeNull();
+    expect(getBackendHelpDetails('inexistente')).toBeNull();
   });
 });

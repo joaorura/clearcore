@@ -75,11 +75,20 @@ HAS_AMD_NPU=false
 HAS_AMD_GPU=false
 
 # 1. NVIDIA GPU
+NVIDIA_MODEL=""
 if echo "${PCI_INFO}" | grep -qi "10de:"; then
     HAS_NVIDIA=true
 fi
 if [[ -e "${ROOT}/dev/nvidia0" || -e "${ROOT}/proc/driver/nvidia/version" ]]; then
     HAS_NVIDIA=true
+fi
+if [[ "${HAS_NVIDIA}" == "true" ]]; then
+    if [[ -n "${PCI_INFO}" ]]; then
+        NVIDIA_MODEL="$(echo "${PCI_INFO}" | grep -i "10de:" | head -n1 | sed -E 's/^[0-9a-f:.]+ [^:]+: //' || true)"
+    fi
+    if [[ -z "${NVIDIA_MODEL}" ]]; then
+        NVIDIA_MODEL="NVIDIA Dedicated GPU"
+    fi
 fi
 
 # 2. Intel NPU
@@ -300,6 +309,46 @@ else
 fi
 
 # ------------------------------------------------------------------------------
+# Identificacao da Distribuicao e Comandos Nativos de Instalacao
+# ------------------------------------------------------------------------------
+DISTRO_ID=""
+DISTRO_LIKE=""
+if [[ -f "${ROOT}/etc/os-release" ]]; then
+    DISTRO_ID="$(grep -E '^ID=' "${ROOT}/etc/os-release" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]' || true)"
+    DISTRO_LIKE="$(grep -E '^ID_LIKE=' "${ROOT}/etc/os-release" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]' || true)"
+fi
+
+if [[ "${DISTRO_ID}" =~ (ubuntu|debian|linuxmint|pop) || "${DISTRO_LIKE}" =~ (ubuntu|debian) ]]; then
+    CMD_TRT="sudo apt install -y libnvinfer10 libnvonnxparsers10 || pip install tensorrt"
+    CMD_OV_NPU="sudo apt install -y intel-npu-driver openvino || pip install openvino"
+    CMD_OV_GPU="sudo apt install -y intel-opencl-icd openvino || pip install openvino"
+    CMD_OV_CPU="sudo apt install -y openvino || pip install openvino"
+    CMD_AMD_NPU="sudo apt install -y amdxdna-driver xrt || pip install ryzenai"
+    CMD_AMD_GPU="sudo apt install -y mesa-vulkan-drivers rocm-opencl-runtime"
+elif [[ "${DISTRO_ID}" =~ (fedora|rhel|centos|rocky|almalinux) || "${DISTRO_LIKE}" =~ (fedora|rhel) ]]; then
+    CMD_TRT="sudo dnf install -y tensorrt || pip install tensorrt"
+    CMD_OV_NPU="sudo dnf install -y intel-npu-driver openvino || pip install openvino"
+    CMD_OV_GPU="sudo dnf install -y intel-compute-runtime openvino || pip install openvino"
+    CMD_OV_CPU="sudo dnf install -y openvino || pip install openvino"
+    CMD_AMD_NPU="sudo dnf install -y amdxdna-driver xrt || pip install ryzenai"
+    CMD_AMD_GPU="sudo dnf install -y mesa-vulkan-drivers rocm-opencl"
+elif [[ "${DISTRO_ID}" =~ (arch|manjaro|endeavouros) || "${DISTRO_LIKE}" =~ arch ]]; then
+    CMD_TRT="sudo pacman -S --needed tensorrt || pip install tensorrt"
+    CMD_OV_NPU="sudo pacman -S --needed intel-npu-driver-bin openvino || pip install openvino"
+    CMD_OV_GPU="sudo pacman -S --needed intel-compute-runtime openvino || pip install openvino"
+    CMD_OV_CPU="sudo pacman -S --needed openvino || pip install openvino"
+    CMD_AMD_NPU="sudo pacman -S --needed amdxdna-driver-bin xrt || pip install ryzenai"
+    CMD_AMD_GPU="sudo pacman -S --needed vulkan-radeon opencl-mesa"
+else
+    CMD_TRT="pip install tensorrt"
+    CMD_OV_NPU="pip install openvino"
+    CMD_OV_GPU="pip install openvino"
+    CMD_OV_CPU="pip install openvino"
+    CMD_AMD_NPU="pip install ryzenai"
+    CMD_AMD_GPU="sudo apt install -y mesa-vulkan-drivers || sudo dnf install -y mesa-vulkan-drivers"
+fi
+
+# ------------------------------------------------------------------------------
 # Emissao de JSON Estruturado para Frontend / IPC
 # ------------------------------------------------------------------------------
 if [[ "${OUTPUT_JSON}" == "true" ]]; then
@@ -330,11 +379,11 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "tier": "DedicatedGpu",
       "hardware_detected": ${HAS_NVIDIA},
       "runtime_installed": ${HAS_TRT_RUNTIME},
-      "device_info": "NVIDIA RTX PRO 1000 Blackwell Generation Laptop GPU",
+      "device_info": $(if [[ "${HAS_NVIDIA}" == "true" ]]; then echo "\"${NVIDIA_MODEL}\""; else echo "\"Nenhuma GPU dedicada NVIDIA detectada neste sistema.\""; fi),
       "runtime_name": "NVIDIA TensorRT (libnvinfer.so)",
-      "install_script": "./scripts/install-tensorrt.sh",
-      "install_command": "./scripts/install-tensorrt.sh",
-      "install_instruction": "A GPU física NVIDIA foi detectada. Execute o script para compilar e registrar os módulos CUDA/TensorRT para aceleração máxima."
+      "install_script": "",
+      "install_command": "${CMD_TRT}",
+      "install_instruction": "A GPU física NVIDIA foi detectada. Instale o runtime oficial NVIDIA TensorRT pelo gerenciador de pacotes ou Python: '${CMD_TRT}'. Documentação oficial: https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html"
     },
     {
       "id": "openvino_npu",
@@ -344,9 +393,9 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "runtime_installed": ${HAS_OPENVINO_NPU},
       "device_info": $(if [[ "${HAS_INTEL_NPU}" == "true" ]]; then echo "\"Intel(R) AI Boost (NPU Neural dedicada no SoC - ultrabaixo consumo)\""; else echo "\"NPU Intel AI Boost não encontrada neste sistema.\""; fi),
       "runtime_name": "OpenVINO NPU Plugin (libopenvino_intel_npu_plugin.so)",
-      "install_script": "./scripts/install-openvino.sh",
-      "install_command": "./scripts/install-openvino.sh",
-      "install_instruction": "A NPU Intel foi detectada no processador Core Ultra. Instale o OpenVINO e o driver intel-npu-driver para acelerar a rede neural sem impacto na bateria."
+      "install_script": "",
+      "install_command": "${CMD_OV_NPU}",
+      "install_instruction": "A NPU Intel foi detectada no processador Core Ultra. Instale o OpenVINO e o driver intel-npu-driver para acelerar a rede neural sem impacto na bateria: '${CMD_OV_NPU}'. Documentação: https://docs.openvino.ai/"
     },
     {
       "id": "openvino_gpu",
@@ -356,9 +405,9 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "runtime_installed": ${HAS_OPENVINO_GPU},
       "device_info": $(if [[ "${HAS_INTEL_GPU}" == "true" ]]; then echo "\"GPU Integrada Intel Arc / Graphics\""; else echo "\"GPU Integrada Intel não encontrada neste sistema.\""; fi),
       "runtime_name": "OpenVINO GPU Plugin (libopenvino_intel_gpu_plugin.so)",
-      "install_script": "./scripts/install-openvino.sh",
-      "install_command": "./scripts/install-openvino.sh",
-      "install_instruction": "A GPU integrada Intel foi detectada. Instale o compute-runtime OpenCL/oneAPI e o OpenVINO para processar em GPU paralela."
+      "install_script": "",
+      "install_command": "${CMD_OV_GPU}",
+      "install_instruction": "A GPU integrada Intel foi detectada. Instale o compute-runtime OpenCL/oneAPI e o OpenVINO para processar em GPU paralela: '${CMD_OV_GPU}'. Documentação: https://docs.openvino.ai/"
     },
     {
       "id": "openvino_cpu",
@@ -368,9 +417,9 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "runtime_installed": $(if [[ "${HAS_INTEL_CPU}" == "true" ]]; then echo "${HAS_OPENVINO_CPU}"; else echo "false"; fi),
       "device_info": $(if [[ "${HAS_INTEL_CPU}" == "true" ]]; then echo "\"${CPU_MODEL} (Aceleração vetorial AVX2 / AMX / VNNI)\""; else echo "\"Incompatível: Processador AMD detectado (${CPU_MODEL}). OpenVINO é exclusivo para hardware Intel.\""; fi),
       "runtime_name": "OpenVINO CPU Plugin (libopenvino_intel_cpu_plugin.so)",
-      "install_script": "./scripts/install-openvino.sh",
-      "install_command": "./scripts/install-openvino.sh",
-      "install_instruction": "Otimizações vetoriais avançadas da Intel para CPU com o compilador OpenVINO (exclusivo para processadores Intel)."
+      "install_script": "",
+      "install_command": "${CMD_OV_CPU}",
+      "install_instruction": "Otimizações vetoriais avançadas da Intel para CPU com o compilador OpenVINO (exclusivo para processadores Intel): '${CMD_OV_CPU}'. Documentação: https://docs.openvino.ai/"
     },
     {
       "id": "amd_ryzenai_npu",
@@ -380,9 +429,9 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "runtime_installed": ${HAS_AMD_NPU_RUNTIME},
       "device_info": "AMD Ryzen AI NPU (XDNA / XDNA 2 dedicada no processador)",
       "runtime_name": "Ryzen AI Software (libxrt_core.so)",
-      "install_script": "./scripts/install-ryzenai.sh",
-      "install_command": "./scripts/install-ryzenai.sh",
-      "install_instruction": "A NPU AMD Ryzen AI requer o driver amdxdna e o pacote Ryzen AI Software / XRT para processamento neural."
+      "install_script": "",
+      "install_command": "${CMD_AMD_NPU}",
+      "install_instruction": "A NPU AMD Ryzen AI requer o driver amdxdna e o pacote Ryzen AI Software / XRT para processamento neural: '${CMD_AMD_NPU}'. Documentação: https://ryzenai.docs.amd.com/"
     },
     {
       "id": "amd_ryzenai_gpu",
@@ -392,9 +441,9 @@ if [[ "${OUTPUT_JSON}" == "true" ]]; then
       "runtime_installed": ${HAS_AMD_GPU_RUNTIME},
       "device_info": $(if [[ "${HAS_AMD_GPU}" == "true" || "${HAS_AMD_CPU}" == "true" ]]; then echo "\"${CPU_MODEL} (Gráficos AMD Radeon)\""; else echo "\"GPU AMD Radeon não detectada.\""; fi),
       "runtime_name": "AMD ROCm / Vulkan / DirectML",
-      "install_script": "./scripts/install-ryzenai.sh",
-      "install_command": "./scripts/install-ryzenai.sh",
-      "install_instruction": "Instale os drivers gráficos AMD e a runtime Vulkan/ROCm para acelerar na GPU integrada Radeon."
+      "install_script": "",
+      "install_command": "${CMD_AMD_GPU}",
+      "install_instruction": "Instale os drivers gráficos AMD e a runtime Vulkan/ROCm para acelerar na GPU integrada Radeon: '${CMD_AMD_GPU}'. Documentação: https://rocm.docs.amd.com/"
     },
     {
       "id": "apple_coreml",
@@ -433,12 +482,13 @@ echo "----------------------------------------------------------"
 
 # NVIDIA
 if [[ "${HAS_NVIDIA}" == "true" ]]; then
-    echo "  [DETECTADO] GPU Dedicada NVIDIA (Blackwell/Ada/Ampere)"
+    echo "  [DETECTADO] GPU Dedicada NVIDIA (${NVIDIA_MODEL})"
     if [[ "${HAS_TRT_RUNTIME}" == "true" ]]; then
         echo "              Status Runtime: Instalada (TensorRT ativo: ${TRT_PATH})"
     else
         echo "              Status Runtime: AUSENTE (TensorRT nao encontrado)"
-        echo "              -> ACAO: Execute './scripts/install-tensorrt.sh' para ativar TensorRT!"
+        echo "              -> ACAO: Instale via '${CMD_TRT}'"
+        echo "              -> Guia Oficial: https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html"
     fi
 else
     echo "  [NAO DETECTADO] GPU Dedicada NVIDIA"
@@ -446,18 +496,19 @@ fi
 
 # Intel OpenVINO NPU
 if [[ "${HAS_INTEL_NPU}" == "true" ]]; then
-    echo "  [DETECTADO] Intel NPU (Core Ultra 200H / Arrow Lake - AI Boost)"
+    echo "  [DETECTADO] Intel NPU (Core Ultra / Arrow Lake - AI Boost)"
     if [[ "${HAS_OPENVINO_NPU}" == "true" ]]; then
         echo "              Status Runtime: Instalada (OpenVINO NPU Plugin ativo)"
     else
         echo "              Status Runtime: AUSENTE (Plugin NPU nao encontrado)"
-        echo "              -> ACAO: Execute './scripts/install-openvino.sh' para ativar NPU Intel!"
+        echo "              -> ACAO: Instale via '${CMD_OV_NPU}'"
+        echo "              -> Guia Oficial: https://docs.openvino.ai/"
     fi
 fi
 
 # Intel OpenVINO iGPU
 if [[ "${HAS_INTEL_GPU}" == "true" ]]; then
-    echo "  [DETECTADO] Intel iGPU (Arrow Lake-P Graphics)"
+    echo "  [DETECTADO] Intel iGPU (Graphics)"
     if [[ "${HAS_OPENVINO_GPU}" == "true" ]]; then
         echo "              Status Runtime: Instalada (OpenVINO GPU Plugin ativo)"
     fi
@@ -465,7 +516,7 @@ fi
 
 # Intel OpenVINO CPU
 if [[ "${HAS_INTEL_CPU}" == "true" ]]; then
-    echo "  [DETECTADO] Intel CPU (Core Ultra 7 265H - AVX2 / AMX / VNNI)"
+    echo "  [DETECTADO] Intel CPU (AVX2 / AMX / VNNI)"
     if [[ "${HAS_OPENVINO_CPU}" == "true" ]]; then
         echo "              Status Runtime: Instalada (OpenVINO CPU Plugin ativo)"
     fi
@@ -478,7 +529,8 @@ if [[ "${HAS_AMD_NPU}" == "true" ]]; then
         echo "              Status Runtime: Instalada (Ryzen AI Software ativo)"
     else
         echo "              Status Runtime: AUSENTE (XRT / Vitis-AI nao encontrado)"
-        echo "              -> ACAO: Execute './scripts/install-ryzenai.sh' para ativar Ryzen AI!"
+        echo "              -> ACAO: Instale via '${CMD_AMD_NPU}'"
+        echo "              -> Guia Oficial: https://ryzenai.docs.amd.com/"
     fi
 fi
 

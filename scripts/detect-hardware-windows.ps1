@@ -200,9 +200,9 @@ if ($Json -or (-not $Status)) {
                 runtime_installed = [bool]$hasTrtRuntime
                 device_info = $nvidiaName
                 runtime_name = "NVIDIA TensorRT (nvinfer.dll)"
-                install_script = ".\scripts\install-tensorrt.ps1"
-                install_command = "powershell .\scripts\install-tensorrt.ps1"
-                install_instruction = "Instale o NVIDIA CUDA Toolkit e o pacote oficial TensorRT para GPU dedicada."
+                install_script = ""
+                install_command = "pip install tensorrt"
+                install_instruction = "GPU NVIDIA detectada. Instale o NVIDIA CUDA Toolkit e o pacote TensorRT ('pip install tensorrt' ou pelo instalador da NVIDIA). Guia oficial: https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html"
             },
             @{
                 id = "openvino_npu"
@@ -212,9 +212,9 @@ if ($Json -or (-not $Status)) {
                 runtime_installed = [bool]$hasOpenVinoNpu
                 device_info = "Intel(R) AI Boost (NPU Neural dedicada no SoC)"
                 runtime_name = "OpenVINO NPU Plugin (openvino_intel_npu_plugin.dll)"
-                install_script = ".\scripts\install-openvino.ps1"
-                install_command = "powershell .\scripts\install-openvino.ps1"
-                install_instruction = "Instale o runtime OpenVINO e o driver Intel NPU para processamento neural de baixíssimo consumo."
+                install_script = ""
+                install_command = "pip install openvino"
+                install_instruction = "NPU Intel AI Boost detectada. Instale o driver Intel NPU (via Windows Update ou Intel DSA) e o pacote 'pip install openvino'. Documentação: https://docs.openvino.ai/"
             },
             @{
                 id = "openvino_gpu"
@@ -224,9 +224,9 @@ if ($Json -or (-not $Status)) {
                 runtime_installed = [bool]$hasOpenVinoGpu
                 device_info = $intelGpuName
                 runtime_name = "OpenVINO GPU Plugin (openvino_intel_gpu_plugin.dll)"
-                install_script = ".\scripts\install-openvino.ps1"
-                install_command = "powershell .\scripts\install-openvino.ps1"
-                install_instruction = "Instale o runtime OpenVINO para acelerar na GPU integrada Intel Arc / Iris Xe."
+                install_script = ""
+                install_command = "pip install openvino"
+                install_instruction = "GPU integrada Intel Arc / Iris Xe detectada. Mantenha os drivers gráficos atualizados e instale 'pip install openvino'. Documentação: https://docs.openvino.ai/"
             },
             @{
                 id = "openvino_cpu"
@@ -236,9 +236,9 @@ if ($Json -or (-not $Status)) {
                 runtime_installed = [bool]($hasIntelCpu -and $hasOpenVinoCpu)
                 device_info = if ($hasIntelCpu) { if ($proc) { $proc.Name } else { "Processador Intel Host" } } else { "Incompatível: Processador AMD detectado ($($proc.Name)). OpenVINO requer processador Intel." }
                 runtime_name = "OpenVINO CPU Plugin (openvino_intel_cpu_plugin.dll)"
-                install_script = ".\scripts\install-openvino.ps1"
-                install_command = "powershell .\scripts\install-openvino.ps1"
-                install_instruction = "Instale o runtime OpenVINO para habilitar aceleração vetorial Intel AVX2/AMX na CPU (exclusivo para Intel)."
+                install_script = ""
+                install_command = "pip install openvino"
+                install_instruction = "Processador Intel detectado. Instale 'pip install openvino' para habilitar aceleração vetorial Intel AVX2/AMX na CPU. Documentação: https://docs.openvino.ai/"
             },
             @{
                 id = "amd_ryzenai_npu"
@@ -248,9 +248,9 @@ if ($Json -or (-not $Status)) {
                 runtime_installed = [bool]$hasAmdNpuRuntime
                 device_info = "AMD Ryzen AI NPU (XDNA / XDNA 2 dedicada)"
                 runtime_name = "Ryzen AI Software (xrt_core.dll)"
-                install_script = ".\scripts\install-ryzenai.ps1"
-                install_command = "powershell .\scripts\install-ryzenai.ps1"
-                install_instruction = "Instale o driver AMD NPU e o Ryzen AI Software para aceleração neural no processador AMD."
+                install_script = ""
+                install_command = "pip install ryzenai"
+                install_instruction = "NPU AMD Ryzen AI detectada. Instale o driver AMD IPU/NPU e o instalador Ryzen AI Software. Documentação: https://ryzenai.docs.amd.com/"
             },
             @{
                 id = "amd_ryzenai_gpu"
@@ -260,9 +260,9 @@ if ($Json -or (-not $Status)) {
                 runtime_installed = [bool]$hasAmdGpuRuntime
                 device_info = $amdGpuName
                 runtime_name = "DirectML / Vulkan (DirectML.dll)"
-                install_script = ".\scripts\install-ryzenai.ps1"
-                install_command = "powershell .\scripts\install-ryzenai.ps1"
-                install_instruction = "Instale os drivers AMD Adrenalin mais recentes para acelerar na GPU integrada Radeon via DirectML."
+                install_script = ""
+                install_command = "winget install AMD.Adrenalin"
+                install_instruction = "GPU AMD Radeon detectada. Instale os drivers oficiais AMD Adrenalin Edition para aceleração via DirectML e Vulkan. Documentação: https://www.amd.com/support"
             },
             @{
                 id = "apple_coreml"
