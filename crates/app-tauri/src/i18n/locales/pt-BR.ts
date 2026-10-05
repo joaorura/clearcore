@@ -199,6 +199,7 @@ export const ptBR: Translations = {
     statusActive: '🟢 Ativo & Calibrado',
     statusPending: '🟡 Cadastro Pendente',
     storedNotApplied: '🟡 Salvo, não aplicado',
+    enrolledUnconfirmed: '⚪ Inscrito, ativação não confirmada',
     statusSamplesPill: '{count} Amostras Ativas',
     neuralEqStatusTitle: 'Calibração Neural EQ:',
     neuralEqCalibrated: '🟢 Calibrado (+1.8 dB clareza)',

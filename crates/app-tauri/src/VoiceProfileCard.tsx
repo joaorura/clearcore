@@ -260,6 +260,16 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
 
 export type VoiceProfileActivationState = 'active' | 'stored_not_applied' | 'none';
 
+export type VoiceProfileStatusLabelKey = 'active' | 'storedNotApplied' | 'enrolledUnconfirmed' | 'none';
+
+/** Only 'active' may be shown as active; enrolled without confirmation is neutral. */
+export function voiceProfileStatusLabelKey(status: VoiceProfileStatus): VoiceProfileStatusLabelKey {
+  const state = voiceProfileActivationState(status);
+  if (state === 'active') return 'active';
+  if (state === 'stored_not_applied') return 'storedNotApplied';
+  return status.is_enrolled ? 'enrolledUnconfirmed' : 'none';
+}
+
 /** Stored must never be presented as applied: 'active' needs explicit confirmation. */
 export function voiceProfileActivationState(status: VoiceProfileStatus): VoiceProfileActivationState {
   if (status.is_voice_profile_active === true) return 'active';
@@ -949,15 +959,16 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const currentQ = stepQuestions[currentStep - 1];
 
 
-  const activationState = voiceProfileActivationState(profileStatus);
-  // Legacy services omit the activation fields: keep the enrolled-based label for 'none' only.
-  const statusLabelActive = activationState === 'active' || (activationState === 'none' && profileStatus.is_enrolled);
+  const statusLabelKey = voiceProfileStatusLabelKey(profileStatus);
+  const statusLabelActive = statusLabelKey === 'active';
   const statusLabel =
-    activationState === 'stored_not_applied'
-      ? t('voiceProfile.storedNotApplied')
-      : statusLabelActive
-        ? t('voiceProfile.statusActive')
-        : t('voiceProfile.statusPending');
+    statusLabelKey === 'active'
+      ? t('voiceProfile.statusActive')
+      : statusLabelKey === 'storedNotApplied'
+        ? t('voiceProfile.storedNotApplied')
+        : statusLabelKey === 'enrolledUnconfirmed'
+          ? t('voiceProfile.enrolledUnconfirmed')
+          : t('voiceProfile.statusPending');
 
   return (
     <div className="card voice-profile-card">
@@ -1004,7 +1015,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
           <div className="overview-value" style={{ color: statusLabelActive ? '#4ade80' : '#fbbf24' }}>
             {statusLabel}
           </div>
-          {activationState === 'stored_not_applied' && profileStatus.voice_profile_error && (
+          {profileStatus.voice_profile_error && statusLabelKey !== 'active' && (
             <div style={{ color: '#fbbf24', fontSize: '0.75rem', marginTop: 4 }}>
               {profileStatus.voice_profile_error}
             </div>

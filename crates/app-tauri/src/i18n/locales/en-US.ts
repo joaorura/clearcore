@@ -199,6 +199,7 @@ export const enUS: Translations = {
     statusActive: '🟢 Active & Calibrated',
     statusPending: '🟡 Enrollment Pending',
     storedNotApplied: '🟡 Stored, not applied',
+    enrolledUnconfirmed: '⚪ Enrolled, activation not confirmed',
     statusSamplesPill: '{count} Active Samples',
     neuralEqStatusTitle: 'Neural EQ Calibration:',
     neuralEqCalibrated: '🟢 Calibrated (+1.8 dB clarity)',

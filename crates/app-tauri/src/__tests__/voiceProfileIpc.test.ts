@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { invokeBridge } from '../bridge';
-import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState } from '../VoiceProfileCard';
+import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState, voiceProfileStatusLabelKey } from '../VoiceProfileCard';
 import type { VoiceProfileStatus, VoiceSample, CallSuggestionTake, StudioPreset } from '../types';
 import fs from 'fs';
 import path from 'path';
@@ -361,5 +361,30 @@ describe('voiceProfileActivationState', () => {
     const m = mergeVoiceProfileStatus(base, { ...base, is_voice_profile_active: false, voice_profile_error: 'x' }, 3);
     expect(m.is_voice_profile_active).toBe(false);
     expect(m.voice_profile_error).toBe('x');
+  });
+});
+
+describe('voiceProfileStatusLabelKey', () => {
+  const base: VoiceProfileStatus = {
+    is_enrolled: true,
+    active_samples_count: 3,
+    embedding_dim: 192,
+    neural_eq_calibrated: true,
+  };
+
+  it('maps each state to its label key', () => {
+    expect(voiceProfileStatusLabelKey({ ...base, is_voice_profile_active: true })).toBe('active');
+    expect(voiceProfileStatusLabelKey({ ...base, is_voice_profile_active: false, stored_voice_profile_id: 'abc' })).toBe('storedNotApplied');
+    expect(voiceProfileStatusLabelKey({ ...base, is_enrolled: false })).toBe('none');
+  });
+
+  it('never returns active for enrolled without confirmation', () => {
+    expect(voiceProfileStatusLabelKey(base)).toBe('enrolledUnconfirmed');
+    expect(voiceProfileStatusLabelKey({ ...base, stored_voice_profile_id: '' })).toBe('enrolledUnconfirmed');
+    expect(voiceProfileStatusLabelKey({ ...base, stored_voice_profile_id: null })).toBe('enrolledUnconfirmed');
+  });
+
+  it('is none when not enrolled and explicitly inactive', () => {
+    expect(voiceProfileStatusLabelKey({ ...base, is_enrolled: false, is_voice_profile_active: false })).toBe('none');
   });
 });
