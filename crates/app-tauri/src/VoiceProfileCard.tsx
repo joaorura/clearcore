@@ -85,7 +85,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const labels = useMemo(() => buildEnrollmentLabels(t), [t]);
   const { message: feedbackMessage, flash } = useFlashMessage();
   // ENROLL_BUDGET_EXCEEDED opens the gallery, where the delete action is highlighted.
-  const jobs = useJobFeedback(t, labels, () => changeTab({ by: 'budget-error' }));
+  const jobs = useJobFeedback(t, labels, () => changeTab({ by: 'budget-error' }), locale);
   const { jobBusy, currentJob, enrollErrorText, budgetError } = jobs;
   const { sampleList, samples, samplesLoadFailed, deletingId, refreshSamples, removeSample } = useVoiceSamples();
   // Device switch (spec §4.4): asked in the card before a take from another microphone is sent.

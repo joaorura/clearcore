@@ -299,6 +299,9 @@ export const ptBR: Translations = {
     captureNotStarted: 'A gravação não começou. Tente de novo.',
     buildTooLittleSpeech: 'Fala insuficiente para gerar o perfil com este microfone. Grave mais amostras com este microfone e refaça o perfil.',
     reEnrollHint: 'As amostras antigas continuam no serviço e consomem o orçamento de 90 s de fala até serem apagadas na Galeria.',
+    measuredPeak: '(pico medido: {peak})',
+    measuredLevel: '(nível medido: {db} dBFS)',
+    measuredSpeech: '(fala medida: {sec} s)',
     enrollment: {
       budgetTitle: 'Fala usada no perfil',
       budgetUsed: 'Usado',

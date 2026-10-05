@@ -1,7 +1,7 @@
 import type { VoiceProfileStatus } from '../../types';
 import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels, Quality, ServiceSample } from '../enrollmentTypes';
 import { enrollmentErrorCode, errorLabel, isBudgetError } from '../enrollmentErrors';
-import { formatSecondsLocale } from '../format';
+import { formatDecimalLocale, formatSecondsLocale } from '../format';
 
 /*
  * Pure logic of the voice profile card. VoiceProfileCard.tsx re-exports every symbol here so
@@ -166,13 +166,14 @@ export function buildEnrollmentLabels(t: (path: string) => string): EnrollmentLa
 export type JobOutcome =
   | { kind: 'done'; quality: Quality | null }
   | { kind: 'show-budget-error'; remainingSeconds: number | null }
-  | { kind: 'show-error'; code: EnrollErrorCode };
+  | { kind: 'show-error'; code: EnrollErrorCode; quality?: Quality };
 
 /** What the card does once a sample/profile job has finished. */
 export function nextStepAfterJob(job: EnrollmentJob): JobOutcome {
   if (job.state === 'done') return { kind: 'done', quality: job.quality };
   if (isBudgetError(job.errorCode)) return { kind: 'show-budget-error', remainingSeconds: job.remainingSeconds };
-  return { kind: 'show-error', code: job.errorCode ?? 'ENROLL_FAILED' };
+  const code = job.errorCode ?? 'ENROLL_FAILED';
+  return job.quality ? { kind: 'show-error', code, quality: job.quality } : { kind: 'show-error', code };
 }
 
 /** Only the budget error asks the user to free speech by deleting samples (spec §4.4). */
@@ -256,4 +257,19 @@ export function errorLabelForJob(
 /** Samples the current profile is built from (not other-microphone nor re-record ones). */
 export function samplesUsedInProfile(samples: ServiceSample[]): number {
   return samples.filter((s) => s.usedInProfile).length;
+}
+
+/** The measured value behind a quality error (spec §9), or null when the service sent none. */
+export function measuredQualityText(code: EnrollErrorCode | null, quality: Quality | null | undefined, t: Translate, locale: string): string | null {
+  if (!quality) return null;
+  switch (code) {
+    case 'ENROLL_CLIPPING':
+      return t('voiceProfile.measuredPeak', { peak: formatDecimalLocale(quality.peak, 2, locale) });
+    case 'ENROLL_TOO_QUIET':
+      return t('voiceProfile.measuredLevel', { db: formatDecimalLocale(quality.rmsDbfs, 1, locale) });
+    case 'ENROLL_TOO_LITTLE_SPEECH':
+      return t('voiceProfile.measuredSpeech', { sec: formatSecondsLocale(quality.speechSeconds, locale) });
+    default:
+      return null;
+  }
 }

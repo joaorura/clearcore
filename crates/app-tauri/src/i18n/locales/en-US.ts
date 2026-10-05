@@ -299,6 +299,9 @@ export const enUS: Translations = {
     captureNotStarted: 'Recording did not start. Try again.',
     buildTooLittleSpeech: 'Not enough speech to build the profile with this microphone. Record more samples with this microphone and rebuild the profile.',
     reEnrollHint: 'The old samples stay in the service and use the 90 s speech budget until you delete them in the Gallery.',
+    measuredPeak: '(measured peak: {peak})',
+    measuredLevel: '(measured level: {db} dBFS)',
+    measuredSpeech: '(measured speech: {sec} s)',
     enrollment: {
       budgetTitle: 'Speech used in the profile',
       budgetUsed: 'Used',

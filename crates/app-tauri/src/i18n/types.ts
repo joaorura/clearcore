@@ -297,6 +297,9 @@ export interface Translations {
     captureNotStarted: string;
     buildTooLittleSpeech: string;
     reEnrollHint: string;
+    measuredPeak: string;
+    measuredLevel: string;
+    measuredSpeech: string;
     enrollment: {
       budgetTitle: string;
       budgetUsed: string;

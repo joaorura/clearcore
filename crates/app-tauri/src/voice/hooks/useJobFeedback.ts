@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { EnrollmentJob, EnrollmentLabels } from '../enrollmentTypes';
 import { errorLabel } from '../enrollmentErrors';
-import { errorLabelForJob, shouldOpenGalleryOnError, type JobOutcome, type Translate } from './voiceProfileLogic';
+import { errorLabelForJob, measuredQualityText, shouldOpenGalleryOnError, type JobOutcome, type Translate } from './voiceProfileLogic';
 
 /** Where a job was started; its feedback is shown there (same ids as the card tabs). */
 export type JobOrigin = 'enroll' | 'gallery' | 'calls' | 'profile';
@@ -35,7 +35,7 @@ export interface JobFeedback {
 }
 
 /** Shared job state: stage while running, quality when done, error/budget prompt when not. */
-export function useJobFeedback(t: Translate, labels: EnrollmentLabels, onBudgetError: () => void): JobFeedback {
+export function useJobFeedback(t: Translate, labels: EnrollmentLabels, onBudgetError: () => void, locale = 'pt-BR'): JobFeedback {
   const [currentJob, setCurrentJob] = useState<EnrollmentJob | null>(null);
   const [jobBusy, setJobBusy] = useState<boolean>(false);
   const [enrollErrorText, setEnrollErrorText] = useState<string | null>(null);
@@ -69,7 +69,9 @@ export function useJobFeedback(t: Translate, labels: EnrollmentLabels, onBudgetE
         return;
       }
       if (shouldOpenGalleryOnError(outcome.code)) onBudgetError();
-      setEnrollErrorText(errorLabelForJob(outcome.code, kind, labels, t));
+      const label = errorLabelForJob(outcome.code, kind, labels, t);
+      const measured = measuredQualityText(outcome.code, outcome.quality, t, locale);
+      setEnrollErrorText(measured ? `${label} ${measured}` : label);
     },
     failWith: (err) => {
       setCurrentJob(null);
