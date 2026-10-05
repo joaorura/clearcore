@@ -42,54 +42,91 @@ export class PcmRecorder {
   private source: MediaStreamAudioSourceNode | null = null;
   private node: AudioWorkletNode | null = null;
   private stream: MediaStream | null = null;
+  private cancelled = false;
+  private tornDown = false;
+  /** True once the duration guard dropped samples beyond maxSeconds. */
+  truncated = false;
 
   constructor(opts?: { maxSeconds?: number }) {
     this.maxSeconds = opts?.maxSeconds ?? MAX_RECORD_SECONDS;
   }
 
-  async start(stream: MediaStream, onLevel?: (level01: number) => void): Promise<void> {
+  /** Closes the context, disconnects the nodes and stops every track. Idempotent. */
+  private async teardown(): Promise<number> {
+    const context = this.context;
+    const rate = context?.sampleRate ?? CAPTURE_SAMPLE_RATE;
+    try { this.source?.disconnect(); } catch { /* ignore */ }
+    if (this.node) this.node.port.onmessage = null;
+    try { this.node?.disconnect(); } catch { /* ignore */ }
+    this.stream?.getTracks().forEach((t) => {
+      try { t.stop(); } catch { /* ignore */ }
+    });
+    this.context = this.source = this.node = this.stream = null;
+    this.tornDown = true;
+    if (context && context.state !== 'closed') {
+      try { await context.close(); } catch { /* ignore */ }
+    }
+    return rate;
+  }
+
+  /**
+   * Starts capturing. Owns the stream: on any failure (or if stop() is called meanwhile) the
+   * context is closed and every track stopped, so the caller's microphone safety does not depend
+   * on the caller. `onEnded` fires when the microphone track ends (device unplugged).
+   */
+  async start(stream: MediaStream, onLevel?: (level01: number) => void, onEnded?: () => void): Promise<void> {
     this.chunks = [];
     this.samples = 0;
+    this.truncated = false;
+    this.cancelled = false;
+    this.tornDown = false;
     this.stream = stream;
-    const context = new AudioContext({ sampleRate: CAPTURE_SAMPLE_RATE });
-    this.context = context;
-    const url = URL.createObjectURL(new Blob([PCM_WORKLET_SOURCE], { type: 'application/javascript' }));
     try {
-      await context.audioWorklet.addModule(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-    const node = new AudioWorkletNode(context, 'pcm-capture', { numberOfInputs: 1, numberOfOutputs: 0 });
-    const maxSamples = Math.floor(this.maxSeconds * context.sampleRate);
-    node.port.onmessage = (ev: MessageEvent<Float32Array>) => {
-      const chunk = ev.data;
-      if (this.samples >= maxSamples) return; // duration guard
-      const room = maxSamples - this.samples;
-      const kept = chunk.length > room ? chunk.subarray(0, room) : chunk;
-      this.chunks.push(kept);
-      this.samples += kept.length;
-      if (onLevel) {
-        let peak = 0;
-        for (let i = 0; i < chunk.length; i++) peak = Math.max(peak, Math.abs(chunk[i]));
-        onLevel(Math.min(1, peak));
+      const context = new AudioContext({ sampleRate: CAPTURE_SAMPLE_RATE });
+      this.context = context;
+      const url = URL.createObjectURL(new Blob([PCM_WORKLET_SOURCE], { type: 'application/javascript' }));
+      try {
+        await context.audioWorklet.addModule(url);
+      } finally {
+        URL.revokeObjectURL(url);
       }
-    };
-    this.node = node;
-    this.source = context.createMediaStreamSource(stream);
-    this.source.connect(node);
-    await context.resume();
+      if (this.cancelled) return void (await this.teardown());
+      const node = new AudioWorkletNode(context, 'pcm-capture', { numberOfInputs: 1, numberOfOutputs: 0 });
+      this.node = node;
+      const maxSamples = Math.floor(this.maxSeconds * context.sampleRate);
+      node.port.onmessage = (ev: MessageEvent<Float32Array>) => {
+        const chunk = ev.data;
+        if (this.samples >= maxSamples) {
+          this.truncated = true;
+          return;
+        }
+        const room = maxSamples - this.samples;
+        if (chunk.length > room) this.truncated = true;
+        const kept = chunk.length > room ? chunk.subarray(0, room) : chunk;
+        this.chunks.push(kept);
+        this.samples += kept.length;
+        if (onLevel) {
+          let peak = 0;
+          for (let i = 0; i < chunk.length; i++) peak = Math.max(peak, Math.abs(chunk[i]));
+          onLevel(Math.min(1, peak));
+        }
+      };
+      this.source = context.createMediaStreamSource(stream);
+      this.source.connect(node);
+      if (onEnded) {
+        for (const track of stream.getTracks()) track.addEventListener?.('ended', onEnded);
+      }
+      await context.resume();
+      if (this.cancelled) await this.teardown();
+    } catch (err) {
+      await this.teardown();
+      throw err;
+    }
   }
 
   async stop(device: DeviceInfo): Promise<CapturedPcm> {
-    const context = this.context;
-    const rate = context?.sampleRate ?? CAPTURE_SAMPLE_RATE;
-    this.source?.disconnect();
-    if (this.node) this.node.port.onmessage = null;
-    this.node?.disconnect();
-    this.stream?.getTracks().forEach((t) => t.stop());
-    if (context && context.state !== 'closed') await context.close();
-    this.context = this.source = this.node = this.stream = null;
-
+    this.cancelled = true;
+    const rate = this.tornDown ? CAPTURE_SAMPLE_RATE : await this.teardown();
     const pcm = concatChunks(this.chunks);
     this.chunks = [];
     this.samples = 0;

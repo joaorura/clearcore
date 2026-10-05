@@ -21,6 +21,14 @@ export function isVirtualOrLoopbackAudioDevice(label: string): boolean {
   );
 }
 
+/** The user denied microphone permission (distinguishable so the UI can say so). */
+export class MicPermissionDeniedError extends PhysicalMicUnavailableError {
+  constructor(message = 'Microphone permission was denied') {
+    super(message);
+    this.name = 'MicPermissionDeniedError';
+  }
+}
+
 const isAlias = (id: string) => id === 'default' || id === 'communications';
 
 /** Resolve the physical microphone from enumerated devices, filtering virtual/loopback ones. */
@@ -36,7 +44,7 @@ export function resolvePhysicalAudioDevice(
     if (direct) return direct;
   }
 
-  const known = inputDevices?.find((d) => d.id === selectedInputId);
+  const known = selectedInputId ? inputDevices?.find((d) => d.id === selectedInputId) : undefined;
   if (known?.name) {
     const name = known.name.toLowerCase().trim();
     const byName = candidates.find((d) => {
@@ -58,9 +66,25 @@ export async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+const stopAll = (stream: MediaStream | null | undefined) =>
+  stream?.getTracks().forEach((t) => {
+    try { t.stop(); } catch { /* already stopped */ }
+  });
+
 /**
  * Open the raw physical microphone: all browser processing off, mono, 48 kHz ideal.
  * Throws PhysicalMicUnavailableError instead of ever falling back to an unconstrained getUserMedia.
+ * Any failure after a stream was opened stops its tracks before rethrowing.
+ *
+ * Two controlled exceptions to D1 (both close the device again before anything is recorded):
+ *  - Label probe: browsers hide device labels until a first grant, so when every enumerated label is
+ *    empty one getUserMedia({audio:true}) is issued. It may open the system default (possibly the
+ *    virtual mic); its tracks are stopped in the same tick and its audio is never read. Skipped when
+ *    labels are already available.
+ *  - Alias device: if the only physical candidate is the 'default'/'communications' alias (and no
+ *    non-alias with the same group exists), the alias is opened with an exact deviceId and the
+ *    resulting track label ('Default - <name>') is validated AFTER opening; a virtual/loopback
+ *    label stops the track and raises PhysicalMicUnavailableError.
  */
 export async function acquireRawPhysicalStream(
   selectedInputId?: string,
@@ -73,24 +97,34 @@ export async function acquireRawPhysicalStream(
 
   let devs: MediaDeviceInfo[] = await md.enumerateDevices();
   if (devs.length > 0 && devs.every((d) => !d.label)) {
-    // Label-only probe (labels are hidden before the first grant); tracks are stopped at once.
+    let probe: MediaStream;
     try {
-      const probe = await md.getUserMedia({ audio: true });
-      probe.getTracks().forEach((t) => t.stop());
-      devs = await md.enumerateDevices();
-    } catch {
-      // permission denied: handled below as "unavailable"
+      probe = await md.getUserMedia({ audio: true });
+    } catch (err) {
+      const name = (err as { name?: string })?.name;
+      const message = err instanceof Error ? err.message : String(err);
+      throw name === 'NotAllowedError' || name === 'SecurityError'
+        ? new MicPermissionDeniedError(message)
+        : new PhysicalMicUnavailableError(message);
     }
+    stopAll(probe);
+    devs = await md.enumerateDevices();
   }
 
-  const physical = resolvePhysicalAudioDevice(
-    devs.filter((d) => d.kind === 'audioinput'),
-    selectedInputId,
-    inputDevices,
-  );
-  if (!physical || !physical.deviceId || isAlias(physical.deviceId)) {
-    throw new PhysicalMicUnavailableError();
+  const audioInputs = devs.filter((d) => d.kind === 'audioinput');
+  let physical = resolvePhysicalAudioDevice(audioInputs, selectedInputId, inputDevices);
+  if (!physical || !physical.deviceId) throw new PhysicalMicUnavailableError();
+  if (isAlias(physical.deviceId)) {
+    const alias = physical;
+    const sameGroup = audioInputs.find(
+      (d) => !isAlias(d.deviceId) && d.groupId === alias.groupId && !isVirtualOrLoopbackAudioDevice(d.label),
+    );
+    if (sameGroup) physical = sameGroup;
   }
+  const viaAlias = isAlias(physical.deviceId);
+
+  // Computed before opening so a failure here cannot leave an open stream behind.
+  const idHash = await sha256Hex(`${physical.deviceId}|${physical.groupId}`);
 
   let stream: MediaStream;
   try {
@@ -109,11 +143,20 @@ export async function acquireRawPhysicalStream(
     throw new PhysicalMicUnavailableError(err instanceof Error ? err.message : String(err));
   }
 
-  return {
-    stream,
-    device: {
-      label: (physical.label || '').slice(0, 128),
-      idHash: await sha256Hex(`${physical.deviceId}|${physical.groupId}`),
-    },
-  };
+  try {
+    const track = stream.getTracks()[0] as MediaStreamTrack | undefined;
+    let label = physical.label || '';
+    if (viaAlias) {
+      const settings = (track?.getSettings?.() ?? {}) as { label?: string };
+      const labels = [track?.label ?? '', settings.label ?? '', label];
+      if (labels.some((l) => isVirtualOrLoopbackAudioDevice(l))) {
+        throw new PhysicalMicUnavailableError('Default device resolves to a virtual or loopback source');
+      }
+      label = track?.label || label;
+    }
+    return { stream, device: { label: label.slice(0, 128), idHash } };
+  } catch (err) {
+    stopAll(stream);
+    throw err;
+  }
 }

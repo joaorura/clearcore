@@ -60,7 +60,12 @@ export function useEnrollmentRecorder(opts: {
     const device = deviceRef.current;
     recorderRef.current = null;
     deviceRef.current = null;
-    if (recorder && device) recorder.stop(device).catch(() => undefined);
+    if (recorder && device) {
+      recorder
+        .stop(device)
+        .then((discarded) => discarded.pcm.fill(0))
+        .catch(() => undefined);
+    }
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setIsRecording(false);
@@ -86,16 +91,31 @@ export function useEnrollmentRecorder(opts: {
     }
     streamRef.current = acquired.stream;
     const recorder = new PcmRecorder({ maxSeconds: MAX_RECORD_SECONDS });
+    // Registered before start() so a cleanup/stop during the await cancels the recorder.
+    recorderRef.current = recorder;
+    deviceRef.current = acquired.device;
     try {
-      await recorder.start(acquired.stream, (level01) => setLiveVoiceLevel(Math.round(level01 * 100)));
+      await recorder.start(
+        acquired.stream,
+        (level01) => setLiveVoiceLevel(Math.round(level01 * 100)),
+        () => {
+          // Microphone unplugged / track ended: discard the take and tell the user.
+          if (recorderRef.current !== recorder) return;
+          cleanupRecording();
+          setCaptureError(t('voiceProfile.physicalMicUnavailable'));
+        },
+      );
     } catch {
-      acquired.stream.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
+      // PcmRecorder.start() already closed the context and stopped the tracks.
+      if (recorderRef.current === recorder) {
+        recorderRef.current = null;
+        deviceRef.current = null;
+        streamRef.current = null;
+      }
       setCaptureError(t('voiceProfile.physicalMicUnavailable'));
       return false;
     }
-    recorderRef.current = recorder;
-    deviceRef.current = acquired.device;
+    if (recorderRef.current !== recorder) return false; // cancelled while starting
     recordingStartTimeRef.current = Date.now();
     setRecordingElapsedSeconds(0);
     setIsRecording(true);
@@ -145,6 +165,7 @@ export function useEnrollmentRecorder(opts: {
           ? { kind: 'show-budget-error', remainingSeconds: null }
           : { kind: 'show-error', code: startError ?? 'ENROLL_FAILED' };
       } else {
+        captured.pcm.fill(0); // sent: drop the raw audio from memory
         const job = await waitForJob(start.jobId, { onUpdate: jobs.setCurrentJob });
         jobs.setCurrentJob(job);
         outcome = nextStepAfterJob(job);
