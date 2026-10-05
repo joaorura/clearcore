@@ -22,7 +22,13 @@ struct FrameActivity {
 }
 
 fn analyze(samples: &[f32], sample_rate: u32) -> FrameActivity {
-    let frame = ((sample_rate / 50) as usize).max(1);
+    let frame = (sample_rate / 50) as usize;
+    if frame == 0 {
+        return FrameActivity {
+            frame: 1,
+            active: Vec::new(),
+        };
+    }
     let dbfs: Vec<f32> = samples
         .chunks_exact(frame)
         .map(|c| {
@@ -38,6 +44,13 @@ fn analyze(samples: &[f32], sample_rate: u32) -> FrameActivity {
 
 /// 20 ms frames, threshold max(-50 dBFS, loudest - 30 dB) on frame mean-square, each active run
 /// kept with a 40 ms margin on both sides, runs joined with a 20 ms linear crossfade.
+///
+/// Limits (by design):
+/// - The threshold is relative to the loudest frame (spec rule, same as `validate_enrollment_audio`).
+///   One isolated loud click (e.g. a 1-frame pop at full scale) can therefore push quiet speech
+///   below the threshold and collapse it; the service then fails closed with `ENROLL_TOO_LITTLE_SPEECH`.
+/// - Non-finite input samples are not removed here; the caller must validate finiteness first.
+/// - `sample_rate == 0` yields an empty result with `speech_seconds == 0.0`.
 #[must_use]
 pub fn trim_speech(samples: &[f32], sample_rate: u32) -> TrimmedSpeech {
     let a = analyze(samples, sample_rate);
@@ -79,7 +92,8 @@ pub fn trim_speech(samples: &[f32], sample_rate: u32) -> TrimmedSpeech {
     }
 }
 
-/// RMS in dBFS over active frames only (same VAD rule); -120.0 when nothing is active.
+/// RMS in dBFS over active frames only (same VAD rule); -120.0 when nothing is active
+/// (including `sample_rate == 0`). Non-finite samples are not filtered; validate them first.
 #[must_use]
 pub fn active_rms_dbfs(samples: &[f32], sample_rate: u32) -> f32 {
     let a = analyze(samples, sample_rate);
@@ -100,9 +114,15 @@ pub fn active_rms_dbfs(samples: &[f32], sample_rate: u32) -> f32 {
     (10.0 * (sum / count as f64 + 1e-12).log10()) as f32
 }
 
-/// Multiply by `10^(gain_db/20)` with `gain_db` clamped to `±max_abs_db`.
+/// Multiply by `10^(gain_db/20)` with `gain_db` clamped to `±max_abs_db` (a negative
+/// `max_abs_db` is used as its absolute value). If `gain_db` or `max_abs_db` is not finite, no
+/// gain is applied and the input is returned unchanged. Peak headroom is not considered: the
+/// caller must also limit the gain by `0.99 / peak`.
 #[must_use]
 pub fn apply_gain_limited(samples: &[f32], gain_db: f32, max_abs_db: f32) -> Vec<f32> {
+    if !gain_db.is_finite() || !max_abs_db.is_finite() {
+        return samples.to_vec();
+    }
     let limit = max_abs_db.abs();
     let g = 10f32.powf(gain_db.clamp(-limit, limit) / 20.0);
     samples.iter().map(|v| v * g).collect()
@@ -204,5 +224,72 @@ mod tests {
             "{db}"
         );
         assert_eq!(active_rms_dbfs(&vec![0.0; 48_000], 48_000), -120.0);
+    }
+
+    #[test]
+    fn gain_with_non_finite_inputs_returns_the_input_unchanged() {
+        let x = [0.1_f32, -0.2, 0.3];
+        assert_eq!(apply_gain_limited(&x, f32::NAN, 12.0), x.to_vec());
+        assert_eq!(apply_gain_limited(&x, 6.0, f32::NAN), x.to_vec());
+        assert_eq!(apply_gain_limited(&x, f32::INFINITY, 12.0), x.to_vec());
+        assert_eq!(apply_gain_limited(&x, 6.0, f32::INFINITY), x.to_vec());
+    }
+
+    #[test]
+    fn negative_limit_is_treated_as_absolute() {
+        let y = apply_gain_limited(&[0.1], 30.0, -12.0);
+        assert!((y[0] - 0.1 * 10f32.powf(12.0 / 20.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn zero_sample_rate_gives_empty_result() {
+        let t = trim_speech(&tone(480, 0.3), 0);
+        assert!(t.samples.is_empty());
+        assert_eq!(t.speech_seconds, 0.0);
+        assert_eq!(t.active_fraction, 0.0);
+        assert_eq!(active_rms_dbfs(&tone(480, 0.3), 0), -120.0);
+    }
+
+    // Known limitation (controller decision A): the threshold is relative to the loudest frame,
+    // the same rule as validate_enrollment_audio, so one loud click collapses quiet speech.
+    // The service then fails closed with ENROLL_TOO_LITTLE_SPEECH.
+    #[test]
+    fn isolated_click_collapses_quiet_speech_known_limitation() {
+        let mut x = tone(48_000, 0.01);
+        x.extend(vec![0.0; 960]);
+        x[24_000..24_960].fill(1.0);
+        let t = trim_speech(&x, 48_000);
+        assert!(t.speech_seconds < 0.2, "got {}", t.speech_seconds);
+    }
+
+    #[test]
+    fn parts_shorter_than_the_fade_are_copied_whole() {
+        let a = vec![0.5; 4_800];
+        let b = vec![0.25; 100];
+        let c = vec![0.5; 4_800];
+        let j = join_crossfade(&[&a, &b, &c], 48_000, 20);
+        assert_eq!(j.len(), 4_800 + 100 + 4_800 - 960);
+        assert_eq!(join_crossfade(&[&b, &b], 48_000, 20).len(), 200);
+    }
+
+    #[test]
+    fn low_sample_rate_is_coherent() {
+        let mut x = vec![0.0; 8_000];
+        x.extend((0..4_000).map(|i| 0.3 * (i as f32 * 0.2).sin()));
+        x.extend(vec![0.0; 8_000]);
+        let t = trim_speech(&x, 8_000);
+        assert!(
+            (t.speech_seconds - 0.58).abs() < 0.04,
+            "got {}",
+            t.speech_seconds
+        );
+    }
+
+    #[test]
+    fn nan_in_the_middle_of_speech_does_not_panic() {
+        let mut x = tone(48_000, 0.3);
+        x[20_000] = f32::NAN;
+        let _ = trim_speech(&x, 48_000);
+        let _ = active_rms_dbfs(&x, 48_000);
     }
 }
