@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InputDeviceInfo } from '../../types';
-import type { CapturedPcm, DeviceInfo, SampleList } from '../enrollmentTypes';
+import type { CapturedPcm, SampleList } from '../enrollmentTypes';
 import { MAX_RECORD_SECONDS } from '../enrollmentTypes';
 import { enrollmentErrorCode, isBudgetError } from '../enrollmentErrors';
 import { addSample, waitForJob } from '../enrollmentClient';
 import { acquireRawPhysicalStream, PhysicalMicUnavailableError } from '../captureDevice';
 import { PcmRecorder } from '../pcmCapture';
+import { CaptureController } from '../captureController';
 import { nextStepAfterJob, type JobOutcome, type Translate } from './voiceProfileLogic';
 import type { JobFeedback, JobOrigin } from './useJobFeedback';
 
@@ -17,6 +18,8 @@ export interface SubmitResult {
 
 export interface EnrollmentRecorder {
   isRecording: boolean;
+  /** True while the microphone is being opened; disable the record button. */
+  isStarting: boolean;
   recordingElapsedSeconds: number;
   liveVoiceLevel: number;
   captureError: string | null;
@@ -40,82 +43,65 @@ export function useEnrollmentRecorder(opts: {
 }): EnrollmentRecorder {
   const { selectedInputId, inputDevices, t, jobs, refreshSamples } = opts;
   const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [isStarting, setIsStarting] = useState<boolean>(false);
   const [recordingElapsedSeconds, setRecordingElapsedSeconds] = useState<number>(0);
   const [liveVoiceLevel, setLiveVoiceLevel] = useState<number>(0);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
-  const recorderRef = useRef<PcmRecorder | null>(null);
-  const deviceRef = useRef<DeviceInfo | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const controllerRef = useRef<CaptureController | null>(null);
+  if (controllerRef.current === null) {
+    controllerRef.current = new CaptureController(() => new PcmRecorder({ maxSeconds: MAX_RECORD_SECONDS }));
+  }
+  const controller = controllerRef.current;
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartTimeRef = useRef<number>(0);
 
-  // Stops any capture in progress and discards its PCM.
-  const cleanupRecording = useCallback(() => {
+  const clearTimer = () => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    const recorder = recorderRef.current;
-    const device = deviceRef.current;
-    recorderRef.current = null;
-    deviceRef.current = null;
-    if (recorder && device) {
-      recorder
-        .stop(device)
-        .then((discarded) => discarded.pcm.fill(0))
-        .catch(() => undefined);
-    }
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+  };
+
+  // Stops any capture in progress (or in flight) and discards its PCM.
+  const cleanupRecording = useCallback(() => {
+    clearTimer();
+    controller.cancel();
+    setIsStarting(false);
     setIsRecording(false);
     setLiveVoiceLevel(0);
-  }, []);
+  }, [controller]);
 
   useEffect(() => cleanupRecording, [cleanupRecording]);
 
   /**
-   * Opens the raw physical microphone and starts the PCM recorder. If no physical microphone
-   * opens, shows the error and does NOT start recording (spec D1: no fallback).
+   * Opens the raw physical microphone and starts the PCM recorder. Single-flight: a second call
+   * while one is opening returns false. If no physical microphone opens, shows the error and does
+   * NOT start recording (spec D1: no fallback).
    */
   const startCapture = async (onLimit: () => void): Promise<boolean> => {
-    cleanupRecording();
+    if (controller.isStarting) return false;
+    clearTimer();
     setCaptureError(null);
-    let acquired: { stream: MediaStream; device: DeviceInfo };
-    try {
-      acquired = await acquireRawPhysicalStream(selectedInputId, inputDevices);
-    } catch (err) {
-      if (!(err instanceof PhysicalMicUnavailableError)) console.warn('Physical microphone capture failed');
+    setIsRecording(false);
+    setIsStarting(true);
+    const result = await controller.start({
+      acquire: () => acquireRawPhysicalStream(selectedInputId, inputDevices),
+      onLevel: (level01) => setLiveVoiceLevel(Math.round(level01 * 100)),
+      onEnded: () => {
+        // Microphone unplugged / track ended: discard the take and tell the user.
+        cleanupRecording();
+        setCaptureError(t('voiceProfile.physicalMicUnavailable'));
+      },
+    });
+    if (result.status === 'busy') return false;
+    if (result.status === 'cancelled') return false; // cleanup already reset the state
+    setIsStarting(false);
+    if (result.status === 'failed') {
+      if (!(result.error instanceof PhysicalMicUnavailableError)) console.warn('Physical microphone capture failed');
       setCaptureError(t('voiceProfile.physicalMicUnavailable'));
       return false;
     }
-    streamRef.current = acquired.stream;
-    const recorder = new PcmRecorder({ maxSeconds: MAX_RECORD_SECONDS });
-    // Registered before start() so a cleanup/stop during the await cancels the recorder.
-    recorderRef.current = recorder;
-    deviceRef.current = acquired.device;
-    try {
-      await recorder.start(
-        acquired.stream,
-        (level01) => setLiveVoiceLevel(Math.round(level01 * 100)),
-        () => {
-          // Microphone unplugged / track ended: discard the take and tell the user.
-          if (recorderRef.current !== recorder) return;
-          cleanupRecording();
-          setCaptureError(t('voiceProfile.physicalMicUnavailable'));
-        },
-      );
-    } catch {
-      // PcmRecorder.start() already closed the context and stopped the tracks.
-      if (recorderRef.current === recorder) {
-        recorderRef.current = null;
-        deviceRef.current = null;
-        streamRef.current = null;
-      }
-      setCaptureError(t('voiceProfile.physicalMicUnavailable'));
-      return false;
-    }
-    if (recorderRef.current !== recorder) return false; // cancelled while starting
     recordingStartTimeRef.current = Date.now();
     setRecordingElapsedSeconds(0);
     setIsRecording(true);
@@ -133,23 +119,11 @@ export function useEnrollmentRecorder(opts: {
 
   /** Stops the recorder and returns the captured PCM (null if nothing was recording). */
   const stopCapture = async (): Promise<CapturedPcm | null> => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    const recorder = recorderRef.current;
-    const device = deviceRef.current;
-    recorderRef.current = null;
-    deviceRef.current = null;
-    streamRef.current = null;
+    clearTimer();
+    setIsStarting(false);
     setIsRecording(false);
     setLiveVoiceLevel(0);
-    if (!recorder || !device) return null;
-    try {
-      return await recorder.stop(device);
-    } catch {
-      return null;
-    }
+    return controller.stop();
   };
 
   /** Sends one captured sample to the service and follows its job until done/failed. */
@@ -183,7 +157,7 @@ export function useEnrollmentRecorder(opts: {
   };
 
   return {
-    isRecording, recordingElapsedSeconds, liveVoiceLevel, captureError, setCaptureError,
+    isRecording, isStarting, recordingElapsedSeconds, liveVoiceLevel, captureError, setCaptureError,
     startCapture, stopCapture, cleanupRecording, submitSample,
   };
 }
