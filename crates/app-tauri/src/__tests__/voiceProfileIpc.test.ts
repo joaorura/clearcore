@@ -388,3 +388,18 @@ describe('voiceProfileStatusLabelKey', () => {
     expect(voiceProfileStatusLabelKey({ ...base, is_enrolled: false, is_voice_profile_active: false })).toBe('none');
   });
 });
+
+describe('voice profile selected/active id passthrough', () => {
+  it('keeps them absent when the service did not send them', () => {
+    const s = normalizeVoiceProfileStatus({ is_enrolled: true });
+    expect(s.voice_profile_selected).toBeUndefined();
+    expect(s.active_voice_profile_id).toBeUndefined();
+  });
+  it('carries them through normalize and merge', () => {
+    const res = { is_enrolled: true, voice_profile_selected: true, active_voice_profile_id: 'p1' };
+    expect(normalizeVoiceProfileStatus(res).active_voice_profile_id).toBe('p1');
+    const m = mergeVoiceProfileStatus(normalizeVoiceProfileStatus({}), res, 0);
+    expect(m.voice_profile_selected).toBe(true);
+    expect(m.active_voice_profile_id).toBe('p1');
+  });
+});

@@ -10,6 +10,7 @@ const { parseHardwareJson } = require('./hardware-json.cjs');
 const { resolveBackendSelection } = require('./backend-selection.cjs');
 const updater = require('./updater.cjs');
 const voiceProfileStore = require('./voice-profile-store.cjs');
+const voiceProfileMerge = require('./voice-profile-merge.cjs');
 
 // ClearCore Runtime Application Version
 const APP_VERSION = '0.1.0-beta.1';
@@ -83,7 +84,7 @@ function getIpcEndpoint() {
 }
 
 // Low-level IPC request to realtime-noise-service daemon
-function sendIpcRequest(command, payload = {}) {
+function sendIpcRequest(command, payload = {}, timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
     const endpoint = getIpcEndpoint();
     const req =
@@ -124,8 +125,8 @@ function sendIpcRequest(command, payload = {}) {
       reject(new Error(`Daemon unreachable at ${targetDesc}: ${err.message}`));
     });
 
-    // Timeout after 3 seconds
-    client.setTimeout(3000, () => {
+    // Timeout (default 3 seconds)
+    client.setTimeout(timeoutMs, () => {
       client.destroy();
       reject(new Error('Daemon IPC timeout'));
     });
@@ -1569,10 +1570,29 @@ ipcMain.handle('set_studio_preset', async (_event, args) => {
 });
 
 // Voice Profile & Speaker Isolation IPC Handlers
+async function getServiceVoiceProfileStatus() {
+  try {
+    return (await sendIpcRequest('GetStatus', {}, 1500)) || {};
+  } catch (_e) {
+    return {};
+  }
+}
+
+async function readMergedVoiceProfile() {
+  const local = voiceProfileStore.readVoiceProfile();
+  const service = await getServiceVoiceProfileStatus();
+  const merged = voiceProfileMerge.mergeLocalAndServiceProfile(local, service);
+  return { success: true, profile: merged, ...merged };
+}
+
 ipcMain.handle('set_voice_profile', async (_event, args) => {
   try {
     const rawProfile = (args && typeof args === 'object' && args.profile) ? args.profile : (args && typeof args === 'object' ? args : {});
-    const updated = voiceProfileStore.writeVoiceProfile(rawProfile);
+    // Service-derived fields must never be persisted in the local store.
+    const updated = voiceProfileStore.writeVoiceProfile(
+      voiceProfileMerge.stripServiceVoiceProfileFields(rawProfile),
+    );
+    let forwardError = null;
 
     // Forward to daemon if running
     if (await isDaemonResponsive()) {
@@ -1587,30 +1607,26 @@ ipcMain.handle('set_voice_profile', async (_event, args) => {
           });
         }
       } catch (e) {
-        console.log('[Clearcore IPC] Daemon voice profile forward skipped:', e.message);
+        forwardError = String((e && e.message) || 'voice profile forward failed').slice(0, 200);
+        console.log('[Clearcore IPC] Daemon voice profile forward failed');
       }
     }
 
+    const result = forwardError ? { ...updated, voice_profile_error: forwardError } : updated;
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('voice-profile-update', updated);
+      mainWindow.webContents.send('voice-profile-update', result);
     }
 
-    return { success: true, profile: updated, ...updated };
+    return { success: true, profile: result, ...result };
   } catch (err) {
     console.error('[Clearcore IPC] Error in set_voice_profile:', err);
     return { success: false, error: err.message };
   }
 });
 
-ipcMain.handle('get_voice_profile', () => {
-  const profile = voiceProfileStore.readVoiceProfile();
-  return { success: true, profile, ...profile };
-});
+ipcMain.handle('get_voice_profile', () => readMergedVoiceProfile());
 
-ipcMain.handle('get_voice_profile_status', () => {
-  const profile = voiceProfileStore.readVoiceProfile();
-  return { success: true, profile, ...profile };
-});
+ipcMain.handle('get_voice_profile_status', () => readMergedVoiceProfile());
 
 ipcMain.handle('get_voice_samples', async () => {
   let samples = voiceProfileStore.readVoiceSamples();

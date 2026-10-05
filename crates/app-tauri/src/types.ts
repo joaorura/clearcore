@@ -64,5 +64,7 @@ export interface VoiceProfileStatus {
   is_voice_profile_active?: boolean;
   stored_voice_profile_id?: string | null;
   voice_profile_error?: string | null;
+  voice_profile_selected?: boolean;
+  active_voice_profile_id?: string | null;
 }
 

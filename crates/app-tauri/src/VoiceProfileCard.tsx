@@ -255,6 +255,8 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     is_voice_profile_active: src.is_voice_profile_active,
     stored_voice_profile_id: src.stored_voice_profile_id,
     voice_profile_error: src.voice_profile_error,
+    voice_profile_selected: src.voice_profile_selected,
+    active_voice_profile_id: src.active_voice_profile_id,
   };
 }
 
@@ -299,6 +301,8 @@ export function mergeVoiceProfileStatus(
     is_voice_profile_active: prof.is_voice_profile_active,
     stored_voice_profile_id: prof.stored_voice_profile_id,
     voice_profile_error: prof.voice_profile_error,
+    voice_profile_selected: prof.voice_profile_selected,
+    active_voice_profile_id: prof.active_voice_profile_id,
     active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
   };
 }
