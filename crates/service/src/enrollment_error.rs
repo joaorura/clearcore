@@ -14,6 +14,7 @@ pub enum EnrollError {
     JobNotFound,
     Failed,
     Busy,
+    BackendUnsupported,
 }
 
 impl EnrollError {
@@ -30,6 +31,7 @@ impl EnrollError {
             Self::JobNotFound => codes::ENROLL_JOB_NOT_FOUND,
             Self::Failed => codes::ENROLL_FAILED,
             Self::Busy => codes::ENROLL_BUSY,
+            Self::BackendUnsupported => codes::ENROLL_BACKEND_UNSUPPORTED,
         }
     }
 }
@@ -53,11 +55,15 @@ mod tests {
             JobNotFound,
             Failed,
             Busy,
+            BackendUnsupported,
         ];
         let mut codes: Vec<&str> = all.iter().map(EnrollError::code).collect();
         assert!(codes.iter().all(|c| c.starts_with("ENROLL_")));
         codes.sort_unstable();
         codes.dedup();
         assert_eq!(codes.len(), all.len());
+        let mut closed = realtime_noise_ipc::enrollment_codes::ALL_ENROLL_CODES.to_vec();
+        closed.sort_unstable();
+        assert_eq!(codes, closed, "every IPC code has exactly one EnrollError");
     }
 }

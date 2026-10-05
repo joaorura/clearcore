@@ -55,6 +55,14 @@ const MAX_SAMPLE_WAV_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_DEV_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
 /// Level matching: largest gain change applied to one sample (spec 4.2 step 1).
 const MAX_LEVEL_GAIN_DB: f32 = 12.0;
+/// Fixed service-log reasons of a built profile that was not applied (diagnostics only; they
+/// never carry the profile, its name or the backend error text).
+const BUILT_PROFILE_NOT_APPLICABLE_LOG: &str =
+    "Built voice profile not applied: the active backend does not accept voice profiles";
+const BUILT_PROFILE_NO_STORE_LOG: &str =
+    "Built voice profile not applied: no profile store is attached";
+const BUILT_PROFILE_PERSIST_FAILED_LOG: &str =
+    "Built voice profile not applied: it could not be persisted; the previous profile was kept";
 /// Peak ceiling of the leveled, joined 48 kHz audio. It sits below the validator's 0.99 because
 /// the 48 -> 16 kHz low-pass rings on broadband transients (a full-scale square wave overshoots
 /// by about 9 %, Gibbs); 0.9 keeps the 16 kHz signal the model sees under 0.99.
@@ -362,6 +370,9 @@ const fn message_for(error: &EnrollError) -> &'static str {
         EnrollError::JobNotFound => "enrollment job not found",
         EnrollError::Busy => "enrollment is busy; retry later",
         EnrollError::Failed => "voice enrollment failed",
+        EnrollError::BackendUnsupported => {
+            "the active isolation model does not accept a voice profile"
+        }
     }
 }
 
@@ -884,8 +895,22 @@ impl ServiceDaemon {
                     },
                 );
             }
-            // The transaction already kept (or restored) the previous profile.
-            Err(ApplyError::NoStore | ApplyError::NotApplicable | ApplyError::PersistFailed) => {
+            // The transaction already kept (or restored) the previous profile. The service log
+            // gets a fixed reason per branch: never the profile, its name or the backend text.
+            Err(ApplyError::NotApplicable) => {
+                eprintln!("{BUILT_PROFILE_NOT_APPLICABLE_LOG}");
+                self.enrollment
+                    .profile_jobs
+                    .mark_failed(job_id, failure(codes::ENROLL_BACKEND_UNSUPPORTED, "apply"));
+            }
+            Err(ApplyError::NoStore) => {
+                eprintln!("{BUILT_PROFILE_NO_STORE_LOG}");
+                self.enrollment
+                    .profile_jobs
+                    .mark_failed(job_id, failure(codes::ENROLL_FAILED, "apply"));
+            }
+            Err(ApplyError::PersistFailed) => {
+                eprintln!("{BUILT_PROFILE_PERSIST_FAILED_LOG}");
                 self.enrollment
                     .profile_jobs
                     .mark_failed(job_id, failure(codes::ENROLL_FAILED, "apply"));
@@ -898,6 +923,11 @@ impl ServiceDaemon {
         const REQUEST_ID: &str = "build-voice-profile-resp";
         if !valid_metadata(name, false) {
             return IpcResponse::invalid_command(REQUEST_ID, "invalid profile name");
+        }
+        // Refused up front: a backend that cannot apply a profile would only fail the build at
+        // the `apply` stage after the whole trim/EQ/embedding run.
+        if !self.supervisor.supports_voice_profile() {
+            return enroll_error(REQUEST_ID, &EnrollError::BackendUnsupported);
         }
         if self.enrollment.build_running() {
             return enroll_error(REQUEST_ID, &EnrollError::Busy);

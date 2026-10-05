@@ -405,6 +405,14 @@ impl ServiceDaemon {
                         "voice_profile_selected": self.stored_voice_profile_id.is_some(),
                         "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
                         "voice_profile_error": self.voice_profile_error,
+                        // Whether the live backend can apply a conditioned profile at all
+                        // (`false` on NPU/OpenVINO and on a base model without FiLM inputs).
+                        "voice_profile_supported": self.supervisor.supports_voice_profile(),
+                        // The APPLIED profile carries a calibrated microphone EQ.
+                        "neural_eq_calibrated": self
+                            .supervisor
+                            .active_voice_profile()
+                            .is_some_and(|profile| profile.eq.is_some()),
                         "voice_samples_count": self.voice_samples.list_samples().len(),
                         // A stored profile, not the obsolete averaged sample embedding.
                         "has_voice_profile": self.stored_voice_profile_id.is_some(),

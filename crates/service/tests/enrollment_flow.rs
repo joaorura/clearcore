@@ -14,9 +14,9 @@ use base64::Engine as _;
 use common::{TempDir, send};
 use realtime_noise_contracts::AudioFrame;
 use realtime_noise_ipc::enrollment_codes::{
-    ENROLL_BUDGET_EXCEEDED, ENROLL_BUSY, ENROLL_INVALID_AUDIO, ENROLL_JOB_NOT_FOUND,
-    ENROLL_MODEL_NOT_CONFIGURED, ENROLL_PAYLOAD_TOO_LARGE, ENROLL_TOO_LITTLE_SPEECH,
-    MAX_REQUEST_LINE_BYTES,
+    ENROLL_BACKEND_UNSUPPORTED, ENROLL_BUDGET_EXCEEDED, ENROLL_BUSY, ENROLL_FAILED,
+    ENROLL_INVALID_AUDIO, ENROLL_JOB_NOT_FOUND, ENROLL_MODEL_NOT_CONFIGURED,
+    ENROLL_PAYLOAD_TOO_LARGE, ENROLL_TOO_LITTLE_SPEECH, MAX_REQUEST_LINE_BYTES,
 };
 use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus};
 use realtime_noise_model::enrollment::{EnrollmentError, RawFilmVectors, SpeakerEmbeddingModel};
@@ -42,6 +42,8 @@ use std::time::{Duration, Instant};
 /// `reject_prefix` when set.
 struct ProfileBackend {
     reject_prefix: Option<&'static str>,
+    /// What `supports_voice_profile` reports (the up-front check of `BuildVoiceProfile`).
+    supports: bool,
 }
 
 impl InferenceBackend for ProfileBackend {
@@ -72,6 +74,10 @@ impl InferenceBackend for ProfileBackend {
             }
             _ => Ok(()),
         }
+    }
+
+    fn supports_voice_profile(&self) -> bool {
+        self.supports
     }
 }
 
@@ -118,6 +124,8 @@ struct Setup {
     legacy: Option<PathBuf>,
     /// Backend rejects built profiles (ids `p-...`).
     reject_built: bool,
+    /// Backend reports that it cannot apply voice profiles at all.
+    backend_unsupported: bool,
 }
 
 impl Default for Setup {
@@ -128,6 +136,7 @@ impl Default for Setup {
             model_delay: Some(Duration::ZERO),
             legacy: None,
             reject_built: false,
+            backend_unsupported: false,
         }
     }
 }
@@ -162,6 +171,7 @@ fn daemon_with(dir: &Path, setup: Setup) -> (ServiceDaemon, Arc<Mutex<Option<f32
     supervisor.set_backend(
         Box::new(ProfileBackend {
             reject_prefix: setup.reject_built.then_some("p-"),
+            supports: !setup.backend_unsupported,
         }),
         "fake",
     );
@@ -1119,7 +1129,9 @@ fn a_profile_the_backend_rejects_fails_the_job_and_keeps_the_previous_one() {
     let id = job_id(&build(&mut daemon));
     let job = wait_job(&mut daemon, &id);
     assert_eq!(job["state"], "failed", "{job}");
-    assert_eq!(job["error_code"], "ENROLL_FAILED");
+    // The backend passed the up-front check but refused the profile: its own code, not the
+    // generic failure.
+    assert_eq!(job["error_code"], ENROLL_BACKEND_UNSUPPORTED);
     assert_eq!(job["stage"], "apply");
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["active_voice_profile_id"], "previous");
@@ -1394,4 +1406,120 @@ fn symlinks_inside_samples_never_delete_their_targets() {
     );
     assert_eq!(resp.payload["discarded"], true);
     assert_eq!(std::fs::read(&sentinel).expect("sentinel"), b"keep");
+}
+
+// ---------------------------------------------------------------- backend capability
+
+#[test]
+fn a_backend_without_voice_profile_support_refuses_the_build_up_front() {
+    let temp = TempDir::new("enroll-backend-unsupported");
+    let (mut daemon, seen_peak) = daemon_with(
+        temp.path(),
+        Setup {
+            backend_unsupported: true,
+            model_delay: Some(Duration::from_secs(30)),
+            ..Setup::default()
+        },
+    );
+    add_sample(&mut daemon, 4.0, "mic-a");
+    add_sample(&mut daemon, 4.0, "mic-a");
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_profile_supported"], false);
+
+    let started = Instant::now();
+    let resp = build(&mut daemon);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "answered synchronously"
+    );
+    assert_eq!(resp.status, IpcStatus::InternalError, "{resp:?}");
+    assert_eq!(error_code(&resp), ENROLL_BACKEND_UNSUPPORTED, "{resp:?}");
+    assert!(resp.payload.get("job_id").is_none(), "no job is created");
+    assert!(
+        seen_peak.lock().unwrap().is_none(),
+        "the embedding never ran"
+    );
+    let job = send(
+        &mut daemon,
+        IpcCommand::GetEnrollmentJob {
+            job_id: "profile-job-1".to_owned(),
+        },
+    );
+    assert_eq!(error_code(&job), ENROLL_JOB_NOT_FOUND);
+    // Samples and gallery stay intact.
+    assert_eq!(list(&mut daemon)["total_count"], 2);
+}
+
+#[test]
+fn a_supporting_backend_still_builds_and_status_reports_support_and_eq() {
+    let temp = TempDir::new("enroll-backend-supported");
+    let mut daemon = daemon(temp.path());
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_profile_supported"], true);
+    assert_eq!(status.payload["neural_eq_calibrated"], false, "no profile");
+
+    let film = FiLMVectors::new(
+        film_vector(0.5, 0.003),
+        film_vector(-0.25, 0.001),
+        film_vector(0.75, 0.002),
+        film_vector(0.125, -0.0005),
+    )
+    .expect("film");
+    let no_eq = VoiceProfile::new("no-eq", "n", "2026-10-02T12:00:00Z", film, None).expect("p");
+    let set = send(
+        &mut daemon,
+        IpcCommand::SetVoiceProfile {
+            profile_json: no_eq.to_json().expect("json"),
+        },
+    );
+    assert_eq!(set.status, IpcStatus::Ok);
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(
+        status.payload["neural_eq_calibrated"], false,
+        "profile without EQ"
+    );
+
+    let set = send(
+        &mut daemon,
+        IpcCommand::SetVoiceProfile {
+            profile_json: test_profile("with-eq").to_json().expect("json"),
+        },
+    );
+    assert_eq!(set.status, IpcStatus::Ok);
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(
+        status.payload["neural_eq_calibrated"], true,
+        "applied profile has EQ"
+    );
+
+    add_sample(&mut daemon, 4.0, "mic-a");
+    add_sample(&mut daemon, 4.0, "mic-a");
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "done", "{job}");
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["active_voice_profile_id"], job["profile_id"]);
+}
+
+#[test]
+fn a_built_profile_that_cannot_be_persisted_stays_enroll_failed() {
+    let temp = TempDir::new("enroll-build-persist-fails");
+    let mut daemon = daemon(temp.path());
+    add_sample(&mut daemon, 4.0, "mic-a");
+    add_sample(&mut daemon, 4.0, "mic-a");
+    // A non-empty directory where the active profile file goes: the final rename fails.
+    let blocker = temp.path().join(ACTIVE_PROFILE_FILE_NAME);
+    std::fs::create_dir_all(&blocker).expect("dir");
+    std::fs::write(blocker.join("keep"), b"x").expect("file");
+
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "failed", "{job}");
+    assert_eq!(job["error_code"], ENROLL_FAILED);
+    assert_eq!(job["stage"], "apply");
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert!(
+        status.payload["active_voice_profile_id"].is_null(),
+        "rolled back"
+    );
 }
