@@ -3,8 +3,8 @@
 
 use realtime_noise_contracts::AudioFrame;
 use realtime_noise_model::{
-    BackendDescriptor, InferenceBackend, InferenceError, ProcessedFrame, VoiceProfile,
-    reject_unsupported_voice_profile,
+    BackendDescriptor, FILM_HIDDEN_DIM, FiLMVectors, InferenceBackend, InferenceError,
+    ProcessedFrame, VoiceProfile, reject_unsupported_voice_profile,
 };
 use realtime_noise_supervisor::EngineSupervisor;
 
@@ -110,4 +110,37 @@ fn backend_swap_to_unsupported_drops_the_active_profile() {
     sup.set_voice_profile(Some(&profile("a"))).unwrap();
     sup.set_backend(Box::new(ProfileBackend { supports: false }), "b");
     assert_eq!(sup.active_voice_profile_id(), None);
+}
+
+/// Confirms on the real stack why `BuildVoiceProfile` cannot activate a profile on the shipped
+/// model: the approved base `DFNet3` (`vendor/approved/df-compatible-release-asset-v1.bin`, the
+/// same weights as `models/stateful`) declares no `gamma`/`beta` inputs, so the real
+/// `TractBackend` refuses any non-identity profile.
+#[test]
+fn real_tract_base_model_refuses_a_conditioned_profile() {
+    let root = realtime_noise_supervisor::find_repo_root().expect("repo root");
+    let mut sup = EngineSupervisor::default();
+    let info = sup.select_backend("tract", None, Some(&root));
+    assert_eq!(
+        info.name, "tract",
+        "the real tract backend must load, not the mock"
+    );
+    let film = FiLMVectors::new(
+        vec![1.1; FILM_HIDDEN_DIM],
+        vec![0.02; FILM_HIDDEN_DIM],
+        vec![0.9; FILM_HIDDEN_DIM],
+        vec![-0.02; FILM_HIDDEN_DIM],
+    )
+    .unwrap();
+    let built = VoiceProfile::new("p-built", "n", "2026-10-05T00:00:00Z", film, None).unwrap();
+    let err = sup.set_voice_profile(Some(&built)).unwrap_err();
+    eprintln!("real tract set_voice_profile(non-identity) -> {err:?}");
+    assert!(
+        matches!(&err, InferenceError::InputContract(m)
+            if m == "backend model does not support speaker conditioning"),
+        "{err:?}"
+    );
+    assert_eq!(sup.active_voice_profile_id(), None);
+    // The neutral profile is still accepted by the same backend.
+    sup.set_voice_profile(Some(&profile("neutral"))).unwrap();
 }
