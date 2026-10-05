@@ -19,18 +19,19 @@ powered by DeepFilterNet3 ONNX, PipeWire C bridge, and Rust supervisor daemon.
 Provides voice isolation, neural EQ acoustic calibration, and studio DSP.
 
 %prep
+mkdir -p dist
 %ifarch x86_64
 curl -fsSL -o bundle.tar.gz https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-linux-x64.tar.gz
 %endif
 %ifarch aarch64
 curl -fsSL -o bundle.tar.gz https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.3/Clearcore-linux-arm64.tar.gz
 %endif
-tar -xzf bundle.tar.gz --strip-components=1
+tar -xzf bundle.tar.gz -C dist --strip-components=1
 
 %install
 rm -rf %{buildroot}
 mkdir -p %{buildroot}/opt/clearcore
-cp -a * %{buildroot}/opt/clearcore/
+cp -a dist/* %{buildroot}/opt/clearcore/
 
 mkdir -p %{buildroot}/usr/bin
 cat << 'WRAPPER' > %{buildroot}/usr/bin/clearcore
