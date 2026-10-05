@@ -237,6 +237,11 @@ impl InferenceBackend for TractBackend {
         Self::set_voice_profile(self, profile)
     }
 
+    /// Only a model with `FiLM` inputs can apply a profile built by enrollment.
+    fn supports_voice_profile(&self) -> bool {
+        self.film_supported
+    }
+
     fn descriptor(&self) -> BackendDescriptor {
         self.descriptor.clone()
     }
@@ -518,6 +523,9 @@ mod tests {
     fn base_model_does_not_support_speaker_conditioning() -> TestResult {
         assert!(!base_backend()?.supports_speaker_conditioning());
         assert!(film_backend()?.supports_speaker_conditioning());
+        // The cheap trait capability the service checks before a build follows the model.
+        assert!(!InferenceBackend::supports_voice_profile(&base_backend()?));
+        assert!(InferenceBackend::supports_voice_profile(&film_backend()?));
         Ok(())
     }
 

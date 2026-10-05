@@ -386,6 +386,10 @@ impl<B: SpectralModelBackend> InferenceBackend for AgnosticDspBackend<B> {
     fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
         crate::reject_unsupported_voice_profile(profile)
     }
+
+    fn supports_voice_profile(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

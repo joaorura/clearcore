@@ -129,6 +129,15 @@ pub trait InferenceBackend: Send {
     fn process(&mut self, input: &AudioFrame) -> Result<ProcessedFrame, InferenceError>;
     fn algorithmic_latency_samples(&self) -> u32;
     fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError>;
+
+    /// Cheap capability check: whether [`Self::set_voice_profile`] can apply a conditioned
+    /// (non-identity) profile, so the service can refuse an enrollment build up front instead
+    /// of spending it on a profile the backend will reject. Backends that reject every profile
+    /// through [`reject_unsupported_voice_profile`] must return `false`; the default (`true`)
+    /// covers backends that accept profiles (test doubles included).
+    fn supports_voice_profile(&self) -> bool {
+        true
+    }
 }
 
 /// Policy for backends that cannot condition on a voice profile: `None` is
@@ -159,6 +168,10 @@ impl<T: InferenceBackend + ?Sized> InferenceBackend for Box<T> {
 
     fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
         (**self).set_voice_profile(profile)
+    }
+
+    fn supports_voice_profile(&self) -> bool {
+        (**self).supports_voice_profile()
     }
 }
 

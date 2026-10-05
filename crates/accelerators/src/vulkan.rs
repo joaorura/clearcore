@@ -170,6 +170,10 @@ impl InferenceBackend for VulkanBackend {
     ) -> Result<(), realtime_noise_model::InferenceError> {
         realtime_noise_model::reject_unsupported_voice_profile(profile)
     }
+
+    fn supports_voice_profile(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

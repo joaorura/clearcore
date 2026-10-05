@@ -115,6 +115,10 @@ impl<B: InferenceBackend> InferenceBackend for StudioBackend<B> {
     fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
         self.inner.set_voice_profile(profile)
     }
+
+    fn supports_voice_profile(&self) -> bool {
+        self.inner.supports_voice_profile()
+    }
 }
 
 #[cfg(test)]

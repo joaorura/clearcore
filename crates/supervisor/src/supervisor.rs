@@ -219,6 +219,15 @@ impl EngineSupervisor {
         self.active_profile.as_ref().map(|p| p.id.as_str())
     }
 
+    /// Whether the live backend can apply a conditioned voice profile (cheap; no inference).
+    /// `false` without a backend.
+    #[must_use]
+    pub fn supports_voice_profile(&self) -> bool {
+        self.backend
+            .as_deref()
+            .is_some_and(InferenceBackend::supports_voice_profile)
+    }
+
     /// Re-applies the stored profile to a freshly installed backend. If the new backend does not
     /// confirm it, the profile is dropped so an unconfirmed profile is never reported.
     fn reapply_voice_profile(&mut self) {

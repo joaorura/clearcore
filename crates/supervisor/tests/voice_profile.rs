@@ -52,6 +52,10 @@ impl InferenceBackend for ProfileBackend {
             _ => Ok(()),
         }
     }
+
+    fn supports_voice_profile(&self) -> bool {
+        self.supports
+    }
 }
 
 fn profile(id: &str) -> VoiceProfile {
@@ -75,6 +79,39 @@ fn unsupported_backend_never_reports_active() {
     sup.set_backend(Box::new(ProfileBackend { supports: false }), "fake");
     assert!(sup.set_voice_profile(Some(&profile("a"))).is_err());
     assert_eq!(sup.active_voice_profile_id(), None);
+}
+
+#[test]
+fn supports_voice_profile_follows_the_live_backend_through_the_studio_wrapper() {
+    let mut sup = EngineSupervisor::default();
+    assert!(
+        !sup.supports_voice_profile(),
+        "no backend: nothing can apply a profile"
+    );
+    sup.set_backend(Box::new(ProfileBackend { supports: true }), "a");
+    assert!(sup.supports_voice_profile());
+    sup.set_backend(Box::new(ProfileBackend { supports: false }), "b");
+    assert!(!sup.supports_voice_profile());
+}
+
+#[test]
+fn backends_that_reject_every_profile_report_no_support() {
+    use realtime_noise_accelerators::BackendSelection;
+    for selection in [
+        BackendSelection::TractCpu,
+        BackendSelection::OpenVinoNpu,
+        BackendSelection::OpenVinoGpu,
+        BackendSelection::OpenVinoCpu,
+        BackendSelection::DirectMl,
+        BackendSelection::RyzenAiNpu,
+        BackendSelection::TensorRt,
+        BackendSelection::Vulkan,
+        BackendSelection::CoreMl,
+    ] {
+        let mut sup = EngineSupervisor::default();
+        sup.set_backend(selection.instantiate_mock_backend(), "mock");
+        assert!(!sup.supports_voice_profile(), "{selection:?}");
+    }
 }
 
 #[test]
