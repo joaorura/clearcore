@@ -34,6 +34,29 @@ To run the full development environment with live React hot reloading and automa
 - **Windows:** `.\dev.bat` ou `.\dev.ps1` (or `cd crates/app-tauri && npm run dev`)
 - **React Frontend Only (Browser):** `cd crates/app-tauri && npm run dev:ui`
 
+`./dev.sh` builds the daemon in **release** (incremental; the first build takes longer) because the
+denoiser does not keep up with real-time audio in a debug build, and the Electron app starts it with
+core dumps disabled.
+
+**Voice enrollment model (development only).** Generating a voice profile needs the M3 development
+asset. `dev.sh` passes these variables on to the daemon (started by Electron); without them,
+"Gerar perfil" ends in `ENROLL_MODEL_NOT_CONFIGURED` (samples are still recorded and denoised):
+
+| Variable | Value |
+| :--- | :--- |
+| `CLEARCORE_DEV_ENROLLMENT_ASSET` | Absolute path of `voice-enrollment-asset-v1.tar.gz`. |
+| `CLEARCORE_DEV_ENROLLMENT_SHA256` | SHA-256 of the whole file (64 lowercase hex). |
+
+Example only (the path is this machine's `clearcore-train` M3 run; use your own copy):
+
+```bash
+CLEARCORE_DEV_ENROLLMENT_ASSET=/home/joaorura/orca/projects/clearcore-train/runs/m3/voice-enrollment-asset-v1.tar.gz \
+CLEARCORE_DEV_ENROLLMENT_SHA256=bd4d6dd941f8527b5011a2bae78169148f33155e25d30c5707e88963e7ea824d \
+./dev.sh
+```
+
+The asset is never copied to `vendor/approved/`, pinned or distributed (see `docs/ipc-v1.md` §3.1.7).
+
 ### Standalone Desktop App Execution (Production Package)
 - **Run Standalone App (Linux):** `./release/Clearcore-linux-x64/clearcore`
 - **Run Standalone App (Windows):** `.\release\Clearcore-win32-x64\Clearcore.exe`
