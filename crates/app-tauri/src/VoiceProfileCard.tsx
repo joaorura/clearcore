@@ -667,13 +667,6 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     audio.play().catch(() => setPlayingAudioId(null));
   };
 
-  // Sends the local profile (never service keys) and applies the fresh service status from the reply.
-  const pushProfileStatus = (local: VoiceProfileStatus) => {
-    invokeBridge<unknown>('set_voice_profile', { profile: stripServiceVoiceProfileKeys(local) })
-      .catch(() => undefined)
-      .then((res) => setProfileStatus((prev) => applySetVoiceProfileResult(prev, local, res)));
-  };
-
   // Main-process pushes (same merged payload as the set_voice_profile reply).
   useEffect(() => {
     const api = typeof window !== 'undefined' ? window.clearcoreApi : undefined;
@@ -683,7 +676,10 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     });
   }, []);
 
-  // Delete Sample from the service gallery
+  /**
+   * Deletes a sample in the service and refreshes the list (and budget). It does NOT rebuild or
+   * re-send the profile: only the user frees budget, and rebuilding is the explicit button (spec §4.4).
+   */
   const handleDeleteSample = async (id: string) => {
     setDeletingId(id);
     try {
@@ -694,14 +690,6 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     const list = await refreshSamples();
     setDeletingId(null);
     if (list) setBudgetError(null);
-
-    const remaining = list?.samples.length ?? samples.length;
-    const newStatus: VoiceProfileStatus = {
-      ...stripServiceVoiceProfileKeys(profileStatus),
-      is_enrolled: remaining > 0,
-      active_samples_count: remaining,
-    };
-    pushProfileStatus(newStatus);
   };
 
   // Approve Call Suggestion Take: the service rechecks the speech budget.
