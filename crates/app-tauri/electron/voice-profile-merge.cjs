@@ -8,7 +8,16 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'voice_profile_selected',
   'active_voice_profile_id',
   'has_voice_profile',
+  // GetStatus: the active backend can apply a voice profile (absent = unknown, older service).
+  'voice_profile_supported',
+  // GetStatus: the APPLIED profile carries a microphone EQ (never read from the local file).
+  'neural_eq_calibrated',
 ];
+
+// Service fields accepted only as real booleans; anything else is dropped (= unknown).
+const BOOLEAN_SERVICE_KEYS = new Set([
+  'is_voice_profile_active', 'has_voice_profile', 'voice_profile_supported', 'neural_eq_calibrated',
+]);
 
 function isObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -19,7 +28,7 @@ function pickServiceVoiceProfileFields(serviceStatus) {
   const out = {};
   for (const key of SERVICE_VOICE_PROFILE_KEYS) {
     if (!(key in serviceStatus) || serviceStatus[key] === undefined) continue;
-    if ((key === 'is_voice_profile_active' || key === 'has_voice_profile') && typeof serviceStatus[key] !== 'boolean') continue;
+    if (BOOLEAN_SERVICE_KEYS.has(key) && typeof serviceStatus[key] !== 'boolean') continue;
     out[key] = serviceStatus[key];
   }
   return out;
@@ -36,7 +45,8 @@ function serviceHasVoiceProfile(serviceStatus) {
 
 function mergeLocalAndServiceProfile(localProfile, serviceStatus) {
   return {
-    ...(isObject(localProfile) ? localProfile : {}),
+    // Service-owned fields left in the local file (e.g. an old neural_eq_calibrated) never count.
+    ...stripServiceVoiceProfileFields(localProfile),
     ...pickServiceVoiceProfileFields(serviceStatus),
     is_enrolled: serviceHasVoiceProfile(serviceStatus),
   };

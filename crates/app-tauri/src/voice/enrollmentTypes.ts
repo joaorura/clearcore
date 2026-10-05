@@ -8,6 +8,8 @@ export type EnrollErrorCode =
   | 'ENROLL_CLIPPING' | 'ENROLL_TOO_QUIET' | 'ENROLL_TOO_LITTLE_SPEECH' | 'ENROLL_MODEL_NOT_CONFIGURED'
   | 'ENROLL_BUDGET_EXCEEDED' | 'ENROLL_INVALID_AUDIO' | 'ENROLL_PAYLOAD_TOO_LARGE'
   | 'ENROLL_JOB_NOT_FOUND' | 'ENROLL_BUSY' | 'ENROLL_FAILED' | 'SERVICE_UNAVAILABLE'
+  /** The active isolation model cannot apply a voice profile (samples and enrollment are kept). */
+  | 'ENROLL_BACKEND_UNSUPPORTED'
   /** Local code: the running daemon predates the enrollment pipeline (restart ClearCore). */
   | 'SERVICE_OUTDATED';
 

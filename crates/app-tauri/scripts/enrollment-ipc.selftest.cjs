@@ -55,6 +55,9 @@ assert.strictEqual(m.classifyEnrollError(new Error('Daemon unreachable at /x: co
 assert.strictEqual(m.classifyEnrollError(new Error('service rejected: ENOENT')), 'ENROLL_FAILED');
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ENROLL_WHATEVER' })), 'ENROLL_FAILED');
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ENROLL_BUSY' })), 'ENROLL_BUSY');
+// The active isolation model cannot apply a profile: its own code, on the closed list.
+assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ENROLL_BACKEND_UNSUPPORTED' })), 'ENROLL_BACKEND_UNSUPPORTED');
+assert.strictEqual(m.mapJob({ job_id: 'profile-job-2', state: 'failed', stage: 'apply', error_code: 'ENROLL_BACKEND_UNSUPPORTED' }).errorCode, 'ENROLL_BACKEND_UNSUPPORTED');
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ETIMEDOUT' })), 'SERVICE_UNAVAILABLE');
 assert.strictEqual(m.classifyEnrollError(new Error('Daemon IPC timeout')), 'SERVICE_UNAVAILABLE');
 assert.strictEqual(m.classifyEnrollError(new Error('boom')), 'ENROLL_FAILED');
@@ -212,6 +215,9 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
   assert.deepStrictEqual(await build(), { errorCode: 'ENROLL_FAILED' });
   err = Object.assign(new Error('x'), { code: 'ENROLL_BUSY' });
   assert.deepStrictEqual(await build(), { errorCode: 'ENROLL_BUSY' });
+  // Immediate refusal of BuildVoiceProfile by a backend without voice profile support.
+  err = Object.assign(new Error('the active isolation model does not accept a voice profile'), { code: 'ENROLL_BACKEND_UNSUPPORTED' });
+  assert.deepStrictEqual(await build(), { errorCode: 'ENROLL_BACKEND_UNSUPPORTED' });
   // Other channels keep the generic classification.
   err = Object.assign(new Error('malformed request'), { code: 'JSON_PARSE_ERROR' });
   assert.deepStrictEqual(await hs.enrollment_get_job({}, { jobId: 'sample-job-1' }), { errorCode: 'ENROLL_FAILED' });

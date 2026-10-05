@@ -20,7 +20,7 @@ const LABEL_KEYS = ['budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', '
   'devModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech'];
 const ERROR_CODES = ['ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE', 'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED',
-  'SERVICE_UNAVAILABLE', 'UNKNOWN'];
+  'SERVICE_UNAVAILABLE', 'ENROLL_BACKEND_UNSUPPORTED', 'UNKNOWN'];
 const labels = {
   ...Object.fromEntries(LABEL_KEYS.map((k) => [k, k])),
   errors: Object.fromEntries(ERROR_CODES.map((c) => [c, `err:${c}`])),
@@ -160,6 +160,26 @@ describe('ProfilePanel', () => {
   it('shows the build job stage and the sample count', () => {
     const m = html(<ProfilePanel {...profileProps({ feedback: { jobBusy: true, currentJob: { ...runningJob, stage: 'enroll' }, enrollErrorText: null } })} />);
     expect(m).toContain('stageEnroll'); expect(m).toContain('voiceProfile.statusSamplesPill(count=2)');
+  });
+  it('voice_profile_supported false: notice shown and the build button disabled with the reason', () => {
+    const st: VoiceProfileStatus = { is_enrolled: false, active_samples_count: 2, voice_profile_supported: false };
+    const m = html(<ProfilePanel {...profileProps({ profileStatus: st })} />);
+    expect(m).toContain('voiceProfile.profileUnsupportedNotice');
+    expect(m).toMatch(/<button[^>]*disabled=""[^>]*title="voiceProfile.profileUnsupportedNotice"[^>]*aria-describedby="voice-profile-unsupported"[^>]*>voiceProfile.activateProfileBtn/);
+    expect(m).toContain('id="voice-profile-unsupported"');
+    // The rest of the tab stays: status, samples count and EQ.
+    expect(m).toContain('voiceProfile.statusSamplesPill(count=2)');
+  });
+  it('voice_profile_supported true or absent (older service): no notice, button enabled', () => {
+    for (const st of [
+      { is_enrolled: false, active_samples_count: 2, voice_profile_supported: true },
+      { is_enrolled: false, active_samples_count: 2 },
+    ] as VoiceProfileStatus[]) {
+      const m = html(<ProfilePanel {...profileProps({ profileStatus: st })} />);
+      expect(m).not.toContain('voiceProfile.profileUnsupportedNotice');
+      expect(m).not.toMatch(/<button[^>]*disabled=""/);
+      expect(m).toContain('voiceProfile.activateProfileBtn');
+    }
   });
   it('neural EQ shows calibrated only when the service says so', () => {
     expect(html(<ProfilePanel {...profileProps()} />)).toContain('voiceProfile.neuralEqPending');

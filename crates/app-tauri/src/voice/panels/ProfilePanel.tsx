@@ -1,6 +1,6 @@
 import type { VoiceProfileStatus } from '../../types';
 import type { EnrollmentLabels } from '../enrollmentTypes';
-import { hasServiceVoiceProfile, voiceProfileErrorKey, type Translate } from '../hooks/voiceProfileLogic';
+import { hasServiceVoiceProfile, voiceProfileErrorKey, voiceProfileUnsupported, type Translate } from '../hooks/voiceProfileLogic';
 import { profileStatusLabel } from './profileStatusLabel';
 import { JobFeedbackBlock, type JobFeedbackView } from './shared';
 
@@ -29,8 +29,16 @@ export interface ProfilePanelProps {
 export function ProfilePanel(p: ProfilePanelProps) {
   const { t, profileStatus } = p;
   const status = profileStatusLabel(profileStatus, t);
+  // Only an explicit `false` from the service; an absent field keeps today's behavior.
+  const unsupported = voiceProfileUnsupported(profileStatus);
+  const unsupportedText = t('voiceProfile.profileUnsupportedNotice');
   return (
     <div>
+      {unsupported && (
+        <div id="voice-profile-unsupported" role="status" style={{ color: '#fbbf24', fontSize: 13, marginBottom: 8 }}>
+          {unsupportedText}
+        </div>
+      )}
       <div className="profile-overview-box">
         <div className="overview-metric">
           <div className="overview-label">{t('voiceProfile.statusTitle')}</div>
@@ -72,7 +80,14 @@ export function ProfilePanel(p: ProfilePanelProps) {
 
       {p.canBuild && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-          <button className="action-btn" disabled={p.busy} onClick={p.onBuildProfile} style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
+          <button
+            className="action-btn"
+            disabled={p.busy || unsupported}
+            title={unsupported ? unsupportedText : undefined}
+            aria-describedby={unsupported ? 'voice-profile-unsupported' : undefined}
+            onClick={p.onBuildProfile}
+            style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+          >
             {hasServiceVoiceProfile(profileStatus) ? t('voiceProfile.rebuildProfileBtn') : t('voiceProfile.activateProfileBtn')}
           </button>
         </div>

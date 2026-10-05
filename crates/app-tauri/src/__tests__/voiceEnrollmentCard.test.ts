@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ptBR } from '../i18n/locales/pt-BR';
 import { enUS } from '../i18n/locales/en-US';
+import { availableLocales } from '../i18n/locales';
 import type { EnrollErrorCode, EnrollmentJob, EnrollmentLabels } from '../voice/enrollmentTypes';
 import {
   buildEnrollmentLabels,
@@ -29,7 +30,8 @@ const strictT = (translations: unknown) => (path: string): string => getNested(t
 const ERROR_CODES: Array<EnrollErrorCode | 'UNKNOWN'> = [
   'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE',
-  'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'UNKNOWN',
+  'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'SERVICE_OUTDATED',
+  'ENROLL_BACKEND_UNSUPPORTED', 'UNKNOWN',
 ];
 
 const LABEL_KEYS: Array<Exclude<keyof EnrollmentLabels, 'errors'>> = [
@@ -69,6 +71,19 @@ describe('buildEnrollmentLabels', () => {
     expect(labels.otherMicrophone).toBe('Outro microfone (não usado)');
     expect(labels.needsReenroll).toBe('Regravar');
     expect(labels.errors.ENROLL_BUSY).toBe('O serviço está ocupado processando outro áudio. Aguarde alguns segundos e tente de novo.');
+  });
+
+  it('gives ENROLL_BACKEND_UNSUPPORTED its own label in every locale', () => {
+    for (const { code, translations } of availableLocales) {
+      const labels = buildEnrollmentLabels(strictT(translations));
+      expect(labels.errors.ENROLL_BACKEND_UNSUPPORTED, code).not.toMatch(/^MISSING:/);
+      expect(labels.errors.ENROLL_BACKEND_UNSUPPORTED, code).not.toBe(labels.errors.ENROLL_FAILED);
+      expect(strictT(translations)('voiceProfile.profileUnsupportedNotice'), code).not.toMatch(/^MISSING:/);
+    }
+    expect(buildEnrollmentLabels(strictT(ptBR)).errors.ENROLL_BACKEND_UNSUPPORTED).toBe(
+      'O modelo de isolamento ativo ainda não aceita perfil de voz. Suas amostras e o cadastro foram salvos; o perfil será aplicado quando houver um modelo com suporte.',
+    );
+    expect(strictT(ptBR)('voiceProfile.profileUnsupportedNotice')).toBe('Perfil de voz não suportado pelo modelo de isolamento ativo');
   });
 
   it('gives ENROLL_BUSY its own label, distinct from the generic failure', () => {

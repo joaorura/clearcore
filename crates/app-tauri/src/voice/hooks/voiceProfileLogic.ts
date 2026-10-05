@@ -35,7 +35,13 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     voice_profile_selected: src.voice_profile_selected,
     active_voice_profile_id: src.active_voice_profile_id,
     has_voice_profile: typeof src.has_voice_profile === 'boolean' ? src.has_voice_profile : undefined,
+    voice_profile_supported: typeof src.voice_profile_supported === 'boolean' ? src.voice_profile_supported : undefined,
   };
+}
+
+/** The service said the active isolation model cannot apply a voice profile (absent = unknown). */
+export function voiceProfileUnsupported(status: Partial<VoiceProfileStatus> | null | undefined): boolean {
+  return status?.voice_profile_supported === false;
 }
 
 export type VoiceProfileActivationState = 'active' | 'stored_not_applied' | 'none';
@@ -81,6 +87,7 @@ export function mergeVoiceProfileStatus(
     voice_profile_selected: prof.voice_profile_selected,
     active_voice_profile_id: prof.active_voice_profile_id,
     has_voice_profile: prof.has_voice_profile,
+    voice_profile_supported: prof.voice_profile_supported,
     active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
   };
 }
@@ -92,6 +99,8 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'voice_profile_selected',
   'active_voice_profile_id',
   'has_voice_profile',
+  'voice_profile_supported',
+  'neural_eq_calibrated',
 ] as const;
 
 /** Service-owned fields: the renderer never resends nor inherits them. */
@@ -125,6 +134,8 @@ export function applySetVoiceProfileResult(
     voice_profile_error: svc.voice_profile_error,
     voice_profile_selected: svc.voice_profile_selected,
     active_voice_profile_id: svc.active_voice_profile_id,
+    voice_profile_supported: svc.voice_profile_supported,
+    neural_eq_calibrated: svc.neural_eq_calibrated,
   };
 }
 
@@ -169,6 +180,7 @@ const ENROLLMENT_ERROR_KEYS = [
   'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE',
   'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'SERVICE_OUTDATED', 'UNKNOWN',
+  'ENROLL_BACKEND_UNSUPPORTED',
 ] as const satisfies ReadonlyArray<keyof EnrollmentLabels['errors']>;
 
 /** Fills every EnrollmentLabels field from i18n (`voiceProfile.enrollment.*`). */

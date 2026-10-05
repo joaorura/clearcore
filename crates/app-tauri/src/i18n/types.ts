@@ -214,6 +214,8 @@ export interface Translations {
     neuralEqStatusTitle: string;
     neuralEqCalibrated: string;
     neuralEqPending: string;
+    /** Profile tab notice (and reason of the disabled build button) when GetStatus says voice_profile_supported: false. */
+    profileUnsupportedNotice: string;
     stepProgress: string;
     stepPercent: string;
     openQuestionsMode: string;
@@ -337,6 +339,7 @@ export interface Translations {
         ENROLL_PAYLOAD_TOO_LARGE: string;
         ENROLL_JOB_NOT_FOUND: string;
         ENROLL_BUSY: string;
+        ENROLL_BACKEND_UNSUPPORTED: string;
         ENROLL_FAILED: string;
         SERVICE_UNAVAILABLE: string;
         SERVICE_OUTDATED: string;

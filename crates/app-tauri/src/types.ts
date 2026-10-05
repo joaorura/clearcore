@@ -73,5 +73,10 @@ export interface VoiceProfileStatus {
   active_voice_profile_id?: string | null;
   /** Service-reported (GetStatus): the service holds a stored profile. */
   has_voice_profile?: boolean;
+  /**
+   * Service-reported (GetStatus): the active isolation model can apply a voice profile.
+   * `undefined` (older service) means unknown and keeps the build available.
+   */
+  voice_profile_supported?: boolean;
 }
 

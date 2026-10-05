@@ -16,7 +16,7 @@ const KEYS = [
   'voice_profile_selected',
   'active_voice_profile_id',
 ];
-const local = { is_enrolled: true, active_samples_count: 4, embedding_dim: 192, neural_eq_calibrated: false };
+const local = { is_enrolled: true, active_samples_count: 4, embedding_dim: 192 };
 
 console.log('Testing offline/undefined/null service => no service keys...');
 for (const s of [undefined, null, {}, 'x', 42, []]) {
@@ -98,5 +98,23 @@ assert.strictEqual(mergeLocalAndServiceProfile({ is_enrolled: false }, { stored_
 assert.strictEqual(mergeLocalAndServiceProfile({}, { has_voice_profile: true }).is_enrolled, true);
 assert.strictEqual(mergeLocalAndServiceProfile({ is_enrolled: true }, { stored_voice_profile_id: '' }).is_enrolled, false);
 assert.strictEqual(mergeLocalAndServiceProfile({ is_enrolled: true }, { has_voice_profile: 'yes' }).is_enrolled, false);
+
+console.log('Testing voice_profile_supported and neural_eq_calibrated come only from the service...');
+// A local file from the old flow that claims calibration is ignored, online or offline.
+const legacyEq = { is_enrolled: true, active_samples_count: 1, neural_eq_calibrated: true };
+assert.ok(!('neural_eq_calibrated' in mergeLocalAndServiceProfile(legacyEq, {})));
+assert.ok(!('neural_eq_calibrated' in mergeLocalAndServiceProfile(legacyEq, { stored_voice_profile_id: 'p1' })));
+assert.strictEqual(mergeLocalAndServiceProfile(legacyEq, { neural_eq_calibrated: false }).neural_eq_calibrated, false);
+assert.strictEqual(mergeLocalAndServiceProfile({}, { neural_eq_calibrated: true }).neural_eq_calibrated, true);
+assert.strictEqual(mergeLocalAndServiceProfile({}, { voice_profile_supported: false }).voice_profile_supported, false);
+assert.strictEqual(mergeLocalAndServiceProfile({}, { voice_profile_supported: true }).voice_profile_supported, true);
+for (const v of ['false', 0, null, {}]) {
+  const m = mergeLocalAndServiceProfile({}, { voice_profile_supported: v, neural_eq_calibrated: v });
+  assert.ok(!('voice_profile_supported' in m), 'non-boolean support = unknown');
+  assert.ok(!('neural_eq_calibrated' in m), 'non-boolean calibration dropped');
+}
+// Absent (older service): unknown, never invented.
+assert.ok(!('voice_profile_supported' in mergeLocalAndServiceProfile({}, { stored_voice_profile_id: 'p1' })));
+assert.deepStrictEqual(stripServiceVoiceProfileFields({ a: 1, voice_profile_supported: false, neural_eq_calibrated: true }), { a: 1 });
 
 console.log('voice-profile-merge selftest passed.');
