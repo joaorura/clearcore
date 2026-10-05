@@ -33,8 +33,10 @@ describe('VoiceProfileStore (electron/voice-profile-store.cjs)', () => {
     const profile = voiceProfileStore.readVoiceProfile(testDir);
     expect(profile.is_enrolled).toBe(false);
     expect(profile.active_samples_count).toBe(0);
-    expect(profile.embedding_dim).toBe(192);
-    expect(profile.gain_boost_db).toBe(1.8);
+    // Service-only fields are never invented by the local store.
+    expect(profile.embedding_dim).toBeUndefined();
+    expect(profile.gain_boost_db).toBeUndefined();
+    expect(profile.neural_eq_calibrated).toBeUndefined();
   });
 
   it('writes and persists voice profile correctly', () => {
@@ -55,37 +57,11 @@ describe('VoiceProfileStore (electron/voice-profile-store.cjs)', () => {
     expect(reRead.active_samples_count).toBe(5);
   });
 
-  it('manages voice samples (add, list, delete)', () => {
-    const sample1 = {
-      id: 'sample-test-1',
-      title: 'Amostra Teste 1',
-      category: 'Início de Reunião',
-      timestamp: '10:00',
-      durationSec: 5.0,
-      isInitialStep: true,
-    };
-
-    const addRes = voiceProfileStore.addVoiceSample(sample1, testDir);
-    expect(addRes.sample.id).toBe('sample-test-1');
-    expect(addRes.samples).toHaveLength(1);
-
-    const list1 = voiceProfileStore.readVoiceSamples(testDir);
-    expect(list1).toHaveLength(1);
-    expect(list1[0].id).toBe('sample-test-1');
-
-    // Profile auto-updates active_samples_count
-    const profile = voiceProfileStore.readVoiceProfile(testDir);
-    expect(profile.active_samples_count).toBe(1);
-    expect(profile.is_enrolled).toBe(true);
-
-    // Delete sample
-    const delRes = voiceProfileStore.deleteVoiceSample('sample-test-1', testDir);
-    expect(delRes.success).toBe(true);
-    expect(voiceProfileStore.readVoiceSamples(testDir)).toHaveLength(0);
-
-    const profileAfterDel = voiceProfileStore.readVoiceProfile(testDir);
-    expect(profileAfterDel.active_samples_count).toBe(0);
-    expect(profileAfterDel.is_enrolled).toBe(false);
+  it('keeps no local sample store (samples live in the service)', () => {
+    for (const gone of ['addVoiceSample', 'deleteVoiceSample', 'writeVoiceSamples']) {
+      expect(voiceProfileStore[gone], gone).toBeUndefined();
+    }
+    expect(voiceProfileStore.readVoiceSamples(testDir)).toEqual([]);
   });
 
   it('handles call suggestion intake (approve & dismiss)', () => {
@@ -101,11 +77,12 @@ describe('VoiceProfileStore (electron/voice-profile-store.cjs)', () => {
     expect(voiceProfileStore.readCallTakes(testDir)).toHaveLength(1);
 
     // Approve take
-    const approveRes = voiceProfileStore.approveCallTake('take-meet-1', 'Meet Validado', take1, testDir);
+    // Only drops the take from the local cache; the sample is created by the service.
+    const approveRes = voiceProfileStore.approveCallTake('take-meet-1', testDir);
     expect(approveRes.success).toBe(true);
     expect(approveRes.takes).toHaveLength(0);
-    expect(approveRes.sample.title).toBe('Chamada Google Meet');
-    expect(voiceProfileStore.readVoiceSamples(testDir)).toHaveLength(1);
+    expect(approveRes.sample).toBeUndefined();
+    expect(voiceProfileStore.readVoiceSamples(testDir)).toHaveLength(0);
 
     // Dismiss take test
     voiceProfileStore.writeCallTakes([take1], testDir);
@@ -248,7 +225,8 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
   it('gracefully falls back in browser environment without throwing errors', async () => {
     // In browser fallback (no clearcoreApi, no __TAURI_INTERNALS__)
     const profileRes = await invokeBridge<VoiceProfileStatus>('get_voice_profile');
-    expect(profileRes.embedding_dim).toBe(192);
+    expect(profileRes.embedding_dim).toBeUndefined();
+    expect(profileRes.gain_boost_db).toBeUndefined();
 
     const setRes = await invokeBridge<{ success: boolean }>('set_voice_profile', {
       profile: { is_enrolled: true, active_samples_count: 5 },
