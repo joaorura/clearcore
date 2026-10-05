@@ -301,6 +301,7 @@ export interface Translations {
     measuredLevel: string;
     measuredSpeech: string;
     legacySamplesNotice: string;
+    profileStale: string;
     enrollment: {
       budgetTitle: string;
       budgetUsed: string;

@@ -273,3 +273,22 @@ export function measuredQualityText(code: EnrollErrorCode | null, quality: Quali
       return null;
   }
 }
+
+/** Samples of the current microphone group that have audio: what a build would use. */
+export function profileSampleIds(samples: ServiceSample[]): string[] {
+  return samples.filter((x) => !x.otherMicrophone && !x.needsReenroll).map((x) => x.id);
+}
+
+/**
+ * The applied profile is out of date when the current group's samples changed (added or deleted)
+ * since it was built in this session. Unknown build (null) is never reported. The card only says
+ * so; rebuilding stays the explicit button (spec §4.4).
+ */
+export function profileIsStale(usedSampleIdsNow: string[], idsAtBuild: string[] | null): boolean {
+  if (idsAtBuild === null) return false;
+  const now = new Set(usedSampleIdsNow);
+  const then = new Set(idsAtBuild);
+  if (now.size !== then.size) return true;
+  for (const id of now) if (!then.has(id)) return true;
+  return false;
+}

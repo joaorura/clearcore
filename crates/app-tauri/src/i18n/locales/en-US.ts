@@ -303,6 +303,7 @@ export const enUS: Translations = {
     measuredLevel: '(measured level: {db} dBFS)',
     measuredSpeech: '(measured speech: {sec} s)',
     legacySamplesNotice: 'The old samples on this computer were only local and were never sent to the service; they need to be recorded again.',
+    profileStale: 'Profile out of date: the samples changed since the last build. Rebuild the profile.',
     enrollment: {
       budgetTitle: 'Speech used in the profile',
       budgetUsed: 'Used',

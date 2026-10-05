@@ -18,6 +18,8 @@ export interface ProfilePanelProps {
   /** Feedback of the build job. */
   feedback: JobFeedbackView | null;
   onBuildProfile: () => void;
+  /** Samples changed since the last build in this session: ask to rebuild (never automatic). */
+  stale?: boolean;
 }
 
 /**
@@ -59,6 +61,12 @@ export function ProfilePanel(p: ProfilePanelProps) {
           </div>
         </div>
       </div>
+
+      {p.stale && (
+        <div role="status" style={{ color: '#fbbf24', fontSize: 13, marginTop: 8 }}>
+          {t('voiceProfile.profileStale')}
+        </div>
+      )}
 
       <JobFeedbackBlock feedback={p.feedback} labels={p.labels} t={t} locale={p.locale} />
 

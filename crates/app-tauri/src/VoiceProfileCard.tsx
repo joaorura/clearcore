@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from './i18n';
 import type { CallSuggestionTake, InputDeviceInfo } from './types';
 import { errorLabel } from './voice/enrollmentErrors';
-import { buildEnrollmentLabels, samplesUsedInProfile } from './voice/hooks/voiceProfileLogic';
+import { buildEnrollmentLabels, profileIsStale, profileSampleIds, samplesUsedInProfile } from './voice/hooks/voiceProfileLogic';
 import { stepAfterSelect } from './voice/hooks/guidedSteps';
 import { DevModelNotice } from './voice/DevModelNotice';
 import { useJobFeedback } from './voice/hooks/useJobFeedback';
@@ -211,6 +211,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             busy={jobBusy || isRecording}
             feedback={feedbackFor('profile')}
             onBuildProfile={() => void handleBuildProfile('profile')}
+            stale={profileStatus.is_enrolled && sampleList !== null && profileIsStale(profileSampleIds(samples), profile.idsAtBuild)}
           />
         );
       default:

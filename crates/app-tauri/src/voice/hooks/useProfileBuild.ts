@@ -6,6 +6,7 @@ import { enrollmentErrorCode } from '../enrollmentErrors';
 import { buildProfile, waitForJob } from '../enrollmentClient';
 import {
   applySetVoiceProfileResult,
+  profileSampleIds,
   errorLabelForJob,
   mergeVoiceProfileStatus,
   nextStepAfterJob,
@@ -23,6 +24,8 @@ export interface ProfileBuild {
    * `origin` is the tab whose button was clicked: progress and errors show there (and on Profile).
    */
   buildProfile: (origin: Extract<JobOrigin, 'enroll' | 'profile'>) => Promise<boolean>;
+  /** Ids of the samples the last successful build in this session used (null: none yet). */
+  idsAtBuild: string[] | null;
 }
 
 /**
@@ -37,6 +40,7 @@ export function useProfileBuild(opts: {
 }): ProfileBuild {
   const { t, labels, jobs, refreshSamples } = opts;
   const [profileStatus, setProfileStatus] = useState<VoiceProfileStatus>({ is_enrolled: false, active_samples_count: 0 });
+  const [idsAtBuild, setIdsAtBuild] = useState<string[] | null>(null);
 
   // Main-process pushes (same merged payload as the set_voice_profile reply).
   useEffect(() => {
@@ -81,6 +85,7 @@ export function useProfileBuild(opts: {
     }
 
     const list = await refreshSamples();
+    if (done && list) setIdsAtBuild(profileSampleIds(list.samples));
     let serviceStatus: VoiceProfileStatus | null = null;
     try {
       const res = await invokeBridge<unknown>('get_voice_profile');
@@ -95,5 +100,5 @@ export function useProfileBuild(opts: {
     return done;
   };
 
-  return { profileStatus, loadInitialStatus, buildProfile: runBuild };
+  return { profileStatus, loadInitialStatus, buildProfile: runBuild, idsAtBuild };
 }
