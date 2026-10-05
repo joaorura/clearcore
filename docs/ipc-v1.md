@@ -92,7 +92,9 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
     "stored_voice_profile_id": "spk-1",
     "voice_profile_selected": true,
     "is_voice_profile_active": true,
-    "voice_profile_error": null
+    "voice_profile_error": null,
+    "voice_profile_supported": true,
+    "neural_eq_calibrated": true
   }
   ```
   (The payload also carries preset, backend and voice-sample fields, omitted here.)
@@ -106,6 +108,8 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
   | `voice_profile_selected` | `true` when `stored_voice_profile_id` is not `null`. |
   | `is_voice_profile_active` | `true` when `active_voice_profile_id` is not `null`. |
   | `voice_profile_error` | Generic, constant reason the stored profile is not applied (backend rejected it, file missing/unreadable, rollback failed), or `null`. Never carries profile data or backend error text. |
+  | `voice_profile_supported` | `true` when the active backend can apply a voice profile at all. `false` on backends that reject every profile (OpenVINO NPU/GPU/CPU, DirectML, RyzenAI, TensorRT, Vulkan, CoreML, the mock tract) and on tract when the loaded model has no `FiLM` (`gamma`/`beta`) inputs, which is the case of the approved base DFNet3; `false` without a backend. While `false`, `BuildVoiceProfile` answers `ENROLL_BACKEND_UNSUPPORTED` immediately. Clients that do not find the field must treat support as unknown. |
+  | `neural_eq_calibrated` | `true` when the **applied** profile (`active_voice_profile_id`) carries a microphone EQ; `false` without an applied profile or when it has no EQ. |
 
   Scope: "applied" means applied on the **service's own** backend. The packaged audio path
   (`filter-capi` / helper / virtual microphone) does not use the profile yet (stage 2). The
@@ -182,8 +186,8 @@ Builds a profile from the active samples of the **most recent sample's microphon
 
 - **Request:** `{"BuildVoiceProfile":{"name":"My voice"}}`
 - **Response Payload (immediate):** `{"success": true, "job_id": "profile-job-1"}`. Profile build jobs use the `profile-job-N` id format.
-- **Immediate errors:** `ENROLL_TOO_LITTLE_SPEECH` (no eligible sample group, or under 6 s of speech in it: record more with this microphone; no job is created), `ENROLL_BUSY` (two profile jobs already running; no job is created), `INVALID_COMMAND` for an invalid `name` (empty or over 256 bytes).
-- **Job errors:** `ENROLL_MODEL_NOT_CONFIGURED` (the development model is loaded by the job: variables unset, archive missing, unreadable, oversized, or SHA-256 mismatch, stage `enroll`), `ENROLL_BUDGET_EXCEEDED` (more than 90 s found, e.g. data from before the budget; the builder never discards audio on its own), `ENROLL_FAILED` (including a sample WAV that cannot be read back).
+- **Immediate errors:** `ENROLL_BACKEND_UNSUPPORTED` (the active backend cannot apply a voice profile, see `voice_profile_supported` in `GetStatus`; checked first after the name, before any audio is read; no job is created and samples are kept), `ENROLL_TOO_LITTLE_SPEECH` (no eligible sample group, or under 6 s of speech in it: record more with this microphone; no job is created), `ENROLL_BUSY` (two profile jobs already running; no job is created), `INVALID_COMMAND` for an invalid `name` (empty or over 256 bytes).
+- **Job errors:** `ENROLL_MODEL_NOT_CONFIGURED` (the development model is loaded by the job: variables unset, archive missing, unreadable, oversized, or SHA-256 mismatch, stage `enroll`), `ENROLL_BUDGET_EXCEEDED` (more than 90 s found, e.g. data from before the budget; the builder never discards audio on its own), `ENROLL_BACKEND_UNSUPPORTED` (stage `apply`: the backend passed the up-front check but refused the built profile; the previous profile is kept), `ENROLL_FAILED` (including a sample WAV that cannot be read back, and stage `apply` when the profile could not be persisted or no profile store is attached).
 - **Input:** the build reads only `samples/<id>.wav` inside the profile store (ids are validated); the `audio_path` stored in a manifest is never used.
 
 #### 3.1.3 `GetEnrollmentJob`
@@ -271,6 +275,7 @@ Codes are fixed strings with no free text and no echo of the payload (`crates/ip
 | `ENROLL_JOB_NOT_FOUND` | Unknown or expired `job_id`. |
 | `ENROLL_FAILED` | Generic failure of the pipeline (denoise, enrollment, persistence), including a job failed by the 10-minute watchdog (stage `timeout`). No detail is exposed. |
 | `ENROLL_BUSY` | Two enrollment jobs are already running in that table; immediate response, no job is created; retry later. |
+| `ENROLL_BACKEND_UNSUPPORTED` | The active isolation model cannot apply a voice profile (status `InternalError`). Immediate response of `BuildVoiceProfile` when `voice_profile_supported` is `false` (no job is created), or the `apply` stage of a build job when the backend refused the built profile. Samples and earlier profiles are kept. |
 
 #### 3.1.7 Development model configuration
 The enrollment model is loaded only when both environment variables are set for the service:
