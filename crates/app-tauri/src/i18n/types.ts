@@ -300,6 +300,7 @@ export interface Translations {
     measuredPeak: string;
     measuredLevel: string;
     measuredSpeech: string;
+    legacySamplesNotice: string;
     enrollment: {
       budgetTitle: string;
       budgetUsed: string;

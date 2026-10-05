@@ -302,6 +302,7 @@ export const ptBR: Translations = {
     measuredPeak: '(pico medido: {peak})',
     measuredLevel: '(nível medido: {db} dBFS)',
     measuredSpeech: '(fala medida: {sec} s)',
+    legacySamplesNotice: 'As amostras antigas deste computador eram apenas locais e nunca foram enviadas ao serviço; elas precisam ser regravadas.',
     enrollment: {
       budgetTitle: 'Fala usada no perfil',
       budgetUsed: 'Usado',

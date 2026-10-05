@@ -302,6 +302,7 @@ export const enUS: Translations = {
     measuredPeak: '(measured peak: {peak})',
     measuredLevel: '(measured level: {db} dBFS)',
     measuredSpeech: '(measured speech: {sec} s)',
+    legacySamplesNotice: 'The old samples on this computer were only local and were never sent to the service; they need to be recorded again.',
     enrollment: {
       budgetTitle: 'Speech used in the profile',
       budgetUsed: 'Used',

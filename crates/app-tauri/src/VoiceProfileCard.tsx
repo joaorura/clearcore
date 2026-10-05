@@ -22,6 +22,7 @@ import { AddSampleModal } from './voice/panels/AddSampleModal';
 import { DeviceSwitchDialog, type DeviceSwitchInfo } from './voice/panels/DeviceSwitchDialog';
 import { useConfirmDialog } from './voice/hooks/useConfirmDialog';
 import { confirmDeviceSwitchBeforeSend } from './voice/deviceSwitch';
+import { purgeLegacyVoiceKeys, takeLegacyNotice } from './voice/legacyMigration';
 import { profileStatusLabel } from './voice/panels/profileStatusLabel';
 import {
   browserStorage,
@@ -109,6 +110,13 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const { currentStep, setCurrentStep, isReadingMode, completedSteps } = steps;
   const modal = useVoluntarySample({ recorder: rec, playback, jobs, t, samplesCount: samples.length, flash });
   const { isModalOpen, modalSampleName, setModalSampleName, modalCaptured } = modal;
+
+  // One-time local migration: legacy voice keys are removed; old local-only samples are announced once.
+  const [legacyNotice, setLegacyNotice] = useState<boolean>(false);
+  useEffect(() => {
+    const storage = browserStorage();
+    if (takeLegacyNotice(purgeLegacyVoiceKeys(storage), storage)) setLegacyNotice(true);
+  }, []);
 
   // Initial state: samples, takes and profile status from the service.
   useEffect(() => {
@@ -256,6 +264,11 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       {/* Always visible, whatever the tab, while the enrollment model is the development asset (spec §9). */}
       <div style={{ marginBottom: 12 }}>
         <DevModelNotice labels={labels} />
+        {legacyNotice && (
+          <div role="note" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+            {t('voiceProfile.legacySamplesNotice')}
+          </div>
+        )}
       </div>
 
       {feedbackMessage && <div className="feedback-banner success-banner">{feedbackMessage}</div>}

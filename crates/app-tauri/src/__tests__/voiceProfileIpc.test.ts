@@ -217,6 +217,15 @@ describe('IPC Bridge invokeBridge Integration for Voice Profile & Studio DSP', (
     const unset = await invokeBridge<VoiceProfileStatus>('set_voice_profile', { profile: {} });
     expect(unset.is_enrolled).toBe(false);
 
+    // No local voice state (M-6): nothing is written to the legacy keys, nothing is read back.
+    for (const k of ['clearcore_voice_profile_enrolled', 'clearcore_voice_profile_samples', 'clearcore_voice_intake_takes', 'clearcore_voice_sample_count']) {
+      expect(fakeLocalStorage.getItem(k), k).toBeNull();
+    }
+    fakeLocalStorage.setItem('clearcore_voice_profile_enrolled', 'true');
+    fakeLocalStorage.setItem('clearcore_voice_intake_takes', JSON.stringify([{ id: 'old' }]));
+    expect((await invokeBridge<VoiceProfileStatus>('get_voice_profile')).is_enrolled).toBe(false);
+    expect(await invokeBridge<unknown[]>('get_call_takes')).toEqual([]);
+
     const presetRes = await invokeBridge<StudioPreset>('get_studio_preset');
     expect(presetRes).toBe('Natural');
 

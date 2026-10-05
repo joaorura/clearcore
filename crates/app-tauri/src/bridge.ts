@@ -204,31 +204,14 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     }
     return { success: true, preset } as unknown as T;
   }
-  if (cmd === 'get_voice_profile' || cmd === 'get_voice_profile_status') {
-    const enrolled = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_profile_enrolled') === 'true' : false;
-    const count = 0;
-    const profile: VoiceProfileStatus = {
-      is_enrolled: enrolled,
-      active_samples_count: count,
-    };
-    return { success: true, profile, ...profile } as unknown as T;
-  }
-  if (cmd === 'set_voice_profile') {
-    const p = (args?.profile ?? args) as VoiceProfileStatus;
-    const enrolled = p && typeof p.is_enrolled === 'boolean' ? p.is_enrolled : false;
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('clearcore_voice_profile_enrolled', String(enrolled));
-    }
-    const profile: VoiceProfileStatus = {
-      is_enrolled: enrolled,
-      active_samples_count: p?.active_samples_count ?? 0,
-    };
+  // No service in a plain browser: the voice profile is neutral and nothing is kept locally
+  // (samples, takes and the enrolled flag live only in the service).
+  if (cmd === 'get_voice_profile' || cmd === 'get_voice_profile_status' || cmd === 'set_voice_profile') {
+    const profile: VoiceProfileStatus = { is_enrolled: false, active_samples_count: 0 };
     return { success: true, profile, ...profile } as unknown as T;
   }
   if (cmd === 'get_call_takes') {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_intake_takes') : null;
-    const takes = raw ? JSON.parse(raw) : [];
-    return takes as unknown as T;
+    return [] as unknown as T;
   }
   if (cmd === 'approve_call_take') {
     return { success: true, id: String(args?.id ?? '') } as unknown as T;
