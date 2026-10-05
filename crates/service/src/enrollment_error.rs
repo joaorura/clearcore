@@ -13,6 +13,7 @@ pub enum EnrollError {
     PayloadTooLarge,
     JobNotFound,
     Failed,
+    Busy,
 }
 
 impl EnrollError {
@@ -28,6 +29,7 @@ impl EnrollError {
             Self::PayloadTooLarge => codes::ENROLL_PAYLOAD_TOO_LARGE,
             Self::JobNotFound => codes::ENROLL_JOB_NOT_FOUND,
             Self::Failed => codes::ENROLL_FAILED,
+            Self::Busy => codes::ENROLL_BUSY,
         }
     }
 }
@@ -50,6 +52,7 @@ mod tests {
             PayloadTooLarge,
             JobNotFound,
             Failed,
+            Busy,
         ];
         let mut codes: Vec<&str> = all.iter().map(EnrollError::code).collect();
         assert!(codes.iter().all(|c| c.starts_with("ENROLL_")));

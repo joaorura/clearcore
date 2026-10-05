@@ -9,5 +9,6 @@ pub const ENROLL_INVALID_AUDIO: &str = "ENROLL_INVALID_AUDIO";
 pub const ENROLL_PAYLOAD_TOO_LARGE: &str = "ENROLL_PAYLOAD_TOO_LARGE";
 pub const ENROLL_JOB_NOT_FOUND: &str = "ENROLL_JOB_NOT_FOUND";
 pub const ENROLL_FAILED: &str = "ENROLL_FAILED";
+pub const ENROLL_BUSY: &str = "ENROLL_BUSY";
 /// 90 s * 48 kHz * 4 B = 17.28 MB; base64 inflates by 4/3 (23.04 MB) plus envelope.
 pub const MAX_REQUEST_LINE_BYTES: usize = 32 * 1024 * 1024;
