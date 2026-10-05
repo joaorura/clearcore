@@ -307,6 +307,75 @@ export function mergeVoiceProfileStatus(
   };
 }
 
+const SERVICE_VOICE_PROFILE_KEYS = [
+  'is_voice_profile_active',
+  'stored_voice_profile_id',
+  'voice_profile_error',
+  'voice_profile_selected',
+  'active_voice_profile_id',
+] as const;
+
+/** Service-owned fields: the renderer never resends nor inherits them. */
+export function stripServiceVoiceProfileKeys(status: VoiceProfileStatus): VoiceProfileStatus {
+  const out: VoiceProfileStatus = { ...status };
+  for (const key of SERVICE_VOICE_PROFILE_KEYS) delete out[key];
+  return out;
+}
+
+/**
+ * Applies the result of set_voice_profile: local fields come from what the user did, service
+ * fields come ONLY from the result (missing/offline result => cleared, never kept as active).
+ */
+export function applySetVoiceProfileResult(
+  prev: VoiceProfileStatus,
+  localStatus: VoiceProfileStatus,
+  res: unknown,
+): VoiceProfileStatus {
+  const base = { ...stripServiceVoiceProfileKeys(prev), ...stripServiceVoiceProfileKeys(localStatus) };
+  const r = (res ?? {}) as { profile?: unknown };
+  const raw = (r.profile ?? res) as Record<string, unknown> | null | undefined;
+  if (!raw || typeof raw !== 'object') return base;
+  const svc = normalizeVoiceProfileStatus(raw);
+  return {
+    ...base,
+    is_voice_profile_active: typeof svc.is_voice_profile_active === 'boolean' ? svc.is_voice_profile_active : undefined,
+    stored_voice_profile_id: svc.stored_voice_profile_id,
+    voice_profile_error: svc.voice_profile_error,
+    voice_profile_selected: svc.voice_profile_selected,
+    active_voice_profile_id: svc.active_voice_profile_id,
+  };
+}
+
+export type VoiceProfileErrorKey =
+  | 'errorServiceUnavailable' | 'errorServiceError' | 'errorServiceRejected' | 'errorNotApplicable'
+  | 'errorClearFailed' | 'errorNoProfileStore' | 'errorInvalidProfile' | 'errorPersistFailed'
+  | 'errorNotApplied' | 'errorLoadFailed' | 'errorRestoreFailed' | 'errorUnknown';
+
+const VOICE_PROFILE_ERROR_KEYS: Record<string, VoiceProfileErrorKey> = {
+  service_unavailable: 'errorServiceUnavailable',
+  service_error: 'errorServiceError',
+  service_rejected: 'errorServiceRejected',
+  VOICE_PROFILE_NOT_APPLICABLE: 'errorNotApplicable',
+  VOICE_PROFILE_CLEAR_FAILED: 'errorClearFailed',
+  NO_PROFILE_STORE: 'errorNoProfileStore',
+  'Invalid voice profile': 'errorInvalidProfile',
+  'Failed to persist voice profile': 'errorPersistFailed',
+  'The backend could not apply the stored voice profile': 'errorNotApplied',
+  'The stored voice profile failed validation or has insecure permissions': 'errorLoadFailed',
+  'The previous voice profile could not be restored on the backend': 'errorRestoreFailed',
+  'The active backend could not return to the neutral voice': 'errorClearFailed',
+  'The active backend cannot apply this voice profile': 'errorNotApplicable',
+  'Voice profile storage is not configured': 'errorNoProfileStore',
+};
+
+/** Never returns service free text: unknown input maps to errorUnknown. */
+export function voiceProfileErrorKey(code: unknown): VoiceProfileErrorKey {
+  if (typeof code !== 'string') return 'errorUnknown';
+  return Object.prototype.hasOwnProperty.call(VOICE_PROFILE_ERROR_KEYS, code)
+    ? VOICE_PROFILE_ERROR_KEYS[code]
+    : 'errorUnknown';
+}
+
 export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   selectedInputId,
   virtualMicPresent: _virtualMicPresent,
@@ -720,9 +789,10 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       neural_eq_calibrated: true,
       gain_boost_db: 1.8,
     };
-    setProfileStatus(newStatus);
+    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, undefined));
 
-    await invokeBridge('set_voice_profile', { profile: newStatus });
+    const setRes = await invokeBridge<unknown>('set_voice_profile', { profile: stripServiceVoiceProfileKeys(newStatus) }).catch(() => undefined);
+    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, setRes));
     for (const sample of newSamples) {
       await invokeBridge('add_voice_sample', { sample }).catch(() => {});
     }
@@ -769,6 +839,22 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     });
   };
 
+  // Sends the local profile (never service keys) and applies the fresh service status from the reply.
+  const pushProfileStatus = (local: VoiceProfileStatus) => {
+    invokeBridge<unknown>('set_voice_profile', { profile: stripServiceVoiceProfileKeys(local) })
+      .catch(() => undefined)
+      .then((res) => setProfileStatus((prev) => applySetVoiceProfileResult(prev, local, res)));
+  };
+
+  // Main-process pushes (same merged payload as the set_voice_profile reply).
+  useEffect(() => {
+    const api = typeof window !== 'undefined' ? window.clearcoreApi : undefined;
+    if (!api?.onVoiceProfileUpdate) return;
+    return api.onVoiceProfileUpdate((profile) => {
+      setProfileStatus((prev) => applySetVoiceProfileResult(prev, prev, profile));
+    });
+  }, []);
+
   // Delete Sample from Cumulative Gallery
   const handleDeleteSample = (id: string) => {
     const updated = samples.filter((s) => s.id !== id);
@@ -779,14 +865,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     } catch {}
 
     const newStatus: VoiceProfileStatus = {
-      ...profileStatus,
+      ...stripServiceVoiceProfileKeys(profileStatus),
       is_enrolled: updated.length > 0,
       active_samples_count: updated.length,
       neural_eq_calibrated: updated.length > 0,
     };
-    setProfileStatus(newStatus);
+    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, undefined));
     invokeBridge('delete_voice_sample', { id }).catch(() => {});
-    invokeBridge('set_voice_profile', { profile: newStatus });
+    pushProfileStatus(newStatus);
   };
 
   // Approve Call Suggestion Take (Voice Intake Engine)
@@ -814,14 +900,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     } catch {}
 
     const newStatus: VoiceProfileStatus = {
-      ...profileStatus,
+      ...stripServiceVoiceProfileKeys(profileStatus),
       is_enrolled: true,
       active_samples_count: updatedSamples.length,
       neural_eq_calibrated: true,
     };
-    setProfileStatus(newStatus);
+    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, undefined));
     invokeBridge('approve_call_take', { id: take.id, name: take.title, take }).catch(() => {});
-    invokeBridge('set_voice_profile', { profile: newStatus });
+    pushProfileStatus(newStatus);
 
     setFeedbackMessage(t('voiceProfile.takeApprovedFeedback'));
     setTimeout(() => setFeedbackMessage(null), 4000);
@@ -942,14 +1028,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     } catch {}
 
     const newStatus: VoiceProfileStatus = {
-      ...profileStatus,
+      ...stripServiceVoiceProfileKeys(profileStatus),
       is_enrolled: true,
       active_samples_count: updated.length,
       neural_eq_calibrated: true,
     };
-    setProfileStatus(newStatus);
+    setProfileStatus((prev) => applySetVoiceProfileResult(prev, newStatus, undefined));
     invokeBridge('add_voice_sample', { sample: newSample }).catch(() => {});
-    invokeBridge('set_voice_profile', { profile: newStatus });
+    pushProfileStatus(newStatus);
 
     setIsModalOpen(false);
     setModalSampleName('');
@@ -1019,9 +1105,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
           <div className="overview-value" style={{ color: statusLabelActive ? '#4ade80' : '#fbbf24' }}>
             {statusLabel}
           </div>
+          {statusLabelKey === 'active' && (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 4 }}>
+              {t('voiceProfile.appliedInServiceNote')}
+            </div>
+          )}
           {profileStatus.voice_profile_error && statusLabelKey !== 'active' && (
             <div style={{ color: '#fbbf24', fontSize: '0.75rem', marginTop: 4 }}>
-              {profileStatus.voice_profile_error}
+              {t(`voiceProfile.${voiceProfileErrorKey(profileStatus.voice_profile_error)}`)}
             </div>
           )}
         </div>

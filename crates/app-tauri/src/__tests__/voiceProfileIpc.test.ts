@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { invokeBridge } from '../bridge';
-import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState, voiceProfileStatusLabelKey } from '../VoiceProfileCard';
+import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState, voiceProfileStatusLabelKey, stripServiceVoiceProfileKeys, applySetVoiceProfileResult, voiceProfileErrorKey } from '../VoiceProfileCard';
+import { ptBR } from '../i18n/locales/pt-BR';
+import { enUS } from '../i18n/locales/en-US';
 import type { VoiceProfileStatus, VoiceSample, CallSuggestionTake, StudioPreset } from '../types';
 import fs from 'fs';
 import path from 'path';
@@ -401,5 +403,86 @@ describe('voice profile selected/active id passthrough', () => {
     const m = mergeVoiceProfileStatus(normalizeVoiceProfileStatus({}), res, 0);
     expect(m.voice_profile_selected).toBe(true);
     expect(m.active_voice_profile_id).toBe('p1');
+  });
+});
+
+describe('stale service state on set/clear (I1)', () => {
+  const local = { is_enrolled: false, active_samples_count: 0, embedding_dim: 192, neural_eq_calibrated: false };
+  const activeBefore = {
+    is_enrolled: true, active_samples_count: 1, embedding_dim: 192, neural_eq_calibrated: true,
+    is_voice_profile_active: true, stored_voice_profile_id: 'p1', voice_profile_error: 'x',
+    voice_profile_selected: true, active_voice_profile_id: 'p1',
+  };
+  it('strips every service key before sending', () => {
+    const s = stripServiceVoiceProfileKeys(activeBefore);
+    for (const k of ['is_voice_profile_active', 'stored_voice_profile_id', 'voice_profile_error', 'voice_profile_selected', 'active_voice_profile_id']) {
+      expect(k in s).toBe(false);
+    }
+    expect(s.is_enrolled).toBe(true);
+  });
+  it('active -> delete last sample with service answering inactive is not active', () => {
+    const res = { ...local, is_voice_profile_active: false, stored_voice_profile_id: null };
+    const next = applySetVoiceProfileResult(activeBefore, local, res);
+    expect(next.active_samples_count).toBe(0);
+    expect(voiceProfileStatusLabelKey(next)).toBe('none');
+  });
+  it('result without service keys never yields active', () => {
+    const next = applySetVoiceProfileResult(activeBefore, { ...local, is_enrolled: true, active_samples_count: 2 }, { is_enrolled: true });
+    expect(voiceProfileStatusLabelKey(next)).toBe('enrolledUnconfirmed');
+    expect(next.is_voice_profile_active).toBeUndefined();
+    expect(next.stored_voice_profile_id).toBeUndefined();
+  });
+  it('missing/offline result clears service keys', () => {
+    for (const res of [undefined, null, { success: false }]) {
+      const next = applySetVoiceProfileResult(activeBefore, local, res);
+      expect(voiceProfileStatusLabelKey(next)).toBe('none');
+      expect(next.voice_profile_error).toBeUndefined();
+    }
+  });
+  it('forward error surfaces and service keys replace old ones', () => {
+    const res = { ...local, is_enrolled: true, active_samples_count: 1, is_voice_profile_active: false, voice_profile_error: 'service_unavailable' };
+    const next = applySetVoiceProfileResult(activeBefore, { ...local, is_enrolled: true, active_samples_count: 1 }, res);
+    expect(next.voice_profile_error).toBe('service_unavailable');
+    expect(next.is_voice_profile_active).toBe(false);
+    expect(next.active_voice_profile_id).toBeUndefined();
+  });
+});
+
+describe('voiceProfileErrorKey (M5)', () => {
+  it('maps known codes and service messages', () => {
+    expect(voiceProfileErrorKey('service_unavailable')).toBe('errorServiceUnavailable');
+    expect(voiceProfileErrorKey('service_error')).toBe('errorServiceError');
+    expect(voiceProfileErrorKey('service_rejected')).toBe('errorServiceRejected');
+    expect(voiceProfileErrorKey('VOICE_PROFILE_NOT_APPLICABLE')).toBe('errorNotApplicable');
+    expect(voiceProfileErrorKey('VOICE_PROFILE_CLEAR_FAILED')).toBe('errorClearFailed');
+    expect(voiceProfileErrorKey('NO_PROFILE_STORE')).toBe('errorNoProfileStore');
+    expect(voiceProfileErrorKey('Invalid voice profile')).toBe('errorInvalidProfile');
+    expect(voiceProfileErrorKey('Failed to persist voice profile')).toBe('errorPersistFailed');
+    expect(voiceProfileErrorKey('The backend could not apply the stored voice profile')).toBe('errorNotApplied');
+    expect(voiceProfileErrorKey('The stored voice profile failed validation or has insecure permissions')).toBe('errorLoadFailed');
+    expect(voiceProfileErrorKey('The previous voice profile could not be restored on the backend')).toBe('errorRestoreFailed');
+    expect(voiceProfileErrorKey('The active backend could not return to the neutral voice')).toBe('errorClearFailed');
+    expect(voiceProfileErrorKey('The active backend cannot apply this voice profile')).toBe('errorNotApplicable');
+    expect(voiceProfileErrorKey('Voice profile storage is not configured')).toBe('errorNoProfileStore');
+  });
+  it('falls back to unknown for free text and every key exists in both locales', () => {
+    expect(voiceProfileErrorKey('some <b>free</b> text')).toBe('errorUnknown');
+    expect(voiceProfileErrorKey('')).toBe('errorUnknown');
+    const codes = ['service_unavailable', 'service_error', 'service_rejected', 'VOICE_PROFILE_NOT_APPLICABLE', 'VOICE_PROFILE_CLEAR_FAILED', 'NO_PROFILE_STORE', 'x'];
+    for (const c of codes) {
+      const k = voiceProfileErrorKey(c) as keyof typeof ptBR.voiceProfile;
+      expect(typeof ptBR.voiceProfile[k]).toBe('string');
+      expect(typeof enUS.voiceProfile[k]).toBe('string');
+    }
+  });
+});
+
+describe('relabel (I2/T7)', () => {
+  it('active is applied-in-service with a note; enrolled uses Cadastrado', () => {
+    expect(ptBR.voiceProfile.statusActive).toBe('🟢 Aplicado no serviço (desenvolvimento)');
+    expect(enUS.voiceProfile.statusActive).toBe('🟢 Applied in service (development)');
+    expect(ptBR.voiceProfile.appliedInServiceNote).toBe('O microfone virtual empacotado ainda não usa este perfil.');
+    expect(enUS.voiceProfile.appliedInServiceNote).toBe('The packaged virtual microphone does not use this profile yet.');
+    expect(ptBR.voiceProfile.enrolledUnconfirmed).toBe('⚪ Cadastrado, ativação não confirmada');
   });
 });
