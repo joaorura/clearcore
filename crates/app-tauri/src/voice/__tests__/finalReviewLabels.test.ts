@@ -12,3 +12,13 @@ describe('ENROLL_MODEL_NOT_CONFIGURED label (I5)', () => {
     expect(en).toMatch(/isolation|denoiser/i);
   });
 });
+
+describe('approve call take label (M4)', () => {
+  it('says the take goes to the Gallery, not straight into the profile', () => {
+    expect(ptBR.voiceProfile.approveTake).toMatch(/Aprovar e mover para a Galeria/);
+    expect(enUS.voiceProfile.approveTake).toMatch(/Approve and move to the Gallery/);
+    for (const label of [ptBR.voiceProfile.approveTake, enUS.voiceProfile.approveTake]) {
+      expect(label).not.toMatch(/perfil|profile/i);
+    }
+  });
+});

@@ -263,7 +263,7 @@ export const enUS: Translations = {
     playSample: '▶ Play',
     stopSample: '⏹ Stop',
     deleteSample: '🗑 Delete',
-    approveTake: '⭐ Approve & Add to Profile',
+    approveTake: '⭐ Approve and move to the Gallery',
     dismissTake: '🗑 Dismiss',
     takeSnr: 'SNR: {snr} dB',
     takeDuration: 'Duration: {sec}s',

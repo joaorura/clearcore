@@ -263,7 +263,7 @@ export const ptBR: Translations = {
     playSample: '▶ Ouvir',
     stopSample: '⏹ Parar',
     deleteSample: '🗑 Excluir',
-    approveTake: '⭐ Aprovar e Incorporar ao Perfil',
+    approveTake: '⭐ Aprovar e mover para a Galeria',
     dismissTake: '🗑 Descartar',
     takeSnr: 'SNR: {snr} dB',
     takeDuration: 'Duração: {sec}s',
