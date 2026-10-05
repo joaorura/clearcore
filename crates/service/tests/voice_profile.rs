@@ -1,14 +1,82 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use realtime_noise_contracts::AudioFrame;
 use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus};
 use realtime_noise_model::{
-    ACTIVE_PROFILE_FILE_NAME, BandGains, FiLMVectors, ProfileStore, VoiceProfile,
+    ACTIVE_PROFILE_FILE_NAME, BackendDescriptor, BandGains, FiLMVectors, InferenceBackend,
+    InferenceError, ProcessedFrame, ProfileStore, VoiceProfile, reject_unsupported_voice_profile,
 };
 use realtime_noise_service::ServiceDaemon;
+use realtime_noise_supervisor::EngineSupervisor;
 use serde_json::json;
 use std::io::Cursor;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+/// Calls received by `ProfileBackend::set_voice_profile`, as profile ids (`None` = neutral).
+type Calls = Arc<Mutex<Vec<Option<String>>>>;
+
+/// Test backend: when `supports` is true it accepts any profile, otherwise it follows the
+/// unsupported policy (accepts neutral, rejects a profile).
+struct ProfileBackend {
+    supports: bool,
+    calls: Calls,
+}
+
+impl InferenceBackend for ProfileBackend {
+    fn descriptor(&self) -> BackendDescriptor {
+        BackendDescriptor {
+            backend: "passthrough",
+            backend_version: "1",
+            runtime: "test",
+            runtime_version: "1",
+            asset_id: "test".to_owned(),
+            asset_sha256: "0".repeat(64),
+            cpu_profile: "test",
+        }
+    }
+
+    fn process(&mut self, input: &AudioFrame) -> Result<ProcessedFrame, InferenceError> {
+        ProcessedFrame::checked(*input, 1_440, self.descriptor())
+    }
+
+    fn algorithmic_latency_samples(&self) -> u32 {
+        1_440
+    }
+
+    fn set_voice_profile(&mut self, p: Option<&VoiceProfile>) -> Result<(), InferenceError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(p.map(|profile| profile.id.clone()));
+        if self.supports {
+            Ok(())
+        } else {
+            reject_unsupported_voice_profile(p)
+        }
+    }
+}
+
+fn supervisor_with(supports: bool) -> (EngineSupervisor, Calls) {
+    let calls = Calls::default();
+    let mut supervisor = EngineSupervisor::default();
+    supervisor.set_backend(
+        Box::new(ProfileBackend {
+            supports,
+            calls: Arc::clone(&calls),
+        }),
+        "fake",
+    );
+    (supervisor, calls)
+}
+
+fn daemon_with(dir: &Path, supports: bool) -> (ServiceDaemon, Calls) {
+    let (supervisor, calls) = supervisor_with(supports);
+    let mut daemon = ServiceDaemon::with_supervisor(supervisor);
+    daemon.attach_profile_store(ProfileStore::new(dir));
+    (daemon, calls)
+}
 
 const SENTINEL_NAME: &str = "BIOMETRIC_SENTINEL_TOKEN_SECRET";
 
@@ -55,8 +123,9 @@ fn set_profile(daemon: &mut ServiceDaemon, json: &str) -> (String, IpcResponse) 
     )
 }
 
+/// Daemon whose backend supports voice profiles.
 fn daemon_with_store(dir: &Path) -> ServiceDaemon {
-    ServiceDaemon::with_profile_store(ProfileStore::new(dir))
+    daemon_with(dir, true).0
 }
 
 #[test]
@@ -91,8 +160,9 @@ fn valid_profile_is_persisted_with_0600_and_reported_by_status() {
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["active_voice_profile_id"], "spk-1");
     assert_eq!(status.payload["voice_profile_selected"], true);
-    // The engine does not apply the profile to the audio yet, so it must never claim to.
-    assert_eq!(status.payload["is_voice_profile_active"], false);
+    assert_eq!(status.payload["stored_voice_profile_id"], "spk-1");
+    assert_eq!(status.payload["is_voice_profile_active"], true);
+    assert_eq!(status.payload["voice_profile_error"], json!(null));
 }
 
 #[test]
@@ -254,9 +324,9 @@ fn restart_with_same_directory_reloads_the_profile() {
 
     let status = send(&mut restarted, IpcCommand::GetStatus);
     assert_eq!(status.payload["active_voice_profile_id"], "spk-7");
+    assert_eq!(status.payload["stored_voice_profile_id"], "spk-7");
     assert_eq!(status.payload["voice_profile_selected"], true);
-    // The engine does not apply the profile to the audio yet, so it must never claim to.
-    assert_eq!(status.payload["is_voice_profile_active"], false);
+    assert_eq!(status.payload["is_voice_profile_active"], true);
 }
 
 #[cfg(unix)]
@@ -300,4 +370,131 @@ fn preexisting_tampered_profile_is_not_loaded() {
 
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["voice_profile_selected"], false);
+}
+
+fn profile_json(id: &str) -> String {
+    test_profile(id, "Alice").to_json().expect("json")
+}
+
+#[test]
+fn set_applies_to_backend_then_persists_and_reports_active() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, calls) = daemon_with(&dir, true);
+
+    let (_, response) = set_profile(&mut daemon, &profile_json("spk-1"));
+
+    assert_eq!(response.status, IpcStatus::Ok);
+    assert_eq!(*calls.lock().unwrap(), vec![Some("spk-1".to_owned())]);
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["is_voice_profile_active"], true);
+    assert_eq!(status.payload["active_voice_profile_id"], "spk-1");
+    assert_eq!(status.payload["stored_voice_profile_id"], "spk-1");
+    assert_eq!(status.payload["voice_profile_selected"], true);
+    assert_eq!(daemon.active_voice_profile_id(), Some("spk-1"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dir.join(ACTIVE_PROFILE_FILE_NAME))
+            .expect("meta")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+}
+
+#[test]
+fn unsupported_backend_rejects_and_leaves_disk_and_state_untouched() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _) = daemon_with(&dir, false);
+    let json = test_profile("spk-1", SENTINEL_NAME)
+        .to_json()
+        .expect("json");
+
+    let (raw, response) = set_profile(&mut daemon, &json);
+
+    assert_ne!(response.status, IpcStatus::Ok);
+    assert!(!raw.contains(SENTINEL_NAME));
+    assert!(!dir.join(ACTIVE_PROFILE_FILE_NAME).exists());
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["is_voice_profile_active"], false);
+    assert_eq!(status.payload["active_voice_profile_id"], json!(null));
+    assert_eq!(status.payload["stored_voice_profile_id"], json!(null));
+    assert_eq!(status.payload["voice_profile_selected"], false);
+}
+
+#[cfg(unix)]
+#[test]
+fn persistence_failure_rolls_back_to_previous_backend_profile() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, calls) = daemon_with(&dir, true);
+    let (_, ok) = set_profile(&mut daemon, &profile_json("a"));
+    assert_eq!(ok.status, IpcStatus::Ok);
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).expect("chmod");
+    let (_, response) = set_profile(&mut daemon, &profile_json("b"));
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("chmod back");
+
+    assert_eq!(response.status, IpcStatus::InternalError);
+    let recorded = calls.lock().unwrap().clone();
+    assert_eq!(recorded.last(), Some(&Some("a".to_owned())));
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["active_voice_profile_id"], "a");
+    assert_eq!(status.payload["stored_voice_profile_id"], "a");
+}
+
+#[test]
+fn clear_applies_neutral_then_removes_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, calls) = daemon_with(&dir, true);
+    set_profile(&mut daemon, &profile_json("a"));
+
+    let response = send(&mut daemon, IpcCommand::ClearVoiceProfile);
+
+    assert_eq!(response.status, IpcStatus::Ok);
+    assert_eq!(calls.lock().unwrap().last(), Some(&None));
+    assert!(!dir.join(ACTIVE_PROFILE_FILE_NAME).exists());
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["is_voice_profile_active"], false);
+    assert_eq!(status.payload["stored_voice_profile_id"], json!(null));
+}
+
+#[test]
+fn restart_distinguishes_stored_from_active() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    ProfileStore::new(&dir)
+        .save_active(&test_profile("spk-9", "Alice"))
+        .expect("save");
+
+    let (mut daemon, _) = daemon_with(&dir, false);
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["stored_voice_profile_id"], "spk-9");
+    assert_eq!(status.payload["voice_profile_selected"], true);
+    assert_eq!(status.payload["is_voice_profile_active"], false);
+    assert_eq!(status.payload["active_voice_profile_id"], json!(null));
+    assert!(status.payload["voice_profile_error"].is_string());
+    assert!(dir.join(ACTIVE_PROFILE_FILE_NAME).exists(), "file is kept");
+}
+
+#[test]
+fn restart_with_supporting_backend_restores_active() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    ProfileStore::new(&dir)
+        .save_active(&test_profile("spk-9", "Alice"))
+        .expect("save");
+
+    let (mut daemon, calls) = daemon_with(&dir, true);
+
+    assert_eq!(*calls.lock().unwrap(), vec![Some("spk-9".to_owned())]);
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["is_voice_profile_active"], true);
+    assert_eq!(status.payload["active_voice_profile_id"], "spk-9");
+    assert_eq!(status.payload["voice_profile_error"], json!(null));
 }

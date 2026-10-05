@@ -34,7 +34,10 @@ pub struct ServiceDaemon {
     shutdown: bool,
     served_client_count: usize,
     profile_store: Option<ProfileStore>,
-    active_voice_profile_id: Option<String>,
+    /// Id of the profile persisted on disk (may differ from the one applied to the engine).
+    stored_voice_profile_id: Option<String>,
+    /// Generic reason the stored profile could not be applied at startup; never carries payload.
+    voice_profile_error: Option<String>,
     voice_samples: VoiceSampleManager,
     voice_intake: VoiceIntakeEngine,
     settings: settings::Settings,
@@ -47,6 +50,8 @@ pub struct ServiceDaemon {
 /// received JSON may appear in a response, not even in an error.
 const INVALID_PROFILE_MESSAGE: &str = "Invalid voice profile";
 const PERSIST_FAILED_MESSAGE: &str = "Failed to persist voice profile";
+const NOT_APPLIED_MESSAGE: &str = "The backend could not apply the stored voice profile";
+const APPLY_FAILED_MESSAGE: &str = "The active backend cannot apply this voice profile";
 const NO_PROFILE_STORE_MESSAGE: &str = "Voice profile storage is not configured";
 
 impl Default for ServiceDaemon {
@@ -72,7 +77,8 @@ impl ServiceDaemon {
             shutdown: false,
             served_client_count: 0,
             profile_store: None,
-            active_voice_profile_id: None,
+            stored_voice_profile_id: None,
+            voice_profile_error: None,
             voice_samples,
             voice_intake,
             settings: settings::Settings::default(),
@@ -98,7 +104,8 @@ impl ServiceDaemon {
             shutdown: false,
             served_client_count: 0,
             profile_store: None,
-            active_voice_profile_id: None,
+            stored_voice_profile_id: None,
+            voice_profile_error: None,
             voice_samples,
             voice_intake,
             settings,
@@ -135,16 +142,27 @@ impl ServiceDaemon {
         daemon
     }
 
-    /// Attaches `store` and loads its active profile. Fail-closed: a stored profile with insecure
-    /// permissions, a broken integrity hash or an invalid payload activates nothing.
+    /// Attaches `store` and loads its active profile, then tries to apply it to the engine.
+    /// Fail-closed: a stored profile with insecure permissions, a broken integrity hash or an
+    /// invalid payload activates nothing. A valid profile the backend cannot apply stays stored
+    /// (the file is kept) and the audio stays neutral; the reason is exposed in the status.
     pub fn attach_profile_store(&mut self, store: ProfileStore) {
-        self.active_voice_profile_id = None;
-        if let Ok(profile) = store.load_active() {
-            self.active_voice_profile_id = profile.map(|profile| profile.id);
-        } else {
-            eprintln!(
-                "Stored voice profile was not loaded: it failed validation or has insecure permissions"
-            );
+        self.stored_voice_profile_id = None;
+        self.voice_profile_error = None;
+        match store.load_active() {
+            Ok(Some(profile)) => {
+                self.stored_voice_profile_id = Some(profile.id.clone());
+                if self.supervisor.set_voice_profile(Some(&profile)).is_err() {
+                    eprintln!("Stored voice profile was not applied: the backend rejected it");
+                    self.voice_profile_error = Some(NOT_APPLIED_MESSAGE.to_owned());
+                }
+            }
+            Ok(None) => {}
+            Err(_) => {
+                eprintln!(
+                    "Stored voice profile was not loaded: it failed validation or has insecure permissions"
+                );
+            }
         }
         let dir = store.dir().to_path_buf();
         self.voice_samples =
@@ -153,9 +171,10 @@ impl ServiceDaemon {
         self.profile_store = Some(store);
     }
 
+    /// Id of the voice profile actually applied to the engine, if any.
     #[must_use]
     pub fn active_voice_profile_id(&self) -> Option<&str> {
-        self.active_voice_profile_id.as_deref()
+        self.supervisor.active_voice_profile_id()
     }
 
     #[must_use]
@@ -262,12 +281,11 @@ impl ServiceDaemon {
                                 "dsp_preset": preset_ipc,
                                 "crash_count_15m": status.crash_count_15m,
                                 "total_crashes": status.total_crashes,
-                                "active_voice_profile_id": self.active_voice_profile_id,
-                                // A profile is stored and selected, but the engine does not apply it to
-                                // the audio yet (no `set_voice_profile` on `InferenceBackend`), so
-                                // `is_voice_profile_active` stays false until that wiring exists.
-                                "voice_profile_selected": self.active_voice_profile_id.is_some(),
-                                "is_voice_profile_active": false,
+                                "active_voice_profile_id": self.supervisor.active_voice_profile_id(),
+                                "stored_voice_profile_id": self.stored_voice_profile_id,
+                                "voice_profile_selected": self.stored_voice_profile_id.is_some(),
+                                "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
+                                "voice_profile_error": self.voice_profile_error,
                                 "voice_samples_count": self.voice_samples.list_samples().len(),
                                 "has_voice_profile": self.voice_samples.compute_profile_embedding().is_some(),
                                 "intake_pending_count": self.voice_intake.list_pending().len(),
@@ -375,13 +393,17 @@ impl ServiceDaemon {
                         )
                     }
                     IpcCommand::SetVoiceProfile { profile_json } => set_voice_profile(
+                        &mut self.supervisor,
                         self.profile_store.as_ref(),
-                        &mut self.active_voice_profile_id,
+                        &mut self.stored_voice_profile_id,
+                        &mut self.voice_profile_error,
                         profile_json,
                     ),
                     IpcCommand::ClearVoiceProfile => clear_voice_profile(
+                        &mut self.supervisor,
                         self.profile_store.as_ref(),
-                        &mut self.active_voice_profile_id,
+                        &mut self.stored_voice_profile_id,
+                        &mut self.voice_profile_error,
                     ),
                     IpcCommand::ListVoiceSamples => {
                         let samples = self.voice_samples.list_samples();
@@ -587,9 +609,13 @@ impl ServiceDaemon {
     }
 }
 
+/// Transaction: verify, apply to the engine, persist; if persisting fails the engine goes back
+/// to the previous profile, so the applied state never diverges from what survives a restart.
 fn set_voice_profile(
+    supervisor: &mut EngineSupervisor,
     store: Option<&ProfileStore>,
-    active_id: &mut Option<String>,
+    stored_id: &mut Option<String>,
+    error: &mut Option<String>,
     profile_json: &str,
 ) -> IpcResponse {
     const REQUEST_ID: &str = "set-voice-profile-resp";
@@ -604,23 +630,44 @@ fn set_voice_profile(
     let Ok(profile) = VoiceProfile::from_json(profile_json) else {
         return IpcResponse::invalid_command(REQUEST_ID, INVALID_PROFILE_MESSAGE);
     };
+    let previous = supervisor.active_voice_profile().cloned();
+    if supervisor.set_voice_profile(Some(&profile)).is_err() {
+        return IpcResponse::error(
+            REQUEST_ID,
+            IpcStatus::InternalError,
+            "VOICE_PROFILE_NOT_APPLICABLE",
+            APPLY_FAILED_MESSAGE,
+        );
+    }
     if store.save_active(&profile).is_err() {
+        let _ = supervisor.set_voice_profile(previous.as_ref());
         return IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE);
     }
-    *active_id = Some(profile.id);
-    IpcResponse::success(REQUEST_ID, json!({"active_voice_profile_id": active_id}))
+    *stored_id = Some(profile.id.clone());
+    *error = None;
+    IpcResponse::success(
+        REQUEST_ID,
+        json!({"active_voice_profile_id": supervisor.active_voice_profile_id()}),
+    )
 }
 
 fn clear_voice_profile(
+    supervisor: &mut EngineSupervisor,
     store: Option<&ProfileStore>,
-    active_id: &mut Option<String>,
+    stored_id: &mut Option<String>,
+    error: &mut Option<String>,
 ) -> IpcResponse {
     const REQUEST_ID: &str = "clear-voice-profile-resp";
+    let previous = supervisor.active_voice_profile().cloned();
+    // Going neutral must work on every backend; if it somehow fails there is nothing to undo.
+    let _ = supervisor.set_voice_profile(None);
     if let Some(store) = store
         && store.clear_active().is_err()
     {
+        let _ = supervisor.set_voice_profile(previous.as_ref());
         return IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE);
     }
-    *active_id = None;
+    *stored_id = None;
+    *error = None;
     IpcResponse::success(REQUEST_ID, json!({"active_voice_profile_id": null}))
 }
