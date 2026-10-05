@@ -284,12 +284,15 @@ jobs:
           }
 
           # 2. Compile Inno Setup installer -> produces release\Clearcore-Inno-Setup.exe
-          if (Get-Command iscc -ErrorAction SilentlyContinue) {
-            Write-Host "Compiling Inno Setup installer (Clearcore-Inno-Setup.exe)..." -ForegroundColor Cyan
+          $isccCmd = Get-Command iscc -ErrorAction SilentlyContinue
+          if ($isccCmd) {
+            Write-Host "Compiling Inno Setup installer..." -ForegroundColor Cyan
             Push-Location platform\windows\installer
             try {
-              iscc /O"..\..\..\release" /F"Clearcore-Inno-Setup" Clearcore-Setup.iss
+              & "$($isccCmd.Source)" /O"..\..\..\release" /F"Clearcore-Inno-Setup" Clearcore-Setup.iss
               Write-Host "✓ Clearcore-Inno-Setup.exe built successfully with Inno Setup." -ForegroundColor Green
+            } catch {
+              Write-Warning "Inno Setup compilation skipped: $_"
             } finally {
               Pop-Location
             }
