@@ -14,6 +14,8 @@ mod json;
 mod m0_records;
 pub mod microphone_eq;
 pub mod model_registry;
+#[cfg(feature = "tract")]
+pub mod pdfnet3_dev;
 pub mod profile_store;
 pub mod resample;
 pub mod spectral_eq;
@@ -41,6 +43,8 @@ pub use microphone_eq::{
 pub use model_registry::{
     AssetDescriptor, DEV_KEY_ID, ModelAssetRegistry, ModelRole, VerifiedAsset,
 };
+#[cfg(feature = "tract")]
+pub use pdfnet3_dev::{PDFNET3_DEV_ASSET_ID, PdfNet3DevArchive, PdfNet3DevError};
 pub use profile_store::{ACTIVE_PROFILE_FILE_NAME, ProfileStore};
 pub use studio_backend::{StudioBackend, StudioResetHandle};
 #[cfg(feature = "tract")]
