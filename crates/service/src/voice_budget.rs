@@ -15,12 +15,17 @@ pub struct Budget {
     pub remaining_seconds: f32,
 }
 
-/// Device group of the most recent sample (by numeric `timestamp`, ties broken by the later list position).
+/// Device group of the most recent counting sample (active and with audio), by numeric
+/// `timestamp`, ties broken by the later list position.
+///
+/// `timestamp` contract: a numeric string (epoch in milliseconds) written by the service;
+/// non-numeric values count as 0.
 #[must_use]
 pub fn selected_device_hash(samples: &[VoiceSample]) -> Option<String> {
     samples
         .iter()
         .enumerate()
+        .filter(|(_, s)| s.is_active && s.audio_path.is_some())
         .max_by_key(|(i, s)| (s.timestamp.parse::<u64>().unwrap_or(0), *i))
         .map(|(_, s)| s.device_id_hash.clone())
 }
@@ -30,7 +35,10 @@ pub fn budget_for(samples: &[VoiceSample], device_hash: &str) -> Budget {
     let used: f32 = samples
         .iter()
         .filter(|s| s.is_active && s.device_id_hash == device_hash && s.audio_path.is_some())
-        .map(|s| s.speech_seconds)
+        .map(|s| {
+            let v = s.speech_seconds;
+            if v.is_finite() && v > 0.0 { v } else { 0.0 }
+        })
         .sum();
     Budget {
         used_seconds: used,
@@ -41,15 +49,21 @@ pub fn budget_for(samples: &[VoiceSample], device_hash: &str) -> Budget {
 
 #[must_use]
 pub fn fits_manual(b: &Budget, speech_seconds: f32) -> bool {
-    b.used_seconds + speech_seconds <= b.max_seconds + 1e-4
+    speech_seconds.is_finite()
+        && speech_seconds >= 0.0
+        && b.used_seconds + speech_seconds <= b.max_seconds + 1e-4
 }
 
 #[must_use]
 pub fn fits_take(b: &Budget, speech_seconds: f32) -> bool {
-    b.remaining_seconds >= MIN_TAKE_MARGIN_SECONDS && speech_seconds <= b.remaining_seconds + 1e-4
+    speech_seconds.is_finite()
+        && speech_seconds >= 0.0
+        && b.remaining_seconds >= MIN_TAKE_MARGIN_SECONDS
+        && speech_seconds <= b.remaining_seconds + 1e-4
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::voice_samples::VoiceSample;
@@ -113,6 +127,47 @@ mod tests {
         assert_eq!(selected_device_hash(&list).as_deref(), Some("B"));
         let list = [s("1", "abc", "A", 1.0, true), s("2", "", "B", 1.0, true)];
         assert_eq!(selected_device_hash(&list).as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn inactive_most_recent_sample_does_not_select_its_device() {
+        let mut off = s("2", "20", "B", 1.0, true);
+        off.is_active = false;
+        let list = [s("1", "10", "A", 1.0, true), off];
+        assert_eq!(selected_device_hash(&list).as_deref(), Some("A"));
+    }
+
+    #[test]
+    fn most_recent_sample_without_wav_does_not_select_its_device() {
+        let list = [s("1", "10", "A", 1.0, true), s("2", "20", "", 0.0, false)];
+        assert_eq!(selected_device_hash(&list).as_deref(), Some("A"));
+    }
+
+    #[test]
+    fn negative_duration_does_not_inflate_the_budget() {
+        let list = [s("1", "1", "A", -50.0, true), s("2", "2", "A", 60.0, true)];
+        assert!(budget_for(&list, "A").used_seconds >= 60.0);
+    }
+
+    #[test]
+    fn hostile_durations_do_not_open_the_gate() {
+        let list = [s("1", "1", "A", f32::NEG_INFINITY, true)];
+        assert!(budget_for(&list, "A").remaining_seconds <= MAX_SPEECH_SECONDS);
+        let list = [
+            s("1", "1", "A", f32::NAN, true),
+            s("2", "2", "A", f32::INFINITY, true),
+        ];
+        let b = budget_for(&list, "A");
+        assert!(b.used_seconds.is_finite() && b.remaining_seconds.is_finite());
+    }
+
+    #[test]
+    fn fits_reject_non_finite_or_negative_durations() {
+        let b = budget_used(0.0);
+        for bad in [f32::NAN, -1.0, f32::NEG_INFINITY, f32::INFINITY] {
+            assert!(!fits_manual(&b, bad), "manual {bad}");
+            assert!(!fits_take(&b, bad), "take {bad}");
+        }
     }
 
     #[test]
