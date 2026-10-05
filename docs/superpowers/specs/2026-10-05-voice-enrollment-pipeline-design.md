@@ -37,6 +37,24 @@ Same speaker, another 12 s window ("floor"): 0.077. Different speakers: 0.143. M
 
 Hence the engineering cap in §6.2 is **90 s of speech, the measured range**, not a quality limit.
 
+### 3.1 Quality pilot with the conditioned pDFNet3 (2026-10-05)
+
+Inference on CPU with the M2 checkpoint `t3/ckpt-00022500` (formal `NO-GO`), 24 speakers (8 each from LibriSpeech dev-clean, VCTK and CML-TTS pt), 24 synthetic mixtures per speaker: target plus a speech interferer (SIR 0/5 dB), interferer plus noise (SNR 10 dB), or noise only (SNR 0/5/10 dB). The **enrollment audio was clean speech of the target only**, from a pool disjoint from the mixtures, silence removed, prefixes of d = 6, 12, 30, 60, 90 s (3 draws each). Paired differences with bootstrap 95% CIs over speakers.
+
+| Condition | SI-SDRi (dB) | Δ vs 12 s [95% CI] |
+|---|---|---|
+| 6 s | 1.99 | −0.13 [−0.54, +0.17] |
+| 12 s | 2.12 | reference |
+| 30 s | 2.18 | +0.07 [−0.08, +0.24] |
+| 60 s | 2.14 | +0.02 [−0.24, +0.29] |
+| 90 s | 2.07 | −0.05 [−0.32, +0.23] |
+| no profile (neutral) | 2.48 | — |
+| other speaker's profile | −2.57 | — |
+
+Findings: (a) durations from 6 to 90 s are **indistinguishable** (every CI contains 0; the pilot resolves effects of about 0.3 dB and above); (b) the correct 12 s profile is **not better than no profile** with this checkpoint (−0.36 dB [−1.66, +0.69] SI-SDRi) and is worse on noise-only mixtures (−2.04 dB [−3.72, −0.68]); (c) a wrong-speaker profile is clearly harmful (about 4.7 dB below the correct one), so the vector does steer the model; (d) the checkpoint does not separate an interfering speaker (SI-SDRi about −0.1 dB there) and its STOI is below the input's in about 45% of mixtures. Limits: 24 speakers, synthetic mixtures, one weak checkpoint, CPU, per-corpus effects diverge, and raw versus denoised enrollment audio (D2) was **not** compared. Material: `docs/superpowers/research/2026-10-05-enrollment-quality/`.
+
+**Consequence:** this spec delivers the profile *pipeline*; it makes **no claim** that the profile improves isolation quality. That question belongs to M4 with a model that passes M2.
+
 ## 4. Architecture
 
 Two service-side units, separated so each can be tested alone.
@@ -123,5 +141,5 @@ The Stage 1 semantics stand: "applied" means applied in the service backend; the
 5. The EQ is calibrated on the denoised audio.
 6. The IPC loop is never blocked by denoise or enrollment.
 7. A failed build leaves the previous profile and the stored state unchanged.
-8. Nothing in the code or UI calls the result product end-to-end or production-approved.
+8. Nothing in the code or UI calls the result product end-to-end or production-approved, and nothing claims that the profile improves isolation quality (§3.1).
 9. A profile is built only from samples of one capture device; samples of other devices are visibly excluded, and the level step between joined samples is removed.
