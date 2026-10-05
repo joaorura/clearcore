@@ -1,12 +1,14 @@
 //! Voice Intake Engine.
 //!
-//! Realtime monitoring and intake curation module for detected voice takes during calls.
-//! Maintains a queue of pending suggestions (with duration, SNR, audio file path, and 192d embedding),
-//! allowing the user to review, listen, approve (moving the take to the permanent sample gallery
-//! and recalculating the profile in < 1 ms), or discard (deleting the take and its audio file).
+//! Intake curation for voice takes detected during calls. Pending suggestions carry the take's
+//! denoised WAV (stored by the service in `samples/`), its speech duration and capture device; the
+//! user approves one (it becomes a gallery sample) or discards it (its WAV is deleted).
+//!
+//! Confinement: only an `audio_path` that resolves inside the private `samples/` directory is
+//! ever deleted. Legacy takes whose path points elsewhere keep their file untouched.
 
 use crate::voice_samples::{
-    VOICE_EMBEDDING_DIM, VoiceSample, VoiceSampleError, VoiceSampleManager,
+    SAMPLES_DIR_NAME, VOICE_EMBEDDING_DIM, VoiceSample, VoiceSampleError, VoiceSampleManager,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -91,7 +93,27 @@ pub struct IntakeTake {
     pub duration_secs: f32,
     pub snr: f32,
     pub audio_path: Option<String>,
+    /// Legacy takes carried a 192d embedding; audio takes carry none (empty).
+    #[serde(default)]
     pub embedding: Vec<f32>,
+    #[serde(default)]
+    pub device_label: String,
+    #[serde(default)]
+    pub device_id_hash: String,
+    /// Active speech after trimming, measured on the denoised take (spec 4.4).
+    #[serde(default)]
+    pub speech_seconds: f32,
+    /// Name proposed by the producer of the take, if any.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// True when `path` resolves (canonicalized) inside `root`.
+fn is_inside(path: &Path, root: &Path) -> bool {
+    match (fs::canonicalize(path), fs::canonicalize(root)) {
+        (Ok(file), Ok(root)) => file.starts_with(root),
+        _ => false,
+    }
 }
 
 impl IntakeTake {
@@ -110,6 +132,10 @@ impl IntakeTake {
             snr,
             audio_path,
             embedding,
+            device_label: String::new(),
+            device_id_hash: String::new(),
+            speech_seconds: 0.0,
+            name: None,
         };
         take.validate()?;
         Ok(take)
@@ -125,7 +151,10 @@ impl IntakeTake {
         if !self.snr.is_finite() {
             return Err(VoiceIntakeError::NonFiniteValue("snr"));
         }
-        if self.embedding.len() != VOICE_EMBEDDING_DIM {
+        if !self.speech_seconds.is_finite() || self.speech_seconds < 0.0 {
+            return Err(VoiceIntakeError::NonFiniteValue("speech_seconds"));
+        }
+        if !self.embedding.is_empty() && self.embedding.len() != VOICE_EMBEDDING_DIM {
             return Err(VoiceIntakeError::InvalidDimension {
                 expected: VOICE_EMBEDDING_DIM,
                 actual: self.embedding.len(),
@@ -259,46 +288,66 @@ impl VoiceIntakeEngine {
         self.pending_takes.iter().find(|t| t.id == id)
     }
 
-    /// Approves a pending take, moving it to the sample gallery and recalculating the voice profile.
+    /// Private audio directory of this engine (`<dir>/samples`), if storage is configured.
+    #[must_use]
+    pub fn samples_dir(&self) -> Option<PathBuf> {
+        self.dir.as_ref().map(|d| d.join(SAMPLES_DIR_NAME))
+    }
+
+    /// Approves a pending take: the gallery sample is added FIRST and the take is removed only
+    /// after that succeeded, so a failed add leaves the take pending. The caller rechecks the
+    /// speech budget before calling this. The sample keeps the take's WAV only when its path
+    /// resolves inside the gallery's `samples/`; otherwise it is stored without audio
+    /// (`needs_reenroll`).
     pub fn approve_take(
         &mut self,
         id: &str,
         sample_manager: &mut VoiceSampleManager,
         name_tag: Option<&str>,
     ) -> Result<VoiceSample, VoiceIntakeError> {
-        let pos = self
-            .pending_takes
-            .iter()
-            .position(|t| t.id == id)
+        let take = self
+            .get_pending(id)
+            .cloned()
             .ok_or_else(|| VoiceIntakeError::TakeNotFound(id.to_string()))?;
 
-        let take = self.pending_takes.remove(pos);
-        self.persist()?;
-
-        let sample_name = name_tag.map_or_else(
-            || format!("Sugestão Chamada {}", take.timestamp),
-            str::to_string,
-        );
-
-        let sample = VoiceSample::new(
-            take.id,
-            take.timestamp,
-            sample_name,
-            take.audio_path,
-            take.embedding,
-        )?;
-
+        let confined_audio = take
+            .audio_path
+            .as_ref()
+            .filter(|p| is_inside(Path::new(p), &sample_manager.samples_dir()))
+            .cloned();
+        let has_audio = confined_audio.is_some();
+        let sample_name = name_tag
+            .map(str::to_string)
+            .or(take.name)
+            .unwrap_or_else(|| format!("Sugestão Chamada {}", take.timestamp));
+        let sample = VoiceSample {
+            id: take.id,
+            timestamp: take.timestamp,
+            name: sample_name,
+            audio_path: confined_audio,
+            embedding: take.embedding,
+            is_active: true,
+            device_label: take.device_label,
+            device_id_hash: take.device_id_hash,
+            capture_sample_rate: if has_audio { 48_000 } else { 0 },
+            speech_seconds: if has_audio { take.speech_seconds } else { 0.0 },
+        };
+        sample.validate()?;
         sample_manager.add_sample(sample.clone())?;
+
+        self.pending_takes.retain(|t| t.id != id);
+        self.persist()?;
         Ok(sample)
     }
 
-    /// Discards a pending take, removing it from the queue and deleting any audio file on disk.
+    /// Discards a pending take, removing it from the queue and deleting its audio file when (and
+    /// only when) that file resolves inside `samples/`.
     pub fn discard_take(&mut self, id: &str) -> Result<bool, VoiceIntakeError> {
         if let Some(pos) = self.pending_takes.iter().position(|t| t.id == id) {
             let take = self.pending_takes.remove(pos);
-            if let Some(ref path_str) = take.audio_path {
+            if let (Some(path_str), Some(root)) = (take.audio_path.as_ref(), self.samples_dir()) {
                 let audio_path = PathBuf::from(path_str);
-                if audio_path.is_file() {
+                if audio_path.is_file() && is_inside(&audio_path, &root) {
                     let _ = fs::remove_file(audio_path);
                 }
             }
@@ -468,11 +517,13 @@ mod tests {
     #[test]
     fn test_intake_discard_removes_take_and_deletes_audio_file() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let audio_file = temp.path().join("discard_me.wav");
+        let intake_dir = temp.path().join("intake");
+        fs::create_dir_all(intake_dir.join(SAMPLES_DIR_NAME)).expect("samples dir");
+        let audio_file = intake_dir.join(SAMPLES_DIR_NAME).join("discard_me.wav");
         fs::write(&audio_file, b"audio data").expect("write audio");
         assert!(audio_file.is_file());
 
-        let mut engine = VoiceIntakeEngine::new(Some(temp.path().join("intake")));
+        let mut engine = VoiceIntakeEngine::new(Some(intake_dir));
         let take = IntakeTake::new(
             "junk-take",
             "2026-10-05T03:00:00Z",
@@ -497,5 +548,85 @@ mod tests {
 
         // Discarding non-existent
         assert!(!engine.discard_take("junk-take").expect("discard again"));
+    }
+
+    fn take_with_audio(id: &str, path: &Path) -> IntakeTake {
+        IntakeTake::new(
+            id,
+            "1",
+            4.0,
+            0.0,
+            Some(path.to_str().expect("str").to_string()),
+            Vec::new(),
+        )
+        .expect("take")
+    }
+
+    #[test]
+    fn discard_never_deletes_a_file_outside_samples() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let intake_dir = temp.path().join("intake");
+        let sentinel = temp.path().join("sentinel.txt");
+        fs::write(&sentinel, b"keep me").expect("write");
+        // A path that only looks like it is inside: `samples/../../sentinel.txt`.
+        fs::create_dir_all(intake_dir.join(SAMPLES_DIR_NAME)).expect("samples dir");
+        let sneaky = intake_dir
+            .join(SAMPLES_DIR_NAME)
+            .join("..")
+            .join("..")
+            .join("sentinel.txt");
+
+        let mut engine = VoiceIntakeEngine::new(Some(intake_dir));
+        engine
+            .add_take(take_with_audio("a", &sentinel))
+            .expect("add a");
+        engine
+            .add_take(take_with_audio("b", &sneaky))
+            .expect("add b");
+        assert!(engine.discard_take("a").expect("discard a"));
+        assert!(engine.discard_take("b").expect("discard b"));
+        assert!(sentinel.is_file(), "a file outside samples/ must survive");
+        assert!(engine.list_pending().is_empty());
+    }
+
+    #[test]
+    fn audio_take_without_embedding_is_valid_and_old_json_loads() {
+        let take = IntakeTake::new("t", "1", 4.0, 0.0, None, Vec::new()).expect("take");
+        assert!(take.validate().is_ok());
+        let old = r#"{"id":"x","timestamp":"1","duration_secs":4.0,"snr":1.0,"audio_path":null}"#;
+        let parsed: IntakeTake = serde_json::from_str(old).expect("old json");
+        assert!(parsed.embedding.is_empty() && parsed.device_id_hash.is_empty());
+    }
+
+    #[test]
+    fn approve_adds_the_sample_before_removing_the_take() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = temp.path().join("profiles");
+        let mut samples = VoiceSampleManager::new(&dir);
+        let wav = samples.write_sample_wav("t-1", b"RIFF").expect("wav");
+        let mut engine = VoiceIntakeEngine::new(Some(dir.clone()));
+        let mut take = take_with_audio("t-1", &wav);
+        take.speech_seconds = 4.0;
+        take.device_id_hash = "dev".into();
+        engine.add_take(take).expect("add");
+
+        // Make the gallery unwritable through a symlinked profile dir: the add fails.
+        let blocked_dir = temp.path().join("blocked");
+        std::os::unix::fs::symlink(&dir, &blocked_dir).expect("symlink");
+        let mut blocked = VoiceSampleManager::new(&blocked_dir);
+        assert!(engine.approve_take("t-1", &mut blocked, None).is_err());
+        assert_eq!(
+            engine.list_pending().len(),
+            1,
+            "a failed approve keeps the take"
+        );
+
+        let sample = engine
+            .approve_take("t-1", &mut samples, Some("Nome"))
+            .expect("approve");
+        assert_eq!(sample.audio_path.as_deref(), wav.to_str());
+        assert!((sample.speech_seconds - 4.0).abs() < 1e-6);
+        assert_eq!(sample.device_id_hash, "dev");
+        assert!(engine.list_pending().is_empty());
     }
 }

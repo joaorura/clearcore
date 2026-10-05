@@ -164,7 +164,9 @@ fn test_intake_discard_via_ipc() {
     let dir = temp.path().join("profiles");
     let mut daemon = daemon_with_store(&dir);
 
-    let audio_file = temp.path().join("discard_call.wav");
+    // Only audio inside the private `samples/` directory is ever deleted.
+    std::fs::create_dir_all(dir.join("samples")).expect("samples dir");
+    let audio_file = dir.join("samples").join("discard_call.wav");
     std::fs::write(&audio_file, b"sample wav audio bytes").expect("write");
     assert!(audio_file.is_file());
 
