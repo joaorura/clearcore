@@ -1127,3 +1127,67 @@ fn a_profile_the_backend_rejects_fails_the_job_and_keeps_the_previous_one() {
     let stored = ProfileStore::new(temp.path()).load_active().expect("load");
     assert_eq!(stored.expect("stored").id, "previous");
 }
+
+// ---------------------------------------------------------------- peaks after decimation
+
+/// `seconds` of 300 ms bursts separated by 100 ms of silence, normalized to `peak`.
+fn bursts(seconds: f32, peak: f32, mut source: impl FnMut(usize) -> f32) -> Vec<f32> {
+    let n = (seconds * 48_000.0) as usize;
+    let mut out: Vec<f32> = (0..n)
+        .map(|i| if i % 19_200 < 14_400 { source(i) } else { 0.0 })
+        .collect();
+    let max = out.iter().fold(0.0_f32, |m, v| m.max(v.abs()));
+    for v in &mut out {
+        *v *= peak / max;
+    }
+    out
+}
+
+fn square_bursts(seconds: f32, peak: f32) -> Vec<f32> {
+    bursts(seconds, peak, |i| {
+        if (i / 24) % 2 == 0 { 1.0 } else { -1.0 } // 1 kHz square at 48 kHz
+    })
+}
+
+fn pink_bursts(seconds: f32, peak: f32) -> Vec<f32> {
+    let mut seed = 0x1234_5678_u32;
+    let mut b = [0.0_f32; 3];
+    bursts(seconds, peak, move |_| {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let white = (seed >> 8) as f32 / 8_388_608.0 - 1.0;
+        b[0] = 0.997_65f32.mul_add(b[0], white * 0.099_046);
+        b[1] = 0.963f32.mul_add(b[1], white * 0.296_516_4);
+        b[2] = 0.57f32.mul_add(b[2], white * 1.052_691_3);
+        b[0] + b[1] + b[2] + white * 0.184_8
+    })
+}
+
+#[test]
+fn broadband_transients_stay_under_the_ceiling_after_decimation() {
+    let temp = TempDir::new("enroll-transients");
+    let (mut daemon, seen_peak) = daemon_with(
+        temp.path(),
+        Setup {
+            denoise_gain: Some(1.0),
+            ..Setup::default()
+        },
+    );
+    // The square bursts set the median level, so they keep their 0.985 peak through the level
+    // matching; their odd harmonics ring after the 48 -> 16 kHz low-pass (Gibbs overshoot).
+    for pcm in [
+        square_bursts(4.0, 0.985),
+        pink_bursts(4.0, 0.985),
+        square_bursts(4.0, 0.985),
+        speech_pcm(4.0, 0.05),
+        square_bursts(4.0, 0.985),
+    ] {
+        let resp = send(&mut daemon, add_cmd(&pcm, "mic-a"));
+        let job = wait_job(&mut daemon, &job_id(&resp));
+        assert_eq!(job["state"], "done", "{job}");
+    }
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "done", "{job}");
+    let peak = seen_peak.lock().unwrap().expect("model ran");
+    assert!(peak <= 0.99, "16 kHz peak seen by the model: {peak}");
+}

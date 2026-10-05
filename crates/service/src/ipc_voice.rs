@@ -24,6 +24,7 @@ use realtime_noise_model::enrollment::{
     SpeakerEnrollmentEngine,
 };
 use realtime_noise_model::enrollment_builder::{BuildError, build_profile};
+use realtime_noise_model::resample::decimate_48k_to_16k;
 use realtime_noise_model::speech_trim::{
     active_rms_dbfs, apply_gain_limited, join_crossfade, trim_speech,
 };
@@ -54,8 +55,14 @@ const MAX_SAMPLE_WAV_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_DEV_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
 /// Level matching: largest gain change applied to one sample (spec 4.2 step 1).
 const MAX_LEVEL_GAIN_DB: f32 = 12.0;
-/// Peak ceiling after level matching; the gain is limited so no sample exceeds it.
-const MAX_JOINED_PEAK: f32 = 0.99;
+/// Peak ceiling of the leveled, joined 48 kHz audio. It sits below the validator's 0.99 because
+/// the 48 -> 16 kHz low-pass rings on broadband transients (a full-scale square wave overshoots
+/// by about 9 %, Gibbs); 0.9 keeps the 16 kHz signal the model sees under 0.99.
+const LEVELING_PEAK_CEILING: f32 = 0.9;
+/// Ceiling of the 16 kHz signal the model will see. 0.9 is not enough for every transient (a
+/// truncated square wave rings to about 1.18x), so the joined take is also decimated once to
+/// measure it and scaled down when it would exceed this (never up).
+const DECIMATED_PEAK_CEILING: f32 = 0.97;
 /// Safety margin under the headroom limit (absorbs float rounding of the dB round trip).
 const HEADROOM_MARGIN_DB: f32 = 0.01;
 const JOIN_CROSSFADE_MS: u32 = 20;
@@ -400,7 +407,7 @@ fn map_build_error(error: &BuildError) -> JobFailure {
 }
 
 /// Gain (dB) that moves a sample toward the group level without ever exceeding the peak
-/// ceiling: `desired` is clamped to +-12 dB and then to the headroom `0.99 / peak`.
+/// ceiling: `desired` is clamped to +-12 dB and then to the headroom `0.9 / peak`.
 fn leveling_gain_db(desired_db: f32, peak: f32) -> f32 {
     let wanted = if desired_db.is_finite() {
         desired_db.clamp(-MAX_LEVEL_GAIN_DB, MAX_LEVEL_GAIN_DB)
@@ -408,7 +415,8 @@ fn leveling_gain_db(desired_db: f32, peak: f32) -> f32 {
         0.0
     };
     if peak > 0.0 && peak.is_finite() {
-        let headroom_db = 20.0_f32.mul_add((MAX_JOINED_PEAK / peak).log10(), -HEADROOM_MARGIN_DB);
+        let headroom_db =
+            20.0_f32.mul_add((LEVELING_PEAK_CEILING / peak).log10(), -HEADROOM_MARGIN_DB);
         wanted.min(headroom_db)
     } else {
         wanted
@@ -431,8 +439,9 @@ fn median(values: &mut [f32]) -> f32 {
 
 /// Matches every trimmed part to the median active-speech level (gain limited to +-12 dB and by
 /// the peak headroom), then joins them with a 20 ms crossfade. `levels[i]` is the active RMS
-/// (dBFS) of `parts[i]`. Each crossfade mixes two parts under the ceiling, so the joined peak
-/// stays at or below 0.99. Intermediate copies are zeroed.
+/// (dBFS) of `parts[i]`. Each crossfade mixes two parts under the ceiling; if the joined peak
+/// still exceeds `LEVELING_PEAK_CEILING` the whole take is scaled down to it (never up).
+/// Intermediate copies are zeroed.
 fn level_and_join(parts: &mut [Vec<f32>], levels: &[f32]) -> Vec<f32> {
     let mut sorted = levels.to_vec();
     let target = median(&mut sorted);
@@ -443,7 +452,24 @@ fn level_and_join(parts: &mut [Vec<f32>], levels: &[f32]) -> Vec<f32> {
         *part = leveled;
     }
     let refs: Vec<&[f32]> = parts.iter().map(Vec::as_slice).collect();
-    join_crossfade(&refs, CAPTURE_SAMPLE_RATE, JOIN_CROSSFADE_MS)
+    let mut joined = join_crossfade(&refs, CAPTURE_SAMPLE_RATE, JOIN_CROSSFADE_MS);
+    let peak48 = peak_of(&joined);
+    scale_down_to(&mut joined, peak48, LEVELING_PEAK_CEILING);
+    let mut decimated = decimate_48k_to_16k(&joined);
+    let peak16 = peak_of(&decimated);
+    decimated.fill(0.0);
+    scale_down_to(&mut joined, peak16, DECIMATED_PEAK_CEILING);
+    joined
+}
+
+/// Scales `samples` so that `measured_peak` becomes `ceiling`, only when it is above it.
+fn scale_down_to(samples: &mut [f32], measured_peak: f32, ceiling: f32) {
+    if measured_peak > ceiling && measured_peak.is_finite() {
+        let scale = ceiling / measured_peak;
+        for v in samples {
+            *v *= scale;
+        }
+    }
 }
 
 /// Reads, trims and level-matches the group's WAVs (chronological order) into one take.
@@ -1079,7 +1105,7 @@ mod tests {
             .collect();
         let joined = level_and_join(&mut parts, &levels);
         let peak = peak_of(&joined);
-        assert!(peak <= MAX_JOINED_PEAK, "joined peak {peak}");
+        assert!(peak <= LEVELING_PEAK_CEILING, "joined peak {peak}");
         assert!(joined.iter().all(|v| v.is_finite()));
     }
 
@@ -1088,10 +1114,59 @@ mod tests {
         assert!((leveling_gain_db(30.0, 0.01) - 12.0).abs() < 1e-6);
         assert!((leveling_gain_db(-30.0, 0.5) + 12.0).abs() < 1e-6);
         let g = leveling_gain_db(12.0, 0.5);
-        assert!(0.5 * 10f32.powf(g / 20.0) <= MAX_JOINED_PEAK);
+        assert!(0.5 * 10f32.powf(g / 20.0) <= LEVELING_PEAK_CEILING);
         assert!(leveling_gain_db(f32::NAN, 0.5).abs() < 1e-6);
         // A peak above the ceiling attenuates even when a boost was asked for.
         assert!(leveling_gain_db(6.0, 1.0) < 0.0);
+    }
+
+    #[test]
+    fn level_matching_never_exceeds_twelve_decibels() {
+        // 40 dB apart: the median sits 20 dB from each, but each moves only 12 dB.
+        let loud = speech(1.0, 0.3);
+        let quiet = speech(1.0, 0.003);
+        let mut parts = vec![loud.clone(), quiet.clone()];
+        let levels: Vec<f32> = parts
+            .iter()
+            .map(|p| active_rms_dbfs(p, CAPTURE_SAMPLE_RATE))
+            .collect();
+        let joined = level_and_join(&mut parts, &levels);
+        let fade = 960;
+        let head_gain = peak_of(&joined[..loud.len() - fade]) / peak_of(&loud);
+        let tail_gain = peak_of(&joined[loud.len()..]) / peak_of(&quiet);
+        let db = |g: f32| 20.0 * g.log10();
+        assert!(
+            (db(head_gain) + 12.0).abs() < 0.05,
+            "loud moved {} dB",
+            db(head_gain)
+        );
+        assert!(
+            (db(tail_gain) - 12.0).abs() < 0.05,
+            "quiet moved {} dB",
+            db(tail_gain)
+        );
+    }
+
+    #[test]
+    fn a_joined_peak_over_the_ceiling_is_scaled_down_not_up() {
+        let mut parts = vec![vec![0.95_f32; 4_800]];
+        let joined = level_and_join(&mut parts, &[-1.0]);
+        let peak = peak_of(&joined);
+        assert!(peak <= LEVELING_PEAK_CEILING && peak > 0.89, "{peak}");
+        // A full-scale square wave rings after decimation: the 16 kHz peak is capped too.
+        let square: Vec<f32> = (0..48_000)
+            .map(|i| if (i / 24) % 2 == 0 { 0.95 } else { -0.95 })
+            .collect();
+        let mut parts = vec![square];
+        let joined = level_and_join(&mut parts, &[0.0]);
+        let peak16 = peak_of(&decimate_48k_to_16k(&joined));
+        assert!(peak16 <= DECIMATED_PEAK_CEILING + 1e-4, "{peak16}");
+        let mut quiet = vec![vec![0.1_f32; 4_800]];
+        let same = level_and_join(&mut quiet, &[-20.0]);
+        assert!(
+            (peak_of(&same) - 0.1).abs() < 1e-6,
+            "never amplified globally"
+        );
     }
 
     #[test]
