@@ -234,7 +234,7 @@ fn to_film_vectors(vectors: &FiLMVectors) -> FilmVectors {
 
 impl InferenceBackend for TractBackend {
     fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
-        TractBackend::set_voice_profile(self, profile)
+        Self::set_voice_profile(self, profile)
     }
 
     fn descriptor(&self) -> BackendDescriptor {
