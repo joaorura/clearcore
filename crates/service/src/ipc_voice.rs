@@ -557,6 +557,11 @@ fn state_name(state: JobState) -> &'static str {
     }
 }
 
+/// Known limitations of the job report (documented, not implemented):
+/// - `stage` of a Running job is the stage it was spawned with (`denoise` or `trim`); progress
+///   through eq/enroll is not tracked, only a failure sets the stage where it happened.
+/// - Quality failures (`ENROLL_CLIPPING`, `ENROLL_TOO_QUIET`, ...) carry the fixed code only, not
+///   the measured peak or level; `quality` is filled for successful ingestions.
 fn job_json(prefix: &str, info: &JobInfo, extra: Option<&JobExtra>) -> Value {
     let extra = extra.cloned().unwrap_or_default();
     json!({
