@@ -196,6 +196,7 @@ export interface Translations {
     statusTitle: string;
     statusActive: string;
     statusPending: string;
+    storedNotApplied: string;
     statusSamplesPill: string;
     neuralEqStatusTitle: string;
     neuralEqCalibrated: string;

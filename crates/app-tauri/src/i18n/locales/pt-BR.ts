@@ -198,6 +198,7 @@ export const ptBR: Translations = {
     statusTitle: 'Status do Perfil de Voz',
     statusActive: '🟢 Ativo & Calibrado',
     statusPending: '🟡 Cadastro Pendente',
+    storedNotApplied: '🟡 Salvo, não aplicado',
     statusSamplesPill: '{count} Amostras Ativas',
     neuralEqStatusTitle: 'Calibração Neural EQ:',
     neuralEqCalibrated: '🟢 Calibrado (+1.8 dB clareza)',

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { invokeBridge } from '../bridge';
-import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus } from '../VoiceProfileCard';
+import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState } from '../VoiceProfileCard';
 import type { VoiceProfileStatus, VoiceSample, CallSuggestionTake, StudioPreset } from '../types';
 import fs from 'fs';
 import path from 'path';
@@ -317,5 +317,49 @@ describe('mergeVoiceProfileStatus', () => {
   });
   it('prefers local sample count when present', () => {
     expect(mergeVoiceProfileStatus(initial, { is_enrolled: false, active_samples_count: 9 }, 2).active_samples_count).toBe(2);
+  });
+});
+
+describe('voiceProfileActivationState', () => {
+  const base: VoiceProfileStatus = {
+    is_enrolled: true,
+    active_samples_count: 3,
+    embedding_dim: 192,
+    neural_eq_calibrated: true,
+  };
+
+  it('returns active only when the service confirms it', () => {
+    expect(voiceProfileActivationState({ ...base, is_voice_profile_active: true })).toBe('active');
+  });
+
+  it('returns stored_not_applied for a stored but inactive profile, never active', () => {
+    const s = { ...base, is_voice_profile_active: false, stored_voice_profile_id: 'abc' };
+    expect(voiceProfileActivationState(s)).toBe('stored_not_applied');
+    expect(voiceProfileActivationState({ ...base, is_voice_profile_active: false })).toBe('stored_not_applied');
+    expect(voiceProfileActivationState({ ...base, is_enrolled: false, stored_voice_profile_id: 'abc' })).toBe('stored_not_applied');
+  });
+
+  it('does not claim active when the field is absent (older service)', () => {
+    expect(voiceProfileActivationState(base)).not.toBe('active');
+    expect(voiceProfileActivationState({ ...base, is_enrolled: false })).toBe('none');
+  });
+
+  it('passes the new fields through normalize and merge without inventing defaults', () => {
+    const n = normalizeVoiceProfileStatus({
+      ...base,
+      is_voice_profile_active: false,
+      stored_voice_profile_id: 'abc',
+      voice_profile_error: 'model missing',
+    });
+    expect(n.is_voice_profile_active).toBe(false);
+    expect(n.stored_voice_profile_id).toBe('abc');
+    expect(n.voice_profile_error).toBe('model missing');
+    const absent = normalizeVoiceProfileStatus(base);
+    expect(absent.is_voice_profile_active).toBeUndefined();
+    expect(absent.stored_voice_profile_id).toBeUndefined();
+    expect(absent.voice_profile_error).toBeUndefined();
+    const m = mergeVoiceProfileStatus(base, { ...base, is_voice_profile_active: false, voice_profile_error: 'x' }, 3);
+    expect(m.is_voice_profile_active).toBe(false);
+    expect(m.voice_profile_error).toBe('x');
   });
 });

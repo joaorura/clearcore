@@ -61,5 +61,8 @@ export interface VoiceProfileStatus {
   embedding_dim: number;
   neural_eq_calibrated: boolean;
   gain_boost_db?: number;
+  is_voice_profile_active?: boolean;
+  stored_voice_profile_id?: string | null;
+  voice_profile_error?: string | null;
 }
 

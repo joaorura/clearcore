@@ -198,6 +198,7 @@ export const enUS: Translations = {
     statusTitle: 'Voice Profile Status',
     statusActive: '🟢 Active & Calibrated',
     statusPending: '🟡 Enrollment Pending',
+    storedNotApplied: '🟡 Stored, not applied',
     statusSamplesPill: '{count} Active Samples',
     neuralEqStatusTitle: 'Neural EQ Calibration:',
     neuralEqCalibrated: '🟢 Calibrated (+1.8 dB clarity)',

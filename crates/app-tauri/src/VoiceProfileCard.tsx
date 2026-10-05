@@ -252,7 +252,23 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     embedding_dim: src.embedding_dim ?? 0,
     neural_eq_calibrated: Boolean(src.neural_eq_calibrated),
     gain_boost_db: src.gain_boost_db,
+    is_voice_profile_active: src.is_voice_profile_active,
+    stored_voice_profile_id: src.stored_voice_profile_id,
+    voice_profile_error: src.voice_profile_error,
   };
+}
+
+export type VoiceProfileActivationState = 'active' | 'stored_not_applied' | 'none';
+
+/** Stored must never be presented as applied: 'active' needs explicit confirmation. */
+export function voiceProfileActivationState(status: VoiceProfileStatus): VoiceProfileActivationState {
+  if (status.is_voice_profile_active === true) return 'active';
+  const hasStoredId =
+    typeof status.stored_voice_profile_id === 'string' && status.stored_voice_profile_id.length > 0;
+  if (hasStoredId || (status.is_enrolled && status.is_voice_profile_active === false)) {
+    return 'stored_not_applied';
+  }
+  return 'none';
 }
 
 export function mergeVoiceProfileStatus(
@@ -270,6 +286,9 @@ export function mergeVoiceProfileStatus(
     neural_eq_calibrated: prof.neural_eq_calibrated,
     embedding_dim: raw.embedding_dim ?? initial.embedding_dim,
     gain_boost_db: raw.gain_boost_db ?? initial.gain_boost_db,
+    is_voice_profile_active: prof.is_voice_profile_active,
+    stored_voice_profile_id: prof.stored_voice_profile_id,
+    voice_profile_error: prof.voice_profile_error,
     active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
   };
 }
@@ -929,6 +948,17 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const isAllStepsCompleted = completedCount >= 5;
   const currentQ = stepQuestions[currentStep - 1];
 
+
+  const activationState = voiceProfileActivationState(profileStatus);
+  // Legacy services omit the activation fields: keep the enrolled-based label for 'none' only.
+  const statusLabelActive = activationState === 'active' || (activationState === 'none' && profileStatus.is_enrolled);
+  const statusLabel =
+    activationState === 'stored_not_applied'
+      ? t('voiceProfile.storedNotApplied')
+      : statusLabelActive
+        ? t('voiceProfile.statusActive')
+        : t('voiceProfile.statusPending');
+
   return (
     <div className="card voice-profile-card">
       {/* Header & Status Section */}
@@ -939,8 +969,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             <span className="profile-badge-ecapa">
               {t('voiceProfile.badge')}
             </span>
-            <span className={`status-pill ${profileStatus.is_enrolled ? 'pill-active' : 'pill-pending'}`}>
-              {profileStatus.is_enrolled ? t('voiceProfile.statusActive') : t('voiceProfile.statusPending')}
+            <span className={`status-pill ${statusLabelActive ? 'pill-active' : 'pill-pending'}`}>
+              {statusLabel}
             </span>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6, lineHeight: 1.45 }}>
@@ -971,9 +1001,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       <div className="profile-overview-box">
         <div className="overview-metric">
           <div className="overview-label">{t('voiceProfile.statusTitle')}</div>
-          <div className="overview-value" style={{ color: profileStatus.is_enrolled ? '#4ade80' : '#fbbf24' }}>
-            {profileStatus.is_enrolled ? t('voiceProfile.statusActive') : t('voiceProfile.statusPending')}
+          <div className="overview-value" style={{ color: statusLabelActive ? '#4ade80' : '#fbbf24' }}>
+            {statusLabel}
           </div>
+          {activationState === 'stored_not_applied' && profileStatus.voice_profile_error && (
+            <div style={{ color: '#fbbf24', fontSize: '0.75rem', marginTop: 4 }}>
+              {profileStatus.voice_profile_error}
+            </div>
+          )}
         </div>
         <div className="overview-metric">
           <div className="overview-label">Amostras Registradas</div>
