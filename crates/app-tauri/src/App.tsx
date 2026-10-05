@@ -4,6 +4,7 @@ import { AudioTestCard } from './AudioTestCard';
 import { HardwareAcceleratorCard } from './HardwareAcceleratorCard';
 import { VoiceProfileCard } from './VoiceProfileCard';
 import { StudioDspCard } from './StudioDspCard';
+import { UpdateBanner } from './UpdateBanner';
 import { useI18n } from './i18n';
 import { invokeBridge } from './bridge';
 import type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo } from './types';
@@ -302,6 +303,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="container">
+      <UpdateBanner />
       <header className="header">
         <div className="title-area">
           <h1>{t('app.title')}</h1>

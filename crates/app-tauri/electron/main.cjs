@@ -8,9 +8,10 @@ const clearcoreState = require('./clearcore-state.cjs');
 const { planCaptureLinks } = require('./capture-link-plan.cjs');
 const { parseHardwareJson } = require('./hardware-json.cjs');
 const { resolveBackendSelection } = require('./backend-selection.cjs');
+const updater = require('./updater.cjs');
 
 // ClearCore Runtime Application Version
-const APP_VERSION = '0.1.0-beta.2';
+const APP_VERSION = '0.1.0-beta.3';
 app.setVersion(APP_VERSION);
 
 // Enforce single instance lock (in production)
@@ -1331,5 +1332,46 @@ ipcMain.handle('set_studio_preset', (_event, args) => {
   }
   return { success: false, preset: 'Off' };
 });
+
+// Auto-Updater IPC Handlers
+ipcMain.handle('updater:check', async () => {
+  return await updater.checkForUpdates(APP_VERSION);
+});
+
+ipcMain.handle('updater:download-and-install', async (_event, assetInfo) => {
+  try {
+    if (!assetInfo || !assetInfo.downloadUrl) {
+      throw new Error('Informações do instalador não fornecidas');
+    }
+    const tempDir = app.getPath('temp');
+    const targetFile = path.join(tempDir, assetInfo.name || 'clearcore-update');
+
+    await updater.downloadFile(assetInfo.downloadUrl, targetFile, (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('updater:progress', progress);
+      }
+    });
+
+    const installResult = await updater.launchInstaller(targetFile, assetInfo.installerType);
+    return { success: true, ...installResult };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Silent background check 5s after startup
+app.whenReady().then(() => {
+  setTimeout(async () => {
+    try {
+      const updateInfo = await updater.checkForUpdates(APP_VERSION);
+      if (updateInfo.updateAvailable && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('updater:available', updateInfo);
+      }
+    } catch (e) {
+      console.log('[AutoUpdater] Silent check skipped:', e.message);
+    }
+  }, 5000);
+});
+
 
 

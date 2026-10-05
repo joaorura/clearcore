@@ -37,7 +37,7 @@ jobs:
       - name: Install Linux Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpipewire-0.3-dev libclang-dev meson ninja-build
+          sudo apt-get install -y libpipewire-0.3-dev libclang-dev meson ninja-build rpm dpkg-dev
 
       - name: Build Native Rust Binaries
         run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
@@ -112,6 +112,12 @@ jobs:
             ls -lh release/Clearcore-linux-*.AppImage 2>/dev/null || true
           fi
 
+      - name: Build Native Fedora RPM and Debian DEB Packages
+        run: |
+          set -euo pipefail
+          chmod +x scripts/package-linux-packages.sh
+          QA_RPATHS=0x0002 ./scripts/package-linux-packages.sh Clearcore-linux-x64
+
       - name: Upload Linux Package Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -119,6 +125,8 @@ jobs:
           path: |
             release/Clearcore-linux-x64.tar.gz
             release/Clearcore-linux-x64.AppImage
+            release/Clearcore-*.rpm
+            release/Clearcore-*.deb
 
   build-linux-arm64:
     name: Build Linux ARM64 Package
@@ -136,7 +144,7 @@ jobs:
       - name: Install Linux Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpipewire-0.3-dev libclang-dev meson ninja-build
+          sudo apt-get install -y libpipewire-0.3-dev libclang-dev meson ninja-build rpm dpkg-dev
 
       - name: Build Native Rust Binaries
         run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
@@ -184,6 +192,12 @@ jobs:
             ls -lh release/Clearcore-linux-arm64.AppImage 2>/dev/null || true
           fi
 
+      - name: Build Native Fedora RPM and Debian DEB Packages
+        run: |
+          set -euo pipefail
+          chmod +x scripts/package-linux-packages.sh
+          QA_RPATHS=0x0002 ./scripts/package-linux-packages.sh Clearcore-linux-arm64
+
       - name: Upload Linux ARM64 Package Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -191,6 +205,8 @@ jobs:
           path: |
             release/Clearcore-linux-arm64.tar.gz
             release/Clearcore-linux-arm64.AppImage
+            release/Clearcore-*-1.aarch64.rpm
+            release/Clearcore-*_arm64.deb
 
   build-windows:
     name: Build Windows x64 Package
@@ -294,6 +310,74 @@ jobs:
             release/Clearcore-win32-*.zip
             release/Clearcore-*.exe
 
+  build-windows-arm64:
+    name: Build Windows ARM64 (Snapdragon / Copilot+) Package
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+          targets: aarch64-pc-windows-msvc
+
+      - name: Build Native Rust Binaries for Windows ARM64
+        shell: powershell
+        run: cargo build --release --target aarch64-pc-windows-msvc -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Application Dependencies
+        shell: powershell
+        run: |
+          cd crates\app-tauri
+          npm ci
+
+      - name: Download Electron Windows ARM64 Runtime
+        shell: powershell
+        run: |
+          $pkg = Get-Content crates\app-tauri\package.json | ConvertFrom-Json
+          $rawVer = $pkg.devDependencies.electron
+          $ver = $rawVer -replace '[\^~><=]', ''
+          $zipName = "electron-v$ver-win32-arm64.zip"
+          $url = "https://github.com/electron/electron/releases/download/v$ver/$zipName"
+          Write-Host "Downloading Electron ARM64 from $url..."
+          Invoke-WebRequest -Uri $url -OutFile "crates\app-tauri\$zipName"
+          $armDist = "crates\app-tauri\node_modules\electron\dist-arm64"
+          New-Item -ItemType Directory -Force -Path $armDist | Out-Null
+          Expand-Archive -Path "crates\app-tauri\$zipName" -DestinationPath $armDist -Force
+          Rename-Item -Path "crates\app-tauri\node_modules\electron\dist" -NewName "dist-x64"
+          Rename-Item -Path $armDist -NewName "dist"
+
+      - name: Package Windows ARM64 Application
+        shell: powershell
+        env:
+          TARGET_PLATFORM: win32
+          TARGET_ARCH: arm64
+          RUST_TARGET: aarch64-pc-windows-msvc
+        run: |
+          cd crates\app-tauri
+          node scripts\package-app.mjs
+
+      - name: Create Windows ARM64 Zip Archive
+        shell: powershell
+        run: |
+          Compress-Archive -Path "release\Clearcore-win32-arm64" -DestinationPath "release\Clearcore-win32-arm64.zip" -Force
+          Get-ChildItem -Path release -Filter "Clearcore-win32-arm64*" | Select-Object Name, Length
+
+      - name: Upload Windows ARM64 Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clearcore-win32-arm64
+          path: |
+            release/Clearcore-win32-arm64.zip
+
   build-macos-x64:
     name: Build macOS x64 (Intel) Package
     runs-on: macos-13
@@ -392,7 +476,7 @@ jobs:
 
   publish-github-release:
     name: Publish Multi-Platform GitHub Release
-    needs: [build-linux-x64, build-linux-arm64, build-windows, build-macos-x64, build-macos-arm64]
+    needs: [build-linux-x64, build-linux-arm64, build-windows, build-windows-arm64, build-macos-x64, build-macos-arm64]
     runs-on: ubuntu-latest
     if: always() && !cancelled() && (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag_name != '' || github.event_name == 'workflow_dispatch')
     steps:
@@ -420,8 +504,11 @@ jobs:
                 "Turnkey multi-platform distribution built entirely via GitHub Actions." \
                 "" \
                 "### Included Packages & Installers" \
-                "- **Linux x64 & ARM64**: Standalone archive (\`.tar.gz\`) and AppImage (\`.AppImage\`) with PipeWire C-API bridge." \
+                "- **Fedora / RHEL / openSUSE (x64 & ARM64)**: Native RPM package (\`.rpm\`) for direct installation via \`dnf\`." \
+                "- **Debian / Ubuntu / Mint (x64 & ARM64)**: Native DEB package (\`.deb\`) for direct installation via \`apt\`." \
+                "- **Linux Universal (x64 & ARM64)**: Standalone archive (\`.tar.gz\`) and AppImage (\`.AppImage\`) with PipeWire C-API bridge." \
                 "- **Windows x64**: Single-click installer (\`Clearcore-Setup.exe\`, \`Clearcore-Inno-Setup.exe\`) with WaveRT virtual audio driver and portable zip (\`.zip\`)." \
+                "- **Windows ARM64 (Snapdragon X Elite / Copilot+)**: Standalone ARM64 package (\`.zip\`)." \
                 "- **macOS (Intel x64 & Apple Silicon ARM64)**: Application bundle with CoreAudio HAL driver (\`.tar.gz\` and \`.dmg\`)." > "${NOTES_FILE}"
             fi
           fi
@@ -438,7 +525,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          find downloaded-artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" \) -exec cp {} release-assets/ \;
+          find downloaded-artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.rpm" -o -name "*.deb" \) -exec cp {} release-assets/ \;
           echo "=== Consolidated Release Assets ==="
           ls -lh release-assets/
 

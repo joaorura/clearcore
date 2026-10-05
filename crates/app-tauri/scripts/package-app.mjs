@@ -9,12 +9,14 @@ const __dirname = path.dirname(__filename);
 
 const appDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(appDir, '..', '..');
-const releaseDir = path.resolve(repoRoot, 'release');
-const targetRelease = path.resolve(repoRoot, 'target', 'release');
+const platform = process.env.TARGET_PLATFORM || process.platform;
+const arch = process.env.TARGET_ARCH || process.arch;
+const rustTriple = process.env.RUST_TARGET || (platform === 'win32' && arch === 'arm64' ? 'aarch64-pc-windows-msvc' : null);
+const targetRelease = rustTriple && fs.existsSync(path.resolve(repoRoot, 'target', rustTriple, 'release'))
+  ? path.resolve(repoRoot, 'target', rustTriple, 'release')
+  : path.resolve(repoRoot, 'target', 'release');
 const electronDist = path.resolve(appDir, 'node_modules', 'electron', 'dist');
 
-const platform = process.platform;
-const arch = process.arch;
 const bundleName = `Clearcore-${platform}-${arch}`;
 const bundleDir = path.join(releaseDir, bundleName);
 
