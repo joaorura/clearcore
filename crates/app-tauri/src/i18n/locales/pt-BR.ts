@@ -322,6 +322,7 @@ export const ptBR: Translations = {
       stageEq: 'Calibrando o EQ do microfone…',
       stageEnroll: 'Gerando o perfil…',
       stageApply: 'Aplicando no serviço…',
+      stageTimeout: 'Tempo esgotado: o serviço não concluiu em 10 minutos. Tente de novo.',
       jobDone: 'Concluído',
       jobFailed: 'Falhou',
       devModelNotice: 'Modelo de enrollment de desenvolvimento, ainda não aprovado',

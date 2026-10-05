@@ -322,6 +322,7 @@ export const enUS: Translations = {
       stageEq: 'Calibrating the microphone EQ…',
       stageEnroll: 'Building the profile…',
       stageApply: 'Applying in the service…',
+      stageTimeout: 'Timed out: the service did not finish within 10 minutes. Try again.',
       jobDone: 'Done',
       jobFailed: 'Failed',
       devModelNotice: 'Development enrollment model, not approved yet',

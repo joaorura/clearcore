@@ -16,7 +16,7 @@ function makeLabels(): EnrollmentLabels {
   const l: Record<string, unknown> = {};
   for (const k of ['budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', 'budgetExceededTitle', 'budgetExceededBody',
     'deleteAction', 'deleting', 'otherMicrophone', 'needsReenroll', 'usedInProfile', 'notUsed',
-    'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply', 'jobDone', 'jobFailed',
+    'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply', 'stageTimeout', 'jobDone', 'jobFailed',
     'devModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech']) l[k] = k;
   l.errors = Object.fromEntries(codes.map((c) => [c, c]));
   return l as unknown as EnrollmentLabels;
@@ -87,5 +87,14 @@ describe('components', () => {
   });
   it('dev model notice renders the label', () => {
     expect(html(<DevModelNotice labels={labels} />)).toContain('devModelNotice');
+  });
+});
+
+describe('EnrollmentJobStatus timeout (M6)', () => {
+  it('a job failed by the watchdog shows the timeout, never "queued"', () => {
+    const m = html(<EnrollmentJobStatus job={job({ state: 'failed', stage: 'timeout', errorCode: 'ENROLL_FAILED' })} labels={labels} />);
+    expect(m).toContain('jobFailed');
+    expect(m).toContain('stageTimeout');
+    expect(m).not.toContain('stageQueued');
   });
 });

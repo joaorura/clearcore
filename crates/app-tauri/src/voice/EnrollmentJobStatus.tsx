@@ -2,16 +2,18 @@ import type { EnrollmentJob, EnrollmentLabels, JobStage } from './enrollmentType
 import { formatDecimalLocale, formatSecondsLocale } from './format';
 
 const stageKey: Record<JobStage, keyof EnrollmentLabels> = {
-  queued: 'stageQueued', denoise: 'stageDenoise', trim: 'stageTrim', eq: 'stageEq', enroll: 'stageEnroll', apply: 'stageApply',
+  queued: 'stageQueued', denoise: 'stageDenoise', trim: 'stageTrim', eq: 'stageEq', enroll: 'stageEnroll', apply: 'stageApply', timeout: 'stageTimeout',
 };
 
 export function EnrollmentJobStatus({ job, labels, lang = 'en-US' }: { job: EnrollmentJob | null; labels: EnrollmentLabels; lang?: string }) {
   if (!job) return null;
   if (job.state === 'failed') {
     const code = job.errorCode ?? 'UNKNOWN';
+    // The watchdog's timeout says what happened better than the generic ENROLL_FAILED.
+    const detail = job.stage === 'timeout' ? labels.stageTimeout : (labels.errors[code] ?? labels.errors.UNKNOWN);
     return (
       <div role="alert" className="enrollment-job-status" style={{ color: '#f87171', fontSize: 13 }}>
-        <strong>{labels.jobFailed}</strong>: {labels.errors[code] ?? labels.errors.UNKNOWN}
+        <strong>{labels.jobFailed}</strong>: {detail}
       </div>
     );
   }

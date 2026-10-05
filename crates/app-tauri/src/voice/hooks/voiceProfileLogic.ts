@@ -161,7 +161,7 @@ export function voiceProfileErrorKey(code: unknown): VoiceProfileErrorKey {
 const ENROLLMENT_LABEL_KEYS = [
   'budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', 'budgetExceededTitle', 'budgetExceededBody',
   'deleteAction', 'deleting', 'otherMicrophone', 'needsReenroll', 'usedInProfile', 'notUsed',
-  'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply',
+  'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply', 'stageTimeout',
   'jobDone', 'jobFailed', 'devModelNotice', 'qualityPeak', 'qualityLevel', 'qualitySpeech',
 ] as const satisfies ReadonlyArray<Exclude<keyof EnrollmentLabels, 'errors'>>;
 

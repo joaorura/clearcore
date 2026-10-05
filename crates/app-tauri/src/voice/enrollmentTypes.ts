@@ -27,7 +27,8 @@ export interface SampleList {
   selectedDeviceIdHash?: string | null; selectedDeviceLabel?: string;
 }
 export type JobState = 'running' | 'done' | 'failed';
-export type JobStage = 'queued' | 'denoise' | 'trim' | 'eq' | 'enroll' | 'apply';
+/** 'timeout': failed by the service watchdog (10 min); only on a failed job. */
+export type JobStage = 'queued' | 'denoise' | 'trim' | 'eq' | 'enroll' | 'apply' | 'timeout';
 export interface Quality { peak: number; rmsDbfs: number; activeFraction: number; speechSeconds: number }
 export interface EnrollmentJob {
   jobId: string; state: JobState; stage: JobStage; errorCode: EnrollErrorCode | null;
@@ -49,7 +50,7 @@ export interface EnrollmentLabels {
   budgetExceededTitle: string; budgetExceededBody: string;        // body has "{remaining}" placeholder
   deleteAction: string; deleting: string;
   otherMicrophone: string; needsReenroll: string; usedInProfile: string; notUsed: string;
-  stageQueued: string; stageDenoise: string; stageTrim: string; stageEq: string; stageEnroll: string; stageApply: string;
+  stageQueued: string; stageDenoise: string; stageTrim: string; stageEq: string; stageEnroll: string; stageApply: string; stageTimeout: string;
   jobDone: string; jobFailed: string;
   devModelNotice: string;                                          // "development model, not approved"
   qualityPeak: string; qualityLevel: string; qualitySpeech: string;

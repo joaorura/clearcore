@@ -43,7 +43,8 @@ function wipePcm(pcm) {
     else if (ArrayBuffer.isView(pcm)) new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength).fill(0);
   } catch (_) { /* best effort */ }
 }
-const STAGES = ['queued', 'denoise', 'trim', 'eq', 'enroll', 'apply'];
+// 'timeout': a job the service watchdog failed after 10 min (state 'failed', ENROLL_FAILED).
+const STAGES = ['queued', 'denoise', 'trim', 'eq', 'enroll', 'apply', 'timeout'];
 const STATES = ['running', 'done', 'failed'];
 
 function invalidAudio(message) {

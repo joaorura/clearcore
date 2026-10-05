@@ -170,5 +170,10 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
   const badGrp = m.mapSampleList({ selected_device_id_hash: 'X'.repeat(64), selected_device_label: 42, samples: [] });
   assert.strictEqual(badGrp.selectedDeviceIdHash, null);
   assert.strictEqual(badGrp.selectedDeviceLabel, '');
+  // M6: the watchdog's timeout stage is kept (a failed job never becomes 'queued').
+  const timedOut = m.mapJob({ job_id: 'profile-job-3', state: 'failed', stage: 'timeout', error_code: 'ENROLL_FAILED' });
+  assert.strictEqual(timedOut.stage, 'timeout');
+  assert.strictEqual(timedOut.state, 'failed');
+  assert.strictEqual(timedOut.errorCode, 'ENROLL_FAILED');
   console.log('enrollment-ipc round-1 selftest passed.');
 })().catch((e) => { console.error(e); process.exit(1); });

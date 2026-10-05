@@ -320,6 +320,7 @@ export interface Translations {
       stageEq: string;
       stageEnroll: string;
       stageApply: string;
+      stageTimeout: string;
       jobDone: string;
       jobFailed: string;
       devModelNotice: string;
