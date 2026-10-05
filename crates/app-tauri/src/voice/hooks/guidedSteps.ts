@@ -1,10 +1,12 @@
 import type { CapturedPcm } from '../enrollmentTypes';
 import type { JobOutcome } from './voiceProfileLogic';
 
-/** One accepted take of a guided step. The PCM stays in memory only (never persisted). */
+/**
+ * One accepted take of a guided step. It keeps no PCM: the raw audio is zeroed once sent to the
+ * service, so there is nothing left to play back.
+ */
 export interface StepTake {
   duration: number;
-  captured?: CapturedPcm;
   /** Service id of the sample this step stored, when the job reported it. */
   sampleId?: string | null;
 }
@@ -33,7 +35,7 @@ export function stepAfterSubmit(
   captured: CapturedPcm,
 ): StepTake | undefined {
   if (outcome.kind !== 'done') return prev;
-  return { duration: outcome.quality?.speechSeconds ?? captured.durationSec, captured, sampleId };
+  return { duration: outcome.quality?.speechSeconds ?? captured.durationSec, sampleId };
 }
 
 /**

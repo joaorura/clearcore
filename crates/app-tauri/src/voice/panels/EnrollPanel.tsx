@@ -19,7 +19,6 @@ export interface EnrollPanelProps {
   jobBusy: boolean;
   /** The microphone is being opened: recording cannot be started again. */
   isStarting?: boolean;
-  playingAudioId: string | null;
   /** Feedback of the sample job started here (null when another tab started the job). */
   feedback: JobFeedbackView | null;
   onSelectStep: (step: number) => void;
@@ -28,7 +27,6 @@ export interface EnrollPanelProps {
   onFinishStep: (step: number) => void;
   onRedoStep: (step: number) => void;
   onNextStep: () => void;
-  onPlayStep: (step: number) => void;
   onBuildProfile: () => void;
   onResetEnrollment: () => void;
 }
@@ -128,13 +126,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
               <RecordingIndicator t={t} locale={p.locale} elapsed={p.recordingElapsedSeconds} onStop={() => p.onFinishStep(currentStep)} showHint />
             ) : currentTake ? (
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button
-                  className="action-btn play-sample-btn"
-                  disabled={!currentTake.captured}
-                  onClick={() => p.onPlayStep(currentStep)}
-                >
-                  {p.playingAudioId === `step-${currentStep}` ? t('voiceProfile.stopSample') : t('voiceProfile.playSample')}
-                </button>
+                {/* No "Ouvir": the raw take was zeroed once sent to the service. */}
                 <button className="action-btn" disabled={p.jobBusy || p.isStarting} onClick={() => p.onRedoStep(currentStep)}>
                   {t('voiceProfile.redoSample')}
                 </button>

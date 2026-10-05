@@ -27,10 +27,14 @@ describe('replacedSampleToDelete', () => {
 describe('stepAfterSubmit', () => {
   it('records the accepted take with the service speech seconds and sample id', () => {
     const q = { peak: 0.4, rmsDbfs: -20, activeFraction: 0.7, speechSeconds: 2.5 };
-    expect(stepAfterSubmit(undefined, { kind: 'done', quality: q }, 's1', captured)).toEqual({ duration: 2.5, captured, sampleId: 's1' });
+    expect(stepAfterSubmit(undefined, { kind: 'done', quality: q }, 's1', captured)).toEqual({ duration: 2.5, sampleId: 's1' });
   });
   it('falls back to the captured duration without quality', () => {
-    expect(stepAfterSubmit(undefined, { kind: 'done', quality: null }, 's1', captured)).toEqual({ duration: 3, captured, sampleId: 's1' });
+    expect(stepAfterSubmit(undefined, { kind: 'done', quality: null }, 's1', captured)).toEqual({ duration: 3, sampleId: 's1' });
+  });
+  it('never keeps the PCM: it was zeroed after sending, so playing it would be silence (M1)', () => {
+    const take = stepAfterSubmit(undefined, { kind: 'done', quality: null }, 's1', captured);
+    expect(take && 'captured' in take).toBe(false);
   });
   it('keeps the previous take when the new one fails', () => {
     const prev = { duration: 4, sampleId: 'old' };

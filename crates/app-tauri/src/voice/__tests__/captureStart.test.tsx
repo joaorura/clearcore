@@ -11,8 +11,8 @@ const noop = () => {};
 const enroll = (over: Partial<EnrollPanelProps>): EnrollPanelProps => ({
   t, locale: 'pt-BR', labels, isEnrolled: false, currentStep: 1, isReadingMode: false, completedSteps: {},
   isRecording: false, liveVoiceLevel: 0, recordingElapsedSeconds: 0, captureError: null, jobBusy: false,
-  playingAudioId: null, feedback: null, onSelectStep: noop, onToggleReadingMode: noop, onStartStep: noop,
-  onFinishStep: noop, onRedoStep: noop, onNextStep: noop, onPlayStep: noop, onBuildProfile: noop, onResetEnrollment: noop,
+  feedback: null, onSelectStep: noop, onToggleReadingMode: noop, onStartStep: noop,
+  onFinishStep: noop, onRedoStep: noop, onNextStep: noop, onBuildProfile: noop, onResetEnrollment: noop,
   ...over,
 });
 const modal = (over: Partial<AddSampleModalProps>): AddSampleModalProps => ({

@@ -34,9 +34,9 @@ const enrollProps = (over: Partial<EnrollPanelProps> = {}): EnrollPanelProps => 
   t, locale: 'pt-BR', labels,
   isEnrolled: false, currentStep: 1, isReadingMode: false, completedSteps: {},
   isRecording: false, liveVoiceLevel: 0, recordingElapsedSeconds: 0, captureError: null,
-  jobBusy: false, playingAudioId: null, feedback: null,
+  jobBusy: false, feedback: null,
   onSelectStep: noop, onToggleReadingMode: noop, onStartStep: noop, onFinishStep: noop, onRedoStep: noop,
-  onNextStep: noop, onPlayStep: noop, onBuildProfile: noop, onResetEnrollment: noop,
+  onNextStep: noop, onBuildProfile: noop, onResetEnrollment: noop,
   ...over,
 });
 
@@ -59,10 +59,10 @@ describe('EnrollPanel', () => {
     const ok = html(<EnrollPanel {...enrollProps({ isRecording: true, recordingElapsedSeconds: 2 })} />);
     expect(ok).not.toMatch(/<button[^>]*class="stop-record-btn"[^>]*disabled=""/);
   });
-  it('a completed step offers play, redo and next; all five offer the profile build', () => {
-    const done = { 1: { duration: 3, captured }, 2: { duration: 3 }, 3: { duration: 3 }, 4: { duration: 3 }, 5: { duration: 3 } };
+  it('a completed step offers redo and next (no "Ouvir": the sent PCM was zeroed); all five offer the profile build', () => {
+    const done = { 1: { duration: 3 }, 2: { duration: 3 }, 3: { duration: 3 }, 4: { duration: 3 }, 5: { duration: 3 } };
     const m = html(<EnrollPanel {...enrollProps({ completedSteps: { 1: done[1] } })} />);
-    expect(m).toContain('voiceProfile.playSample'); expect(m).toContain('voiceProfile.redoSample'); expect(m).toContain('voiceProfile.nextStep');
+    expect(m).not.toContain('voiceProfile.playSample'); expect(m).toContain('voiceProfile.redoSample'); expect(m).toContain('voiceProfile.nextStep');
     expect(m).not.toContain('voiceProfile.activateProfileBtn');
     expect(html(<EnrollPanel {...enrollProps({ completedSteps: done, currentStep: 5 })} />)).toContain('voiceProfile.activateProfileBtn');
   });

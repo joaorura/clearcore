@@ -230,7 +230,6 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             captureError={isModalOpen ? null : captureError}
             jobBusy={jobBusy}
             isStarting={isStarting}
-            playingAudioId={playingAudioId}
             feedback={isModalOpen ? null : feedbackFor('enroll')}
             onSelectStep={(step) => setCurrentStep(stepAfterSelect(currentStep, step, isRecording))}
             onToggleReadingMode={steps.toggleReadingMode}
@@ -238,10 +237,6 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             onFinishStep={(step) => void steps.finishStep(step)}
             onRedoStep={steps.redoStep}
             onNextStep={steps.nextStep}
-            onPlayStep={(step) => {
-              const c = completedSteps[step]?.captured;
-              if (c) playCaptured(`step-${step}`, c);
-            }}
             onBuildProfile={() => void handleBuildProfile('enroll')}
             onResetEnrollment={steps.resetSteps}
           />

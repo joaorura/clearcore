@@ -86,8 +86,8 @@ describe('profile actions come back with a service profile (I1)', () => {
   const enrollProps = (isEnrolled: boolean): EnrollPanelProps => ({
     t, locale: 'pt-BR', labels, isEnrolled, currentStep: 1, isReadingMode: false, completedSteps: {},
     isRecording: false, liveVoiceLevel: 0, recordingElapsedSeconds: 0, captureError: null, jobBusy: false,
-    playingAudioId: null, feedback: null, onSelectStep: noop, onToggleReadingMode: noop, onStartStep: noop,
-    onFinishStep: noop, onRedoStep: noop, onNextStep: noop, onPlayStep: noop, onBuildProfile: noop, onResetEnrollment: noop,
+    feedback: null, onSelectStep: noop, onToggleReadingMode: noop, onStartStep: noop,
+    onFinishStep: noop, onRedoStep: noop, onNextStep: noop, onBuildProfile: noop, onResetEnrollment: noop,
   });
   it('EnrollPanel offers "Refazer Cadastro Completo" when the service holds a profile', () => {
     expect(html(<EnrollPanel {...enrollProps(hasServiceVoiceProfile(serviceStored))} />)).toContain('voiceProfile.reEnrollBtn');
