@@ -3,7 +3,7 @@
 
 //! Spec §8: a diagnostics bundle never carries voice samples, WAVs or profiles.
 
-use realtime_noise_diagnostics::{DiagnosticExporter, RawDiagnosticInput};
+use realtime_noise_diagnostics::{DiagnosticExporter, RawDiagnosticInput, sanitize_text};
 use std::fs;
 
 const AUDIO_SENTINEL: &[u8] = b"SENTINEL_AUDIO_BYTES";
@@ -101,4 +101,67 @@ fn diagnostics_exclude_voice_samples_wavs_and_profiles() {
     for output in export_both(&exporter, &dirty) {
         assert_clean(&output, &dir);
     }
+}
+
+const REDACTION: &str = "[REDACTED_VOICE_PROFILE]";
+
+#[test]
+fn artifact_paths_are_dropped_in_every_spelling() {
+    let leaking = [
+        "samples directory /tmp/p/profiles/samples is a symlink",
+        "profile directory /Users/alice/Library/Application Support/clearcore/profiles is a symlink",
+        r"profile directory C:\Users\alice\AppData\Roaming\clearcore\profiles is a symlink",
+        "cannot open /tmp/p/profiles/profile.tmp.1.2",
+        "cannot open /tmp/p/profiles/samples/abc.tmp.4242.99887766",
+        "cannot rename abc.tmp.4242.99887766 to abc.wav",
+        "write failed in profiles: abc.tmp.4242.99887766",
+        "failed to read /tmp/p/PROFILES/SAMPLES/A.WAV",
+        r"failed to read C:\p\Samples\a.WAV",
+        "cannot parse ACTIVE_PROFILE.JSON",
+        "ENOENT Voice_Samples.json",
+        "samples missing under profiles",
+    ];
+    for cause in leaking {
+        let out = sanitize_text(cause);
+        assert_eq!(out, REDACTION, "not dropped: {cause} -> {out}");
+    }
+    for cause in [
+        "samples directory /tmp/p/profiles/samples is a symlink",
+        "profile directory /Users/alice/Library/Application Support/clearcore/profiles",
+        "cannot open /tmp/p/profiles/profile.tmp.1.2",
+    ] {
+        let out = sanitize_text(cause);
+        assert!(!out.contains("profiles") && !out.contains("alice"), "{out}");
+    }
+}
+
+#[test]
+fn macos_user_paths_are_redacted() {
+    let out = sanitize_text("config read failed at /Users/alice/Library/foo/bar.toml");
+    assert!(!out.contains("alice"), "{out}");
+}
+
+#[test]
+fn long_base64_blobs_without_markers_are_dropped() {
+    let blob = "UklGR".repeat(20);
+    assert_eq!(sanitize_text(&format!("decode failed: {blob}")), REDACTION);
+    let slashy = format!("{}/{}", "a".repeat(40), "b".repeat(40));
+    assert_eq!(sanitize_text(&format!("blob {slashy}")), REDACTION);
+}
+
+#[test]
+fn clean_causes_pass_through_intact() {
+    for cause in [
+        "deadline miss p99 7.2 ms",
+        "inference timeout",
+        "device lost: sample rate changed",
+    ] {
+        assert_eq!(sanitize_text(cause), cause);
+    }
+    // A legitimate 64-char lowercase hex digest is not base64 content.
+    let digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    assert_eq!(
+        sanitize_text(&format!("digest {digest}")),
+        format!("digest {digest}")
+    );
 }

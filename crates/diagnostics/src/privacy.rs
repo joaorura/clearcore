@@ -257,27 +257,46 @@ const VOICE_PROFILE_MARKERS: [&str; 5] = [
 
 /// Files and locations of the voice profile directory (profiles, recorded samples, intake
 /// suggestions) and raw audio. Any text naming one of them is dropped whole: diagnostics never
-/// carry voice samples, WAVs or profiles, nor paths that lead to them.
-const VOICE_ARTIFACT_EXCLUSIONS: [&str; 7] = [
+/// carry voice samples, WAVs or profiles, nor paths that lead to them. Matching runs on the
+/// lowercased text with `\\` folded into `/`, so case and separator style do not matter.
+const VOICE_ARTIFACT_EXCLUSIONS: [&str; 9] = [
     "active_profile",
     "voice_samples",
     "intake_suggestions",
     "profile.bin",
+    "profile.tmp",
     ".wav",
     "samples/",
-    "samples\\",
+    "clearcore/profiles",
+    "/profiles/",
 ];
+
+/// Atomic-write temporaries (`<id>.tmp.<pid>.<ns>`) only matter next to these words.
+const TMP_CONTEXT: [&str; 3] = [".wav", "profiles", "samples"];
+
+/// A base64-looking run of this many characters is opaque content (an audio or profile dump).
+const BASE64_RUN: usize = 64;
 
 /// A run of this many consecutive numbers looks like a vector (`FiLM`, EQ gains, embedding).
 const NUMERIC_VECTOR_RUN: usize = 8;
 
 fn contains_voice_profile_material(text: &str) -> bool {
-    let lower = text.to_lowercase();
+    let lower = text.to_lowercase().replace('\\', "/");
     if VOICE_PROFILE_MARKERS
         .iter()
         .chain(VOICE_ARTIFACT_EXCLUSIONS.iter())
         .any(|marker| lower.contains(marker))
     {
+        return true;
+    }
+    if lower.contains(".tmp.") && TMP_CONTEXT.iter().any(|word| lower.contains(word)) {
+        return true;
+    }
+    // `samples` next to `profiles` is the profile directory layout, even without a file name.
+    if lower.contains("samples") && lower.contains("profiles") {
+        return true;
+    }
+    if contains_base64_blob(text) {
         return true;
     }
 
@@ -293,6 +312,19 @@ fn contains_voice_profile_material(text: &str) -> bool {
         }
     }
     false
+}
+
+/// True when `text` holds a run of at least `BASE64_RUN` base64 characters that looks like
+/// encoded data rather than a digest: it must contain `+` or `/`, or mix upper and lower case.
+/// A plain lowercase (or uppercase) hex digest, such as a SHA-256, therefore stays untouched.
+fn contains_base64_blob(text: &str) -> bool {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=')))
+        .filter(|run| run.len() >= BASE64_RUN)
+        .any(|run| {
+            run.contains(['+', '/'])
+                || (run.bytes().any(|b| b.is_ascii_uppercase())
+                    && run.bytes().any(|b| b.is_ascii_lowercase()))
+        })
 }
 
 fn redact_quotes(input: &str) -> String {
@@ -338,6 +370,14 @@ fn redact_user_paths(input: &str) -> String {
         if let Some(slash_idx) = rest.find('/') {
             let target = format!("/home/{}/", &rest[..slash_idx]);
             res = res.replace(&target, "/home/[REDACTED_USER]/");
+        }
+    }
+    // macOS: /Users/<user>/
+    if let Some(users_idx) = res.find("/Users/") {
+        let rest = &res[users_idx + 7..];
+        if let Some(slash_idx) = rest.find('/') {
+            let target = format!("/Users/{}/", &rest[..slash_idx]);
+            res = res.replace(&target, "/Users/[REDACTED_USER]/");
         }
     }
     // Windows: C:\Users\<user>\
