@@ -22,6 +22,7 @@ This spec is **development-integrated**, not product end-to-end and not producti
 | D5 | The **microphone EQ is calibrated on the denoised audio** (48 kHz). | Matches the runtime chain, where the EQ sits after the denoiser. |
 | D6 | Scope: development end-to-end with the M3 `enrollment.onnx` behind explicit development configuration, plus the same path in CI with the synthetic test ONNX. | Honest labelling in the UI (§9). |
 | D7 | Only samples from the **same capture source** (same microphone) are concatenated. | Each sample records its capture device; the builder uses one device group (§4.2); the microphone EQ of D5 is a property of that microphone. |
+| D8 | The profile's speech is a **hard budget of 90 s**, controlled by the user, not an automatic selection. A manual sample that would exceed it is refused with an error asking the user to delete audio; a **dynamic** (call-take) sample is not recorded when the remaining margin is under 5 s. | Replaces the "keep the best samples until 90 s" rule; adds the budget accounting of §4.4 and the meter and error in the UI (§6.1). |
 
 ## 3. Evidence on duration (experiment of 2026-10-05)
 
@@ -35,7 +36,7 @@ Same speaker, another 12 s window ("floor"): 0.077. Different speakers: 0.143. M
 
 **What this supports:** up to 90 s the vector stays inside the same-speaker window-to-window variation. **What it does not show:** (a) only 10 speakers of read speech from one source; (b) prefixes overlap, so the dip at 12 s is partly a bias, and the Common Voice run concatenated clips of one `client_id` that may come from different sessions and microphones, which is exactly what D7 forbids in the product; (c) it measures vector stability, **not** denoiser quality (SI-SDR/TSOS with the conditioned pDFNet3); (d) the same-speaker floor is already 54% of the between-speaker distance, so the vector separates speakers weakly. Material: `docs/superpowers/research/2026-10-05-enrollment-duration/`.
 
-Hence the engineering cap in §6.2 is **90 s of speech, the measured range**, not a quality limit.
+Hence the engineering cap (§4.4, §6.2) is **90 s of speech, the measured range**, not a quality limit.
 
 ### 3.1 Quality pilot with the conditioned pDFNet3 (2026-10-05)
 
@@ -67,7 +68,7 @@ Triggered by `BuildVoiceProfile`. Reads the active samples' WAVs in chronologica
 
 0. **Select one device group (D7):** among the active samples, take the capture device of the **most recent** sample and use only the samples of that device. Samples of other devices stay in the gallery, are flagged `other_microphone` (not used) and are listed to the user; the build fails with `ENROLL_TOO_LITTLE_SPEECH` and a "record more with this microphone" message if the group has under 6 s of speech.
 1. **Trim and join:** frame energy VAD (20 ms frames, threshold `max(−50 dBFS, loudest − 30 dB)`, the same rule as `validate_enrollment_audio`); keep each active segment with a 40 ms margin; **match the active-speech RMS of every sample to the group median (gain limited to ±12 dB)** so there is no level step at the joins; join segments with a 20 ms linear crossfade.
-2. **Cap:** if the speech exceeds 90 s, keep the samples with the highest active-speech fraction (then lowest peak) until 90 s; otherwise keep all, chronologically.
+2. **Budget, not selection:** the group's total speech never exceeds 90 s (§4.4), so the builder uses **all** samples of the group, chronologically, and never drops one on its own. If it nevertheless finds more than 90 s (data migrated from before the budget existed), it fails with `ENROLL_BUDGET_EXCEEDED` instead of discarding audio silently.
 3. **EQ:** `estimate_microphone_eq` on the joined 48 kHz audio (D5).
 4. **Resample 48 → 16 kHz** (integer factor 3): reuse an existing resampler if the codebase has one (first task of the plan checks); otherwise a polyphase low-pass FIR in `crates/model`, no new dependency, with a frequency-response test.
 5. **Validate:** at least 6 s of speech after trimming, finite samples, no clipping (§6.2).
@@ -77,6 +78,14 @@ Triggered by `BuildVoiceProfile`. Reads the active samples' WAVs in chronologica
 ### 4.3 Jobs, not blocking calls
 `serve_client` is a single-threaded accept loop. Denoise plus enrollment takes seconds, so ingestion of one sample and the profile build run on a worker thread; the IPC reply is immediate with a job id. Results return through a channel that the daemon thread drains at the start of **every** request (so the UI's periodic `GetStatus` completes the job): the profile is applied on the daemon thread, using the existing transaction. If no client talks to the service, a finished job waits until the next request.
 
+### 4.4 Speech budget
+
+- **Unit.** At ingestion each sample stores `speech_seconds`: the duration of its active speech after the VAD trim of §4.2 step 1, measured on the denoised audio. For a device group, `used_seconds` is the sum over its active samples, `max_seconds` is 90 and `remaining_seconds = max − used`. Samples flagged `needs_reenroll` (no WAV) count 0.
+- **Manual sample (`AddVoiceSample`).** If `used + speech_seconds > 90`, nothing is stored, the raw PCM is wiped and the call fails with `ENROLL_BUDGET_EXCEEDED`, carrying `remaining_seconds`. The UI shows the error and the gallery with the meter and each sample's `speech_seconds`, and asks the user to delete audio first.
+- **Dynamic sample (call take, `AddIntakeSuggestion`).** Recorded only if `remaining_seconds ≥ 5` **and** the take's speech fits in `remaining_seconds` (the second condition keeps the 90 s invariant for takes longer than the margin). Otherwise it is **not recorded and no error is shown** (reply `recorded: false, reason: "budget"`). `ApproveIntakeSuggestion` rechecks the budget, because it may have changed since the suggestion was made, and fails with `ENROLL_BUDGET_EXCEEDED` if the take no longer fits.
+- **Device switch.** A sample from a microphone different from the current group's becomes the most recent and switches the group (D7); the budget is then evaluated for the new group. The UI warns before the switch that the earlier samples stop being used.
+- **No automatic deletion.** Only the user frees budget, by deleting samples. This spec covers the service-side gate for takes; the producer that detects speech during calls is out of scope (§10).
+
 ## 5. IPC contract
 
 New or changed commands (`crates/ipc/src/protocol.rs`), all payload sizes capped:
@@ -84,11 +93,12 @@ New or changed commands (`crates/ipc/src/protocol.rs`), all payload sizes capped
 - `AddVoiceSample { name, pcm_f32_le_b64, sample_rate, device_label, device_id_hash }` — **changed**: carries audio (48 kHz mono) and the capture device instead of an embedding. Reply: `{ job_id }`. Final status carries the sample id and quality numbers.
 - `BuildVoiceProfile { name }` — **new**. Reply: `{ job_id }`.
 - `GetEnrollmentJob { job_id }` — **new**: `state` (`running` | `done` | `failed`), `stage` (`denoise` | `trim` | `eq` | `enroll` | `apply`), fixed error code on failure.
-- `ListVoiceSamples` — `audio_path` now points to the saved WAV; each item adds `device_label` and `used_in_profile`; samples without a WAV are flagged `needs_reenroll`, samples of a non-selected device `other_microphone`.
+- `ListVoiceSamples` — `audio_path` now points to the saved WAV; each item adds `device_label`, `used_in_profile` and `speech_seconds`; the reply adds `budget { used_seconds, max_seconds: 90, remaining_seconds }`; samples without a WAV are flagged `needs_reenroll`, samples of a non-selected device `other_microphone`.
+- `AddIntakeSuggestion` / `ApproveIntakeSuggestion` — keep their commands; they now carry audio like `AddVoiceSample` and are gated by the budget of §4.4.
 - `DeleteVoiceSample` — unchanged; also removes the WAV. A rebuild is triggered by the client.
 - `GetVoiceProfileEmbedding`, `profile.bin` — **deprecated** (they exposed the fake embedding). Kept returning an error until removed.
 
-Error codes are fixed strings (no free text, no payload echo), e.g. `ENROLL_CLIPPING`, `ENROLL_TOO_QUIET`, `ENROLL_TOO_LITTLE_SPEECH`, `ENROLL_MODEL_NOT_CONFIGURED`, `ENROLL_FAILED`, `ENROLL_PAYLOAD_TOO_LARGE`.
+Error codes are fixed strings (no free text, no payload echo), e.g. `ENROLL_CLIPPING`, `ENROLL_TOO_QUIET`, `ENROLL_TOO_LITTLE_SPEECH`, `ENROLL_MODEL_NOT_CONFIGURED`, `ENROLL_BUDGET_EXCEEDED`, `ENROLL_FAILED`, `ENROLL_PAYLOAD_TOO_LARGE`.
 
 ## 6. Changes to existing code
 
@@ -96,9 +106,10 @@ Error codes are fixed strings (no free text, no payload echo), e.g. `ENROLL_CLIP
 - Capture: raw physical device only, 48 kHz mono; drop the fallback to an unconstrained `getUserMedia`; if the physical device cannot be opened, show an error. Send PCM, not a `blob:` URL, together with the device label and a stable hash of the device id. Show which microphone each sample used and which samples are not used in the profile.
 - `handleActivateProfile`: stop writing `neural_eq_calibrated: true` and `gain_boost_db: 1.8`; those fields come from the service result. Stop sending the local status as `profile_json`.
 - Show per-sample quality numbers and the build/apply state (§9).
+- Show a **meter** of speech used against the 90 s budget and each sample's `speech_seconds`. On `ENROLL_BUDGET_EXCEEDED` for a manual sample, show an error that asks the user to delete audio, with the gallery open and the delete action on each sample. Dynamic takes that are not recorded for lack of margin show no error.
 
 ### 6.2 Validator (`crates/model/src/enrollment.rs`)
-`validate_enrollment_audio` keeps the 16 kHz, finiteness, clipping, level and speech-fraction rules. The duration rule becomes: **≥ 6 s of speech after trimming**; the 12 s maximum (`ENROLLMENT_MAX_*`) is removed from validation and replaced by the 90 s engineering cap applied by the builder. The doc comment states that the model was trained on 6–12 s and the stability evidence of §3.
+`validate_enrollment_audio` keeps the 16 kHz, finiteness, clipping, level and speech-fraction rules. The duration rule becomes: **≥ 6 s of speech after trimming**; the 12 s maximum (`ENROLLMENT_MAX_*`) is removed from validation and replaced by the 90 s engineering cap, enforced by the speech budget of §4.4 when samples are added. The doc comment states that the model was trained on 6–12 s and the stability evidence of §3.
 
 ### 6.3 Storage
 One directory for everything: the `ProfileStore` dir (`XDG_DATA_HOME/clearcore/profiles`). `VoiceSampleManager` moves from `$HOME/.clearcore/profiles` to it (one-time migration of `voice_samples.json`; samples with no WAV are marked `needs_reenroll`). WAVs live in `samples/<sample-id>.wav`.
@@ -121,7 +132,7 @@ The Stage 1 semantics stand: "applied" means applied in the service backend; the
 - Production approval: M4 controlled evaluation and M5 governance/signing; pinning or signing the M3 assets.
 - A controlled raw-vs-denoised ablation and denoiser-quality measurement (SI-SDR/TSOS) with conditioned vectors.
 - Measuring durations above 90 s.
-- UX redesign beyond what §6.1 and §9 need; call-take capture (`AddIntakeSuggestion`) stays as is.
+- UX redesign beyond what §6.1 and §9 need; the producer of call takes (detecting speech during calls) is out of scope: only the service-side budget gate of §4.4 applies to `AddIntakeSuggestion` and `ApproveIntakeSuggestion`, and which signal a call take is recorded from (raw or filtered) is decided when that producer is specified.
 
 ## 11. Testing
 
@@ -130,7 +141,8 @@ The Stage 1 semantics stand: "applied" means applied in the service backend; the
 - **Integration (local, `#[ignore]`):** same path with the M3 asset and the real base DFNet3.
 - **Privacy:** no raw audio on disk after ingestion; WAV permissions; deletion removes WAV; payload cap.
 - **IPC and job tests:** job states, drain-on-request applies the profile, failure leaves the previous profile.
-- **Front end:** capture refuses the virtual device and the fallback; selftests for the PCM message and quality display.
+- **Budget:** a manual sample that fits is stored; one that would exceed 90 s is refused with `ENROLL_BUDGET_EXCEEDED`, stores nothing and wipes the PCM; a take with margin under 5 s is not recorded and a take longer than the margin is not recorded; approving a take re-checks the budget; deleting a sample frees budget; a device switch re-evaluates the budget for the new group; the builder fails, and does not drop audio, on a migrated group above 90 s.
+- **Front end:** capture refuses the virtual device and the fallback; selftests for the PCM message and quality display; the meter, the budget error with the delete prompt, and no error for an unrecorded take.
 
 ## 12. Acceptance criteria
 
@@ -143,3 +155,4 @@ The Stage 1 semantics stand: "applied" means applied in the service backend; the
 7. A failed build leaves the previous profile and the stored state unchanged.
 8. Nothing in the code or UI calls the result product end-to-end or production-approved, and nothing claims that the profile improves isolation quality (§3.1).
 9. A profile is built only from samples of one capture device; samples of other devices are visibly excluded, and the level step between joined samples is removed.
+10. The speech of a profile never exceeds 90 s: a manual sample over the budget is refused with an error that tells the user to delete audio, a dynamic take with under 5 s of margin (or longer than the margin) is not recorded and shows no error, and nothing is deleted automatically.
