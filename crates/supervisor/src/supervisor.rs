@@ -5,8 +5,8 @@ use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
 use realtime_noise_model::{
-    BackendDescriptor, InferenceBackend, InferenceError, StudioBackend, StudioResetHandle,
-    VoiceProfile,
+    BackendDescriptor, CpuProfile, InferenceBackend, InferenceError, PDFNET3_DEV_ASSET_ID,
+    PdfNet3DevArchive, StudioBackend, StudioResetHandle, VoiceProfile,
 };
 use std::fmt;
 use std::path::Path;
@@ -69,7 +69,16 @@ pub struct EngineSupervisor {
     studio_control: Arc<StudioControl>,
     studio_reset: StudioResetHandle,
     active_profile: Option<VoiceProfile>,
+    /// Development pDFNet3 (`FiLM`, unsigned) that overrides every backend selection while set.
+    dev_base_model: Option<PdfNet3DevArchive>,
+    /// Fixed code of the last reason the development model could not be used.
+    dev_base_model_error: Option<&'static str>,
 }
+
+/// `GetStatus.dev_base_model` while the development pDFNet3 drives the live backend.
+pub const DEV_BASE_MODEL_PDFNET3: &str = "pdfnet3-dev";
+/// `GetStatus.dev_base_model` otherwise (the default base model, or no model at all).
+pub const DEV_BASE_MODEL_BASE: &str = "base";
 
 impl Default for EngineSupervisor {
     fn default() -> Self {
@@ -92,6 +101,44 @@ impl EngineSupervisor {
             studio_control: Arc::new(StudioControl::new(Preset::Off)),
             studio_reset: StudioResetHandle::new(),
             active_profile: None,
+            dev_base_model: None,
+            dev_base_model_error: None,
+        }
+    }
+
+    /// Configures the development pDFNet3 base model (already hash- and member-verified). While
+    /// set, [`Self::select_backend`] installs tract with this model whatever was requested
+    /// (`auto` would otherwise pick an accelerator that can never apply a voice profile). If the
+    /// model fails to load, the error code is recorded and the normal selection runs: the
+    /// daemon never switches models silently, the status says which one is live and why.
+    /// Takes effect on the next selection.
+    pub fn set_dev_base_model(&mut self, archive: Option<PdfNet3DevArchive>) {
+        self.dev_base_model = archive;
+        self.dev_base_model_error = None;
+    }
+
+    /// Records why the development model is not in use (configuration/verification failure
+    /// found before it reached the supervisor). Fixed codes only, never a path.
+    pub fn set_dev_base_model_error(&mut self, code: Option<&'static str>) {
+        self.dev_base_model_error = code;
+    }
+
+    #[must_use]
+    pub const fn dev_base_model_error(&self) -> Option<&'static str> {
+        self.dev_base_model_error
+    }
+
+    /// [`DEV_BASE_MODEL_PDFNET3`] when the live backend runs the development pDFNet3,
+    /// [`DEV_BASE_MODEL_BASE`] otherwise.
+    #[must_use]
+    pub fn dev_base_model(&self) -> &'static str {
+        if self
+            .active_backend_descriptor()
+            .is_some_and(|desc| desc.asset_id == PDFNET3_DEV_ASSET_ID)
+        {
+            DEV_BASE_MODEL_PDFNET3
+        } else {
+            DEV_BASE_MODEL_BASE
         }
     }
 
@@ -245,6 +292,30 @@ impl EngineSupervisor {
         repo_root: Option<&Path>,
     ) -> BackendResolutionInfo {
         self.requested_backend_name = request.to_string();
+        if let Some(archive) = &self.dev_base_model {
+            match archive.instantiate(CpuProfile::Avx2Minimum) {
+                Ok(backend) => {
+                    self.dev_base_model_error = None;
+                    let info = BackendResolutionInfo {
+                        name: "tract".to_string(),
+                        runtime: "tract".to_string(),
+                        device: "CPU".to_string(),
+                        is_hardware_accelerated: false,
+                        is_fallback: false,
+                        fallback_reason: None,
+                    };
+                    self.set_backend(Box::new(backend), &info.name);
+                    return info;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "Development pDFNet3 model was not loaded ({}); using the default model",
+                        error.code()
+                    );
+                    self.dev_base_model_error = Some(error.code());
+                }
+            }
+        }
         let (backend, info) = instantiate_backend_with_fallback(request, model_dir, repo_root);
         self.set_backend(backend, &info.name);
         info
