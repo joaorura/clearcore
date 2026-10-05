@@ -29,7 +29,8 @@ describe('ProfilePanel stale notice', () => {
   const t = (k: string) => k;
   const props = (stale: boolean): ProfilePanelProps => ({
     t, locale: 'pt-BR', labels: { errors: {} } as unknown as EnrollmentLabels,
-    profileStatus: { is_enrolled: true, active_samples_count: 2, is_voice_profile_active: true },
+    // As the service reports a stored, applied profile (GetStatus), not a local is_enrolled.
+    profileStatus: { is_enrolled: false, active_samples_count: 2, stored_voice_profile_id: 'p1', has_voice_profile: true, is_voice_profile_active: true },
     samplesCount: 2, canBuild: true, busy: false, feedback: null, onBuildProfile: () => {}, stale,
   });
   it('asks to rebuild only when stale, and never rebuilds by itself', () => {

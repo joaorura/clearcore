@@ -22,7 +22,8 @@ console.log('Testing offline/undefined/null service => no service keys...');
 for (const s of [undefined, null, {}, 'x', 42, []]) {
   assert.deepStrictEqual(pickServiceVoiceProfileFields(s), {});
   const m = mergeLocalAndServiceProfile(local, s);
-  assert.deepStrictEqual(m, local);
+  // The local is_enrolled is ignored: without a service status no profile exists.
+  assert.deepStrictEqual(m, { ...local, is_enrolled: false });
   for (const k of KEYS) assert.ok(!(k in m), `${k} must be absent`);
 }
 
@@ -51,7 +52,7 @@ assert.strictEqual(merged.voice_profile_error, null);
 assert.strictEqual(merged.is_voice_profile_active, true);
 
 console.log('Testing strip service fields...');
-const stripped = stripServiceVoiceProfileFields({ ...local, ...Object.fromEntries(KEYS.map((k) => [k, 1])) });
+const stripped = stripServiceVoiceProfileFields({ ...local, has_voice_profile: true, ...Object.fromEntries(KEYS.map((k) => [k, 1])) });
 assert.deepStrictEqual(stripped, local);
 assert.deepStrictEqual(stripServiceVoiceProfileFields(null), {});
 
@@ -59,7 +60,7 @@ console.log('Testing buildSetVoiceProfileResult...');
 const off = buildSetVoiceProfileResult({ updated: local, serviceStatus: {}, forwardError: 'service_unavailable' });
 assert.strictEqual(off.voice_profile_error, 'service_unavailable');
 for (const k of KEYS.filter((k) => k !== 'voice_profile_error')) assert.ok(!(k in off), `${k} absent`);
-assert.strictEqual(off.is_enrolled, true);
+assert.strictEqual(off.is_enrolled, false);
 const on = buildSetVoiceProfileResult({
   updated: local,
   serviceStatus: { is_voice_profile_active: true, stored_voice_profile_id: 'p1' },
@@ -83,5 +84,19 @@ for (const e of [new Error(leak), null, undefined, 'x']) {
   const c = classifyForwardError(e);
   assert.ok(!c.includes('{') && c.length <= 64);
 }
+
+console.log('Testing is_enrolled comes from the service, never from the local file...');
+// Legacy flow: the local file says enrolled but the service has no profile.
+const legacy = mergeLocalAndServiceProfile(
+  { is_enrolled: true, active_samples_count: 3 },
+  { stored_voice_profile_id: null, has_voice_profile: false, is_voice_profile_active: false },
+);
+assert.strictEqual(legacy.is_enrolled, false);
+assert.strictEqual(legacy.has_voice_profile, false);
+// New flow: the local file never says enrolled, the service holds a profile.
+assert.strictEqual(mergeLocalAndServiceProfile({ is_enrolled: false }, { stored_voice_profile_id: 'p1' }).is_enrolled, true);
+assert.strictEqual(mergeLocalAndServiceProfile({}, { has_voice_profile: true }).is_enrolled, true);
+assert.strictEqual(mergeLocalAndServiceProfile({ is_enrolled: true }, { stored_voice_profile_id: '' }).is_enrolled, false);
+assert.strictEqual(mergeLocalAndServiceProfile({ is_enrolled: true }, { has_voice_profile: 'yes' }).is_enrolled, false);
 
 console.log('voice-profile-merge selftest passed.');

@@ -8,11 +8,23 @@ import { formatDecimalLocale, formatSecondsLocale } from '../format';
  * existing imports keep working.
  */
 
+/**
+ * A profile exists when the SERVICE says so (GetStatus `stored_voice_profile_id` not empty or
+ * `has_voice_profile`). A local `is_enrolled` is never trusted: the enrollment pipeline builds the
+ * profile in the service, and a stale `is_enrolled: true` from the old local flow must not claim
+ * a profile the service does not hold.
+ */
+export function hasServiceVoiceProfile(status: Partial<VoiceProfileStatus> | null | undefined): boolean {
+  if (!status || typeof status !== 'object') return false;
+  const id = status.stored_voice_profile_id;
+  return (typeof id === 'string' && id.length > 0) || status.has_voice_profile === true;
+}
+
 export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
   const r = (res ?? {}) as Partial<VoiceProfileStatus> & { profile?: Partial<VoiceProfileStatus> };
   const src = r.profile ?? r;
   return {
-    is_enrolled: Boolean(src.is_enrolled),
+    is_enrolled: hasServiceVoiceProfile(src),
     active_samples_count: src.active_samples_count ?? 0,
     embedding_dim: src.embedding_dim ?? 0,
     neural_eq_calibrated: Boolean(src.neural_eq_calibrated),
@@ -22,31 +34,29 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     voice_profile_error: src.voice_profile_error,
     voice_profile_selected: src.voice_profile_selected,
     active_voice_profile_id: src.active_voice_profile_id,
+    has_voice_profile: typeof src.has_voice_profile === 'boolean' ? src.has_voice_profile : undefined,
   };
 }
 
 export type VoiceProfileActivationState = 'active' | 'stored_not_applied' | 'none';
 
-export type VoiceProfileStatusLabelKey = 'active' | 'storedNotApplied' | 'enrolledUnconfirmed' | 'none';
+export type VoiceProfileStatusLabelKey = 'active' | 'storedNotApplied' | 'none';
 
-/** Only 'active' may be shown as active; enrolled without confirmation is neutral. */
+/** Only 'active' may be shown as active; a profile the service holds but did not apply is neutral. */
 export function voiceProfileStatusLabelKey(status: VoiceProfileStatus): VoiceProfileStatusLabelKey {
   const state = voiceProfileActivationState(status);
   if (state === 'active') return 'active';
   if (state === 'stored_not_applied') return 'storedNotApplied';
-  return status.is_enrolled ? 'enrolledUnconfirmed' : 'none';
+  return 'none';
 }
 
 /** Stored must never be presented as applied: 'active' needs explicit confirmation. */
 export function voiceProfileActivationState(status: VoiceProfileStatus): VoiceProfileActivationState {
   if (status.is_voice_profile_active === true) return 'active';
-  const hasStoredId =
-    typeof status.stored_voice_profile_id === 'string' && status.stored_voice_profile_id.length > 0;
-  if (hasStoredId || (status.is_enrolled && status.is_voice_profile_active === false)) {
-    return 'stored_not_applied';
-  }
-  return 'none';
+  return hasServiceVoiceProfile(status) ? 'stored_not_applied' : 'none';
 }
+
+const SERVICE_STATUS_KEYS_IN_RESPONSE = ['stored_voice_profile_id', 'has_voice_profile', 'is_voice_profile_active'] as const;
 
 export function mergeVoiceProfileStatus(
   initial: VoiceProfileStatus,
@@ -55,7 +65,9 @@ export function mergeVoiceProfileStatus(
 ): VoiceProfileStatus {
   const r = (res ?? {}) as Partial<VoiceProfileStatus> & { profile?: Partial<VoiceProfileStatus> };
   const raw = r.profile ?? r;
-  if (!raw || typeof raw !== 'object' || typeof raw.is_enrolled !== 'boolean') return initial;
+  if (!raw || typeof raw !== 'object') return initial;
+  const fromService = typeof raw.is_enrolled === 'boolean' || SERVICE_STATUS_KEYS_IN_RESPONSE.some((k) => k in raw);
+  if (!fromService) return initial;
   const prof = normalizeVoiceProfileStatus(res);
   return {
     ...initial,
@@ -68,6 +80,7 @@ export function mergeVoiceProfileStatus(
     voice_profile_error: prof.voice_profile_error,
     voice_profile_selected: prof.voice_profile_selected,
     active_voice_profile_id: prof.active_voice_profile_id,
+    has_voice_profile: prof.has_voice_profile,
     active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
   };
 }
@@ -78,6 +91,7 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'voice_profile_error',
   'voice_profile_selected',
   'active_voice_profile_id',
+  'has_voice_profile',
 ] as const;
 
 /** Service-owned fields: the renderer never resends nor inherits them. */
@@ -96,13 +110,16 @@ export function applySetVoiceProfileResult(
   localStatus: VoiceProfileStatus,
   res: unknown,
 ): VoiceProfileStatus {
-  const base = { ...stripServiceVoiceProfileKeys(prev), ...stripServiceVoiceProfileKeys(localStatus) };
+  // Without a service answer no profile is known to exist (the local flag is never trusted).
+  const base = { ...stripServiceVoiceProfileKeys(prev), ...stripServiceVoiceProfileKeys(localStatus), is_enrolled: false };
   const r = (res ?? {}) as { profile?: unknown };
   const raw = (r.profile ?? res) as Record<string, unknown> | null | undefined;
   if (!raw || typeof raw !== 'object') return base;
   const svc = normalizeVoiceProfileStatus(raw);
   return {
     ...base,
+    is_enrolled: svc.is_enrolled,
+    has_voice_profile: svc.has_voice_profile,
     is_voice_profile_active: typeof svc.is_voice_profile_active === 'boolean' ? svc.is_voice_profile_active : undefined,
     stored_voice_profile_id: svc.stored_voice_profile_id,
     voice_profile_error: svc.voice_profile_error,
@@ -291,4 +308,16 @@ export function profileIsStale(usedSampleIdsNow: string[], idsAtBuild: string[] 
   if (now.size !== then.size) return true;
   for (const id of now) if (!then.has(id)) return true;
   return false;
+}
+
+/**
+ * The "profile out of date" notice: only for a profile the service holds, once the sample list is
+ * known (null while it was not loaded) and changed since the build of this session.
+ */
+export function showStaleProfileNotice(
+  status: VoiceProfileStatus,
+  usedSampleIdsNow: string[] | null,
+  idsAtBuild: string[] | null,
+): boolean {
+  return hasServiceVoiceProfile(status) && usedSampleIdsNow !== null && profileIsStale(usedSampleIdsNow, idsAtBuild);
 }

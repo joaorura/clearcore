@@ -198,7 +198,6 @@ export interface Translations {
     appliedInServiceNote: string;
     statusPending: string;
     storedNotApplied: string;
-    enrolledUnconfirmed: string;
     errorServiceUnavailable: string;
     errorServiceError: string;
     errorServiceRejected: string;

@@ -141,7 +141,7 @@ describe('ProfilePanel', () => {
     expect(m).toContain('voiceProfile.statusActive'); expect(m).toContain('voiceProfile.appliedInServiceNote');
   });
   it('stored but not applied shows the translated service error, never its text', () => {
-    const st: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, is_voice_profile_active: false, voice_profile_error: 'service_unavailable' };
+    const st: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, stored_voice_profile_id: 'p1', is_voice_profile_active: false, voice_profile_error: 'service_unavailable' };
     const m = html(<ProfilePanel {...profileProps({ profileStatus: st })} />);
     expect(m).toContain('voiceProfile.storedNotApplied'); expect(m).toContain('voiceProfile.errorServiceUnavailable');
     expect(m).not.toContain('voiceProfile.appliedInServiceNote');
@@ -150,7 +150,9 @@ describe('ProfilePanel', () => {
   });
   it('build button: generate before enrollment, rebuild after; hidden with no samples; disabled when busy', () => {
     expect(html(<ProfilePanel {...profileProps()} />)).toContain('voiceProfile.activateProfileBtn');
-    expect(html(<ProfilePanel {...profileProps({ profileStatus: { is_enrolled: true, active_samples_count: 2 } })} />)).toContain('voiceProfile.rebuildProfileBtn');
+    expect(html(<ProfilePanel {...profileProps({ profileStatus: { is_enrolled: true, active_samples_count: 2, stored_voice_profile_id: 'p1' } })} />)).toContain('voiceProfile.rebuildProfileBtn');
+    // A local is_enrolled alone (old flow) is no profile: the button still generates one.
+    expect(html(<ProfilePanel {...profileProps({ profileStatus: { is_enrolled: true, active_samples_count: 2 } })} />)).toContain('voiceProfile.activateProfileBtn');
     const none = html(<ProfilePanel {...profileProps({ canBuild: false })} />);
     expect(none).not.toContain('voiceProfile.activateProfileBtn'); expect(none).not.toContain('voiceProfile.rebuildProfileBtn');
     expect(html(<ProfilePanel {...profileProps({ busy: true })} />)).toMatch(/<button[^>]*disabled=""[^>]*>voiceProfile.activateProfileBtn/);
@@ -170,7 +172,8 @@ describe('ProfilePanel', () => {
 describe('profileStatusLabel', () => {
   it('maps the status to its label and activity', () => {
     expect(profileStatusLabel({ is_enrolled: false, active_samples_count: 0 }, t)).toEqual({ text: 'voiceProfile.statusPending', active: false });
-    expect(profileStatusLabel({ is_enrolled: true, active_samples_count: 0 }, t)).toEqual({ text: 'voiceProfile.enrolledUnconfirmed', active: false });
+    expect(profileStatusLabel({ is_enrolled: true, active_samples_count: 0 }, t)).toEqual({ text: 'voiceProfile.statusPending', active: false });
+    expect(profileStatusLabel({ is_enrolled: false, active_samples_count: 0, has_voice_profile: true }, t)).toEqual({ text: 'voiceProfile.storedNotApplied', active: false });
     expect(profileStatusLabel({ is_enrolled: true, active_samples_count: 0, is_voice_profile_active: true }, t)).toEqual({ text: 'voiceProfile.statusActive', active: true });
   });
 });

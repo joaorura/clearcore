@@ -71,5 +71,7 @@ export interface VoiceProfileStatus {
   voice_profile_error?: string | null;
   voice_profile_selected?: boolean;
   active_voice_profile_id?: string | null;
+  /** Service-reported (GetStatus): the service holds a stored profile. */
+  has_voice_profile?: boolean;
 }
 

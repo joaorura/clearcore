@@ -258,7 +258,7 @@ describe('normalizeVoiceProfileStatus edge cases', () => {
     expect(normalizeVoiceProfileStatus(undefined).is_enrolled).toBe(false);
   });
   it('prefers nested profile over flat fields', () => {
-    const s = normalizeVoiceProfileStatus({ is_enrolled: false, active_samples_count: 1, profile: { is_enrolled: true, active_samples_count: 5 } });
+    const s = normalizeVoiceProfileStatus({ stored_voice_profile_id: null, active_samples_count: 1, profile: { stored_voice_profile_id: 'p1', active_samples_count: 5 } });
     expect(s.is_enrolled).toBe(true);
     expect(s.active_samples_count).toBe(5);
   });
@@ -297,8 +297,10 @@ describe('voiceProfileActivationState', () => {
   it('returns stored_not_applied for a stored but inactive profile, never active', () => {
     const s = { ...base, is_voice_profile_active: false, stored_voice_profile_id: 'abc' };
     expect(voiceProfileActivationState(s)).toBe('stored_not_applied');
-    expect(voiceProfileActivationState({ ...base, is_voice_profile_active: false })).toBe('stored_not_applied');
+    expect(voiceProfileActivationState({ ...base, is_voice_profile_active: false, has_voice_profile: true })).toBe('stored_not_applied');
     expect(voiceProfileActivationState({ ...base, is_enrolled: false, stored_voice_profile_id: 'abc' })).toBe('stored_not_applied');
+    // A local is_enrolled without a service profile is not stored (legacy flow).
+    expect(voiceProfileActivationState({ ...base, is_voice_profile_active: false })).toBe('none');
   });
 
   it('does not claim active when the field is absent (older service)', () => {
@@ -340,10 +342,11 @@ describe('voiceProfileStatusLabelKey', () => {
     expect(voiceProfileStatusLabelKey({ ...base, is_enrolled: false })).toBe('none');
   });
 
-  it('never returns active for enrolled without confirmation', () => {
-    expect(voiceProfileStatusLabelKey(base)).toBe('enrolledUnconfirmed');
-    expect(voiceProfileStatusLabelKey({ ...base, stored_voice_profile_id: '' })).toBe('enrolledUnconfirmed');
-    expect(voiceProfileStatusLabelKey({ ...base, stored_voice_profile_id: null })).toBe('enrolledUnconfirmed');
+  it('never returns active without confirmation; a local is_enrolled alone is none', () => {
+    expect(voiceProfileStatusLabelKey({ ...base, stored_voice_profile_id: 'abc' })).toBe('storedNotApplied');
+    expect(voiceProfileStatusLabelKey(base)).toBe('none');
+    expect(voiceProfileStatusLabelKey({ ...base, stored_voice_profile_id: '' })).toBe('none');
+    expect(voiceProfileStatusLabelKey({ ...base, stored_voice_profile_id: null })).toBe('none');
   });
 
   it('is none when not enrolled and explicitly inactive', () => {
@@ -388,7 +391,8 @@ describe('stale service state on set/clear (I1)', () => {
   });
   it('result without service keys never yields active', () => {
     const next = applySetVoiceProfileResult(activeBefore, { ...local, is_enrolled: true, active_samples_count: 2 }, { is_enrolled: true });
-    expect(voiceProfileStatusLabelKey(next)).toBe('enrolledUnconfirmed');
+    expect(voiceProfileStatusLabelKey(next)).toBe('none');
+    expect(next.is_enrolled).toBe(false);
     expect(next.is_voice_profile_active).toBeUndefined();
     expect(next.stored_voice_profile_id).toBeUndefined();
   });
@@ -438,11 +442,11 @@ describe('voiceProfileErrorKey (M5)', () => {
 });
 
 describe('relabel (I2/T7)', () => {
-  it('active is applied-in-service with a note; enrolled uses Cadastrado', () => {
+  it('active is applied-in-service with a note; the local-only "enrolled" label is gone', () => {
     expect(ptBR.voiceProfile.statusActive).toBe('🟢 Aplicado no serviço (desenvolvimento)');
     expect(enUS.voiceProfile.statusActive).toBe('🟢 Applied in service (development)');
     expect(ptBR.voiceProfile.appliedInServiceNote).toBe('O microfone virtual empacotado ainda não usa este perfil.');
     expect(enUS.voiceProfile.appliedInServiceNote).toBe('The packaged virtual microphone does not use this profile yet.');
-    expect(ptBR.voiceProfile.enrolledUnconfirmed).toBe('⚪ Cadastrado, ativação não confirmada');
+    expect('enrolledUnconfirmed' in ptBR.voiceProfile).toBe(false);
   });
 });

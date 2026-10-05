@@ -4,7 +4,6 @@ import { voiceProfileStatusLabelKey, type Translate } from '../hooks/voiceProfil
 const LABEL_PATH = {
   active: 'voiceProfile.statusActive',
   storedNotApplied: 'voiceProfile.storedNotApplied',
-  enrolledUnconfirmed: 'voiceProfile.enrolledUnconfirmed',
   none: 'voiceProfile.statusPending',
 } as const;
 

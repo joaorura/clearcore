@@ -200,7 +200,6 @@ export const enUS: Translations = {
     appliedInServiceNote: 'The packaged virtual microphone does not use this profile yet.',
     statusPending: '🟡 Enrollment Pending',
     storedNotApplied: '🟡 Stored, not applied',
-    enrolledUnconfirmed: '⚪ Enrolled, activation not confirmed',
     errorServiceUnavailable: 'The service is not reachable.',
     errorServiceError: 'The service failed to process the request.',
     errorServiceRejected: 'The service rejected the voice profile.',

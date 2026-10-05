@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from './i18n';
 import type { CallSuggestionTake, InputDeviceInfo } from './types';
 import { errorLabel } from './voice/enrollmentErrors';
-import { buildEnrollmentLabels, profileIsStale, profileSampleIds, samplesUsedInProfile } from './voice/hooks/voiceProfileLogic';
+import { buildEnrollmentLabels, hasServiceVoiceProfile, profileSampleIds, samplesUsedInProfile, showStaleProfileNotice } from './voice/hooks/voiceProfileLogic';
 import { stepAfterSelect } from './voice/hooks/guidedSteps';
 import { DevModelNotice } from './voice/DevModelNotice';
 import { useJobFeedback } from './voice/hooks/useJobFeedback';
@@ -124,7 +124,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       const list = await refreshSamples();
       await refreshCallTakes();
       const initialProfile = await profile.loadInitialStatus(list?.samples.length ?? 0);
-      if (initialProfile.is_enrolled) setCurrentStep(5);
+      if (hasServiceVoiceProfile(initialProfile)) setCurrentStep(5);
     };
     void initVoiceData();
   }, [refreshSamples, refreshCallTakes]);
@@ -211,7 +211,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             busy={jobBusy || isRecording}
             feedback={feedbackFor('profile')}
             onBuildProfile={() => void handleBuildProfile('profile')}
-            stale={profileStatus.is_enrolled && sampleList !== null && profileIsStale(profileSampleIds(samples), profile.idsAtBuild)}
+            stale={showStaleProfileNotice(profileStatus, sampleList ? profileSampleIds(samples) : null, profile.idsAtBuild)}
           />
         );
       default:
@@ -220,7 +220,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             t={t}
             locale={locale}
             labels={labels}
-            isEnrolled={profileStatus.is_enrolled}
+            isEnrolled={hasServiceVoiceProfile(profileStatus)}
             currentStep={currentStep}
             isReadingMode={isReadingMode}
             completedSteps={completedSteps}

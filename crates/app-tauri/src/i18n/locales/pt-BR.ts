@@ -200,7 +200,6 @@ export const ptBR: Translations = {
     appliedInServiceNote: 'O microfone virtual empacotado ainda não usa este perfil.',
     statusPending: '🟡 Cadastro Pendente',
     storedNotApplied: '🟡 Salvo, não aplicado',
-    enrolledUnconfirmed: '⚪ Cadastrado, ativação não confirmada',
     errorServiceUnavailable: 'O serviço não está acessível.',
     errorServiceError: 'O serviço falhou ao processar o pedido.',
     errorServiceRejected: 'O serviço recusou o perfil de voz.',

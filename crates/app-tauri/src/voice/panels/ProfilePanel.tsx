@@ -1,6 +1,6 @@
 import type { VoiceProfileStatus } from '../../types';
 import type { EnrollmentLabels } from '../enrollmentTypes';
-import { voiceProfileErrorKey, type Translate } from '../hooks/voiceProfileLogic';
+import { hasServiceVoiceProfile, voiceProfileErrorKey, type Translate } from '../hooks/voiceProfileLogic';
 import { profileStatusLabel } from './profileStatusLabel';
 import { JobFeedbackBlock, type JobFeedbackView } from './shared';
 
@@ -73,7 +73,7 @@ export function ProfilePanel(p: ProfilePanelProps) {
       {p.canBuild && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
           <button className="action-btn" disabled={p.busy} onClick={p.onBuildProfile} style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
-            {profileStatus.is_enrolled ? t('voiceProfile.rebuildProfileBtn') : t('voiceProfile.activateProfileBtn')}
+            {hasServiceVoiceProfile(profileStatus) ? t('voiceProfile.rebuildProfileBtn') : t('voiceProfile.activateProfileBtn')}
           </button>
         </div>
       )}
