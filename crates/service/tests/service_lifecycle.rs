@@ -180,6 +180,8 @@ fn service_packaging_unit_generators() {
     assert!(systemd.contains("Description=Realtime Noise Suppression User Service"));
     assert!(systemd.contains("/opt/clearcore/realtime-noise-service --run"));
     assert!(systemd.contains("WantedBy=default.target"));
+    // No core dumps: the daemon holds raw voice audio and biometric profiles in memory.
+    assert!(systemd.contains("\nLimitCORE=0\n"));
 
     let launchd = generate_launchd_plist(dummy_bin);
     assert!(launchd.contains("<string>com.clearcore.realtime-noise</string>"));

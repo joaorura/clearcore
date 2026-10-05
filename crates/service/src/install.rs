@@ -25,6 +25,7 @@ Restart=on-failure
 RestartSec=2s
 LimitRTPRIO=95
 LimitMEMLOCK=infinity
+LimitCORE=0
 
 [Install]
 WantedBy=default.target

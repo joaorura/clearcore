@@ -34,7 +34,8 @@ use realtime_noise_ipc::enrollment_codes::{
     ENROLL_FAILED, ENROLL_PAYLOAD_TOO_LARGE, MAX_REQUEST_LINE_BYTES,
 };
 use realtime_noise_ipc::line_limit::{LineRead, is_invalid_utf8, read_line_limited};
-use realtime_noise_ipc::{IpcCommand, IpcResponse, IpcServer, IpcStatus};
+use realtime_noise_ipc::protocol::truncate_request_id;
+use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus, handle_request};
 use realtime_noise_model::{ProfileStore, VoiceProfile};
 use realtime_noise_supervisor::{
     BackendResolutionInfo, EngineSupervisor, convert_dsp_preset_to_ipc, convert_engine_mode_to_ipc,
@@ -337,8 +338,23 @@ impl ServiceDaemon {
                         continue;
                     }
                     self.drain_enrollment_jobs();
-                    let resp = IpcServer::new()
-                        .handle_line(trimmed, |cmd, _payload| self.handle_command(cmd));
+                    // Same contract as `IpcServer::handle_line` (fixed parse error, version
+                    // check, truncated request id), but the parsed request stays here so its
+                    // audio can be wiped after the handler.
+                    let resp = match IpcRequest::from_json(trimmed) {
+                        Ok(mut request) => {
+                            let mut resp =
+                                handle_request(&request, |cmd, _payload| self.handle_command(cmd));
+                            wipe_request_audio(&mut request);
+                            resp.request_id = truncate_request_id(&resp.request_id);
+                            resp.to_json().unwrap_or_else(|_| "{}".to_owned())
+                        }
+                        Err(_) => fixed_error_json(
+                            IpcStatus::InvalidCommand,
+                            "JSON_PARSE_ERROR",
+                            "malformed request",
+                        ),
+                    };
                     // The line may carry raw PCM (base64): wipe it before the next read.
                     wipe_string(&mut line);
                     resp
@@ -627,6 +643,20 @@ fn fixed_error_json(status: IpcStatus, code: &str, message: &str) -> String {
         .unwrap_or_else(|_| "{}".to_owned())
 }
 
+/// Zeroes the audio-carrying fields of a parsed request (`AddVoiceSample` base64 PCM and the
+/// `AddIntakeSuggestion` take JSON) once the handler is done.
+///
+/// Best effort, honestly bounded: copies this code does not own cannot be wiped — buffers that
+/// `read_line_limited` dropped while growing or discarding a line, and any intermediate buffers
+/// serde allocates while unescaping strings. The decoded PCM itself is zeroed by the handlers.
+fn wipe_request_audio(request: &mut IpcRequest) {
+    match &mut request.command {
+        IpcCommand::AddVoiceSample { pcm_f32_le_b64, .. } => wipe_string(pcm_f32_le_b64),
+        IpcCommand::AddIntakeSuggestion { take_json } => wipe_string(take_json),
+        _ => {}
+    }
+}
+
 /// Overwrites the string's bytes with zeros and leaves it empty.
 fn wipe_string(text: &mut String) {
     let mut bytes = std::mem::take(text).into_bytes();
@@ -791,5 +821,42 @@ fn reapply_stored_profile(
             *error = Some(MISSING_MESSAGE.to_owned());
         }
         Err(_) => *error = Some(LOAD_FAILED_MESSAGE.to_owned()),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_fields_of_a_parsed_request_are_wiped() {
+        let mut add = IpcRequest::new(
+            IpcCommand::AddVoiceSample {
+                name: "n".into(),
+                pcm_f32_le_b64: "AAAAAAAA".into(),
+                sample_rate: 48_000,
+                device_label: "Mic".into(),
+                device_id_hash: "h".into(),
+            },
+            json!({}),
+        );
+        wipe_request_audio(&mut add);
+        let IpcCommand::AddVoiceSample { pcm_f32_le_b64, .. } = &add.command else {
+            panic!("variant changed");
+        };
+        assert!(pcm_f32_le_b64.is_empty());
+
+        let mut take = IpcRequest::new(
+            IpcCommand::AddIntakeSuggestion {
+                take_json: "{\"pcm_f32_le_b64\":\"AAAA\"}".into(),
+            },
+            json!({}),
+        );
+        wipe_request_audio(&mut take);
+        let IpcCommand::AddIntakeSuggestion { take_json } = &take.command else {
+            panic!("variant changed");
+        };
+        assert!(take_json.is_empty());
     }
 }
