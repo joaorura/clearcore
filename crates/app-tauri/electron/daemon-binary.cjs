@@ -70,4 +70,9 @@ function shouldReplaceExistingDaemon({ env = {}, spawnedByApp, responsive }) {
   return env.CLEARCORE_DEV_OWN_DAEMON === '1' && Boolean(responsive) && !spawnedByApp;
 }
 
-module.exports = { daemonBinaryCandidates, pickDaemonBinary, shouldReplaceExistingDaemon };
+/** Modo dev: apenas quando o processo recebe --dev. */
+function isDevModeArgv(argv) {
+  return Array.isArray(argv) && argv.includes('--dev');
+}
+
+module.exports = { isDevModeArgv, daemonBinaryCandidates, pickDaemonBinary, shouldReplaceExistingDaemon };

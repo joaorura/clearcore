@@ -135,12 +135,13 @@ function sendIpcRequest(command, payload = {}, timeoutMs = 3000) {
   });
 }
 
-const { pickDaemonBinary, shouldReplaceExistingDaemon } = require('./daemon-binary.cjs');
+const { pickDaemonBinary, shouldReplaceExistingDaemon, isDevModeArgv } = require('./daemon-binary.cjs');
 
 // Sidecar Daemon Discovery & Supervision
 function findDaemonBinaryPath() {
   const binName = process.platform === 'win32' ? 'realtime-noise-service.exe' : 'realtime-noise-service';
-  const isDev = process.argv.includes('--dev') || !app.isPackaged;
+  // Dev = somente quando iniciado com --dev (dev-runner); start-all.sh roda sem --dev.
+  const isDev = isDevModeArgv(process.argv);
   const { path: found, reason } = pickDaemonBinary({
     binName,
     env: process.env,
@@ -189,6 +190,8 @@ async function ensureDaemonRunning() {
       console.error('[Clearcore Daemon] daemon anterior não encerrou; reaproveitando.');
       return true;
     }
+    // Pausa para o daemon antigo terminar o remove_file do socket ao sair.
+    await new Promise((r) => setTimeout(r, 400));
     console.log('[Clearcore Daemon] Daemon anterior encerrado.');
   } else if (alreadyResponsive) {
     console.log('[Clearcore Daemon] Serviço já está em execução e comunicando via IPC.');

@@ -20,8 +20,14 @@ export CLEARCORE_DAEMON_BIN="${SCRIPT_DIR}/target/debug/realtime-noise-service"
 export CLEARCORE_DEV_OWN_DAEMON=1
 
 # Rede de segurança (crash do Electron): encerra só o daemon deste worktree.
+# O padrão é regex ancorado, com o caminho escapado.
+# Limitação: o npm roda em primeiro plano (sem exec, para o trap rodar; em
+# background o Ctrl+C deixaria de funcionar). Para encerrar: Ctrl+C no
+# terminal; `kill` só no PID do bash não propaga ao npm — use `kill -- -<PGID>`.
 cleanup_daemon() {
-    pkill -f "${SCRIPT_DIR}/target/debug/realtime-noise-service --run" || true
+    local escaped
+    escaped="$(printf '%s' "${SCRIPT_DIR}" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
+    pkill -f -- "^${escaped}/target/debug/realtime-noise-service --run" || true
 }
 trap cleanup_daemon EXIT INT TERM
 

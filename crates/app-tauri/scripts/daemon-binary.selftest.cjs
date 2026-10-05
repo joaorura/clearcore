@@ -6,6 +6,7 @@ const {
   daemonBinaryCandidates,
   pickDaemonBinary,
   shouldReplaceExistingDaemon,
+  isDevModeArgv,
 } = require('../electron/daemon-binary.cjs');
 
 const base = {
@@ -84,5 +85,8 @@ assert.strictEqual(shouldReplaceExistingDaemon({ env: own, spawnedByApp: true, r
 assert.strictEqual(shouldReplaceExistingDaemon({ env: own, spawnedByApp: false, responsive: false }), false);
 assert.strictEqual(shouldReplaceExistingDaemon({ env: {}, spawnedByApp: false, responsive: true }), false);
 assert.strictEqual(shouldReplaceExistingDaemon({ env: { CLEARCORE_DEV_OWN_DAEMON: '0' }, spawnedByApp: false, responsive: true }), false);
+
+assert.strictEqual(isDevModeArgv(['electron', 'electron/main.cjs', '--dev']), true);
+assert.strictEqual(isDevModeArgv(['electron', 'electron/main.cjs']), false);
 
 console.log('daemon-binary selftest OK');
