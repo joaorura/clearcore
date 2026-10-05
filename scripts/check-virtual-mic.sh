@@ -320,6 +320,44 @@ recreate_node() {
     return 1
 }
 
+stop_node() {
+    # 1. Encerrar instâncias do helper e loopback primeiro
+    systemctl --user stop realtime-noise-helper.service >/dev/null 2>&1 || true
+    systemctl --user reset-failed realtime-noise-helper.service >/dev/null 2>&1 || true
+    pkill -TERM -f "pipewire_helper" >/dev/null 2>&1 || true
+    pkill -TERM -f "pw-loopback.*realtime-noise" >/dev/null 2>&1 || true
+    sleep 0.1
+
+    # 2. Destruir nós do PipeWire (source, capture, sink e qualquer nó realtime-noise)
+    if command -v pw-cli >/dev/null 2>&1; then
+        local node_ids
+        node_ids=$(pw-cli list-objects Node 2>/dev/null | awk -v name="\"${NODE_NAME}\"" -v cap="\"realtime-noise-capture\"" -v prefix="realtime-noise" '
+            $1 == "id" { cur_id = $2; sub(/,/, "", cur_id) }
+            $0 ~ "node.name = " name || $0 ~ "node.name = " cap || $0 ~ prefix { if (cur_id != "") print cur_id }
+        ')
+        for nid in ${node_ids}; do
+            pw-cli destroy "${nid}" >/dev/null 2>&1 || true
+        done
+    fi
+
+    # 3. Forçar encerramento caso ainda persista
+    pkill -KILL -f "pipewire_helper" >/dev/null 2>&1 || true
+
+    # 4. Limpar travas de execução
+    local lock_file="${XDG_RUNTIME_DIR:-/tmp}/hippocamp_pipewire_helper.lock"
+    rm -f "${lock_file}" 2>/dev/null || true
+    rm -f "/tmp/hippocamp_pipewire_helper.lock" 2>/dev/null || true
+
+    # 5. Aguardar até confirmação de saída do grafo
+    for _ in {1..8}; do
+        if ! is_node_present; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 0
+}
+
 # Processamento de argumentos
 ACTION="verify_or_create"
 OUTPUT_JSON=false
@@ -338,6 +376,10 @@ while [[ $# -gt 0 ]]; do
             ACTION="recreate"
             shift
             ;;
+        --stop|--destroy)
+            ACTION="stop"
+            shift
+            ;;
         --set-default)
             ACTION="set_default"
             shift
@@ -351,6 +393,16 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "${ACTION}" == "stop" ]]; then
+    stop_node
+    if [[ "${OUTPUT_JSON}" == "true" ]]; then
+        print_json_status
+    else
+        echo "[OK] Microfone virtual desativado e removido do sistema operacional."
+    fi
+    exit 0
+fi
 
 if [[ "${ACTION}" == "check_only" ]]; then
     if is_node_present; then

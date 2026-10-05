@@ -33,6 +33,10 @@ export const App: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
 
+  const [isServiceRunning, setIsServiceRunning] = useState<boolean>(true);
+  const [isStartingStopping, setIsStartingStopping] = useState<boolean>(false);
+  const [startActivatedConfig, setStartActivatedConfig] = useState<boolean>(true);
+
   const [inputDevices, setInputDevices] = useState<InputDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [isLoadingDevices, setIsLoadingDevices] = useState<boolean>(false);
@@ -164,12 +168,76 @@ export const App: React.FC = () => {
     }
   };
 
+  const fetchServiceState = async () => {
+    try {
+      const res = await invokeBridge<{ isRunning: boolean }>('get_service_running_state');
+      if (res && typeof res.isRunning === 'boolean') {
+        setIsServiceRunning(res.isRunning);
+      }
+    } catch {
+      // Fallback
+    }
+  };
+
+  const fetchStartActivatedConfig = async () => {
+    try {
+      const enabled = await invokeBridge<boolean>('get_start_activated_config');
+      if (typeof enabled === 'boolean') {
+        setStartActivatedConfig(enabled);
+      }
+    } catch {
+      // Fallback
+    }
+  };
+
+  const handleToggleAudioService = async () => {
+    setIsStartingStopping(true);
+    try {
+      if (isServiceRunning) {
+        setMicActionMessage(t('serviceControl.stopping'));
+        const res = await invokeBridge<{ success: boolean; isRunning: boolean; virtualMic: VirtualMicStatus }>('stop_audio_service');
+        setIsServiceRunning(false);
+        if (res && res.virtualMic) {
+          setVirtualMic(res.virtualMic);
+        }
+        setMicActionMessage(t('serviceControl.stopSuccess'));
+      } else {
+        setMicActionMessage(t('serviceControl.starting'));
+        const res = await invokeBridge<{ success: boolean; isRunning: boolean; virtualMic: VirtualMicStatus }>('start_audio_service');
+        setIsServiceRunning(true);
+        if (res && res.virtualMic) {
+          setVirtualMic(res.virtualMic);
+        }
+        setMicActionMessage(t('serviceControl.startSuccess'));
+      }
+      await fetchStatus();
+      await fetchVirtualMic();
+    } catch (err) {
+      setErrorMessage(String(err));
+    } finally {
+      setIsStartingStopping(false);
+      setTimeout(() => setMicActionMessage(null), 4000);
+    }
+  };
+
+  const handleToggleStartActivated = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const nextVal = e.target.checked;
+    setStartActivatedConfig(nextVal);
+    try {
+      await invokeBridge('set_start_activated_config', { enabled: nextVal });
+    } catch (err) {
+      setErrorMessage(String(err));
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchVirtualMic();
     fetchDiagnostics();
     fetchAutostart();
     fetchInputDevices();
+    fetchServiceState();
+    fetchStartActivatedConfig();
 
     // Listen to real-time status push from electron tray if available
     let cleanupTrayListener: (() => void) | undefined;
@@ -178,6 +246,20 @@ export const App: React.FC = () => {
         if (data.mode) {
           setMode(data.mode);
         }
+      });
+    }
+
+    let cleanupServiceListener: (() => void) | undefined;
+    if (window.clearcoreApi?.onServiceStateUpdate) {
+      cleanupServiceListener = window.clearcoreApi.onServiceStateUpdate((data) => {
+        setIsServiceRunning(Boolean(data.isRunning));
+      });
+    }
+
+    let cleanupStartActivatedListener: (() => void) | undefined;
+    if (window.clearcoreApi?.onStartActivatedConfigUpdate) {
+      cleanupStartActivatedListener = window.clearcoreApi.onStartActivatedConfigUpdate((enabled) => {
+        setStartActivatedConfig(Boolean(enabled));
       });
     }
 
@@ -210,11 +292,14 @@ export const App: React.FC = () => {
     const interval = setInterval(() => {
       fetchStatus();
       fetchVirtualMic();
+      fetchServiceState();
     }, 2500);
 
     return () => {
       clearInterval(interval);
       if (cleanupTrayListener) cleanupTrayListener();
+      if (cleanupServiceListener) cleanupServiceListener();
+      if (cleanupStartActivatedListener) cleanupStartActivatedListener();
       if (cleanupMicListener) cleanupMicListener();
       if (cleanupDevicesListener) cleanupDevicesListener();
       if (cleanupAutostartListener) cleanupAutostartListener();
@@ -350,6 +435,69 @@ export const App: React.FC = () => {
           {micActionMessage}
         </div>
       )}
+
+      {/* Master Service Control (Iniciar / Parar) */}
+      <div
+        className="card"
+        style={{
+          borderLeft: isServiceRunning ? '4px solid #22c55e' : '4px solid #f59e0b',
+          background: isServiceRunning
+            ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, var(--bg-card) 60%)'
+            : 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, var(--bg-card) 60%)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h2 className="card-title" style={{ margin: 0 }}>
+                {t('serviceControl.title')}
+              </h2>
+              <span
+                style={{
+                  fontSize: '0.8rem',
+                  padding: '3px 10px',
+                  borderRadius: 12,
+                  fontWeight: 600,
+                  backgroundColor: isServiceRunning ? '#14532d' : '#451a03',
+                  color: isServiceRunning ? '#4ade80' : '#fbbf24',
+                  border: isServiceRunning ? '1px solid #16a34a' : '1px solid #d97706',
+                }}
+              >
+                {isServiceRunning ? t('serviceControl.statusRunning') : t('serviceControl.statusStopped')}
+              </span>
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>
+              {isServiceRunning
+                ? 'O microfone virtual ClearCore está registrado no sistema e transmitindo áudio suprimido.'
+                : 'O microfone virtual ClearCore está desativado do sistema operacional e não consome recursos de áudio.'}
+            </div>
+          </div>
+
+          <button
+            className="action-btn"
+            disabled={isStartingStopping}
+            onClick={handleToggleAudioService}
+            style={{
+              padding: '10px 22px',
+              fontSize: '0.95rem',
+              fontWeight: 600,
+              borderRadius: 6,
+              cursor: isStartingStopping ? 'not-allowed' : 'pointer',
+              backgroundColor: isServiceRunning ? '#991b1b' : '#16a34a',
+              borderColor: isServiceRunning ? '#dc2626' : '#22c55e',
+              color: '#ffffff',
+              boxShadow: isServiceRunning
+                ? '0 2px 8px rgba(220, 38, 38, 0.3)'
+                : '0 2px 8px rgba(34, 197, 94, 0.3)',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {isStartingStopping
+              ? (isServiceRunning ? t('serviceControl.stopping') : t('serviceControl.starting'))
+              : (isServiceRunning ? t('serviceControl.stopBtn') : t('serviceControl.startBtn'))}
+          </button>
+        </div>
+      </div>
 
       {/* Modo de Operação */}
       <div className="card">
@@ -562,26 +710,50 @@ export const App: React.FC = () => {
       {/* Inicialização e Bandeja */}
       <div className="card">
         <h2 className="card-title">{t('autostart.title')}</h2>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-secondary)', padding: '12px 16px', borderRadius: 6, border: '1px solid var(--border-color)' }}>
-          <div>
-            <div style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.95rem' }}>
-              {t('autostart.itemTitle')}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-secondary)', padding: '12px 16px', borderRadius: 6, border: '1px solid var(--border-color)' }}>
+            <div>
+              <div style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.95rem' }}>
+                {t('autostart.itemTitle')}
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
+                {t('autostart.itemDesc', { platform: platformTitle })}
+              </div>
             </div>
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
-              {t('autostart.itemDesc', { platform: platformTitle })}
-            </div>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={autostartEnabled}
+                onChange={handleToggleAutostart}
+                style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#22c55e' }}
+              />
+              <span style={{ fontSize: '0.9rem', color: autostartEnabled ? '#4ade80' : 'var(--text-muted)' }}>
+                {autostartEnabled ? t('autostart.enabled') : t('autostart.disabled')}
+              </span>
+            </label>
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={autostartEnabled}
-              onChange={handleToggleAutostart}
-              style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#22c55e' }}
-            />
-            <span style={{ fontSize: '0.9rem', color: autostartEnabled ? '#4ade80' : 'var(--text-muted)' }}>
-              {autostartEnabled ? t('autostart.enabled') : t('autostart.disabled')}
-            </span>
-          </label>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-secondary)', padding: '12px 16px', borderRadius: 6, border: '1px solid var(--border-color)' }}>
+            <div>
+              <div style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.95rem' }}>
+                {t('autostart.startActivatedTitle')}
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
+                {t('autostart.startActivatedDesc')}
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={startActivatedConfig}
+                onChange={handleToggleStartActivated}
+                style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#22c55e' }}
+              />
+              <span style={{ fontSize: '0.9rem', color: startActivatedConfig ? '#4ade80' : 'var(--text-muted)' }}>
+                {startActivatedConfig ? t('autostart.enabled') : t('autostart.disabled')}
+              </span>
+            </label>
+          </div>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 10 }}>
           {t('autostart.tip')}

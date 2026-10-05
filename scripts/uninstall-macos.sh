@@ -51,13 +51,22 @@ SYS_HAL_DIR="/Library/Audio/Plug-Ins/HAL"
 if [[ -d "${USER_HAL_DIR}/${DRIVER_NAME}" ]]; then
     rm -rf "${USER_HAL_DIR}/${DRIVER_NAME}"
 fi
+if [[ -e "${USER_HAL_DIR}/${DRIVER_NAME}.disabled" ]]; then
+    rm -rf "${USER_HAL_DIR}/${DRIVER_NAME}.disabled"
+fi
 
 if [[ -d "${SYS_HAL_DIR}/${DRIVER_NAME}" ]]; then
     sudo rm -rf "${SYS_HAL_DIR}/${DRIVER_NAME}" 2>/dev/null || rm -rf "${SYS_HAL_DIR}/${DRIVER_NAME}" 2>/dev/null || true
 fi
+if [[ -e "${SYS_HAL_DIR}/${DRIVER_NAME}.disabled" ]]; then
+    sudo rm -rf "${SYS_HAL_DIR}/${DRIVER_NAME}.disabled" 2>/dev/null || rm -rf "${SYS_HAL_DIR}/${DRIVER_NAME}.disabled" 2>/dev/null || true
+fi
 
 # 4. Reiniciar daemon do CoreAudio para descarregar o driver sem reiniciar o Mac
 echo "🔄 Reiniciando coreaudiod para atualizar dispositivos de áudio..."
+if command -v launchctl >/dev/null 2>&1; then
+    sudo launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || true
+fi
 sudo killall coreaudiod >/dev/null 2>&1 || killall coreaudiod >/dev/null 2>&1 || true
 
 # 5. Remover aplicação

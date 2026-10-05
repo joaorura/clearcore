@@ -43,34 +43,84 @@ Write-Host "Removendo inicializacao automatica..." -ForegroundColor Yellow
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Clearcore" -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Clearcore" -ErrorAction SilentlyContinue
 
-# 5. Desinstalar driver WaveRT via pnputil
-Write-Host "Desinstalando driver de audio virtual WaveRT..." -ForegroundColor Yellow
+# 5. Desinstalar driver de audio virtual WaveRT do DriverStore e do PnP
+Write-Host "Desinstalando driver de audio virtual WaveRT do DriverStore..." -ForegroundColor Yellow
+
+# Parar servico de driver de kernel se ativo
+$driverSvc = Get-Service -Name "RealtimeNoise" -ErrorAction SilentlyContinue
+if ($driverSvc) {
+    Write-Host "Interrompendo servico de driver de kernel RealtimeNoise..." -ForegroundColor Gray
+    Stop-Service -Name "RealtimeNoise" -Force -ErrorAction SilentlyContinue
+    & sc.exe delete "RealtimeNoise" 2>$null | Out-Null
+}
+
 if ($isAdmin) {
-    # Procurar o driver publicado correspondente ao RealtimeNoise
-    $drivers = pnputil.exe /enum-drivers
-    $oemName = ""
-    for ($i = 0; $i -lt $drivers.Count; $i++) {
-        if ($drivers[$i] -match "RealtimeNoise\.inf") {
-            if ($i -gt 0 -and $drivers[$i-1] -match "oem\d+\.inf") {
-                $oemName = $matches[0]
-            } elseif ($i -gt 1 -and $drivers[$i-2] -match "oem\d+\.inf") {
-                $oemName = $matches[0]
+    # 5.1 Encontrar todos os pacotes OEM publicados correspondentes a RealtimeNoise
+    $enumDrivers = & pnputil.exe /enum-drivers 2>&1
+    $driverBlocks = ($enumDrivers -join "`n") -split "(?m)(?=Published Name|Published name|Nome publicado|Nome do OEM)"
+    $oemList = @()
+    foreach ($block in $driverBlocks) {
+        if ($block -match "RealtimeNoise" -or $block -match "ClearCore") {
+            if ($block -match "(oem\d+\.inf)") {
+                $oemList += $matches[1]
             }
         }
     }
-    if ($oemName) {
-        Write-Host "Removendo driver publicado: $oemName..." -ForegroundColor Gray
-        pnputil.exe /delete-driver $oemName /uninstall /force | Out-Null
+    # Fallback caso a saida nao seja em blocos esperados
+    if ($oemList.Count -eq 0) {
+        for ($i = 0; $i -lt $enumDrivers.Count; $i++) {
+            if ($enumDrivers[$i] -match "RealtimeNoise" -or $enumDrivers[$i] -match "ClearCore") {
+                for ($j = [Math]::Max(0, $i - 4); $j -le [Math]::Min($enumDrivers.Count - 1, $i + 4); $j++) {
+                    if ($enumDrivers[$j] -match "(oem\d+\.inf)") {
+                        $oemList += $matches[1]
+                    }
+                }
+            }
+        }
     }
-    pnputil.exe /delete-driver "RealtimeNoise.inf" /uninstall /force 2>$null | Out-Null
+    $oemList = $oemList | Select-Object -Unique
+    foreach ($oem in $oemList) {
+        Write-Host "Removendo driver publicado do DriverStore: $oem..." -ForegroundColor Gray
+        & pnputil.exe /delete-driver $oem /uninstall /force | Out-Null
+    }
+    & pnputil.exe /delete-driver "RealtimeNoise.inf" /uninstall /force 2>$null | Out-Null
+
+    # Candidatos locais do INF
+    $candidateInfs = @(
+        "$env:ProgramFiles\Clearcore\resources\driver\RealtimeNoise.inf",
+        "$env:LOCALAPPDATA\Programs\Clearcore\resources\driver\RealtimeNoise.inf"
+    )
+    foreach ($cInf in $candidateInfs) {
+        if (Test-Path $cInf) {
+            & pnputil.exe /delete-driver "$cInf" /uninstall /force 2>$null | Out-Null
+        }
+    }
 }
 
-# Desativar dispositivos virtuais órfãos no PnP
-Get-PnpDevice | Where-Object { 
+# 5.2 Remover dispositivos virtuais do Gerenciador de Dispositivos (PnP)
+Write-Host "Removendo dispositivos virtuais do PnP..." -ForegroundColor Yellow
+$pnpDevices = Get-PnpDevice | Where-Object { 
     $_.InstanceId -like "*RealtimeNoise*" -or 
-    $_.FriendlyName -like "*Realtime Noise*" 
-} | ForEach-Object {
-    Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue
+    $_.FriendlyName -like "*Realtime Noise*" -or
+    $_.FriendlyName -like "*ClearCore*" -or
+    $_.FriendlyName -like "*Clearcore*"
+}
+foreach ($dev in $pnpDevices) {
+    $devId = $dev.InstanceId
+    Write-Host "Removendo dispositivo virtual PnP: $devId..." -ForegroundColor Gray
+    # 1. Tentar pnputil /remove-device (Windows 10/11)
+    & pnputil.exe /remove-device "$devId" 2>$null | Out-Null
+    # 2. Tentar devcon se disponivel
+    if (Get-Command devcon.exe -ErrorAction SilentlyContinue) {
+        & devcon.exe remove "@$devId" 2>$null | Out-Null
+    }
+    # 3. Desativar como contingencia se remocao falhar
+    Disable-PnpDevice -InstanceId $devId -Confirm:$false -ErrorAction SilentlyContinue
+}
+
+# Remover hardware ID raiz via devcon se disponivel
+if (Get-Command devcon.exe -ErrorAction SilentlyContinue) {
+    & devcon.exe remove "Root\RealtimeNoise" 2>$null | Out-Null
 }
 
 # 6. Remover atalhos do Menu Iniciar e Desktop

@@ -21,7 +21,8 @@ param(
     [switch]$Json,
     [switch]$Recreate,
     [switch]$SetDefault,
-    [switch]$Status
+    [switch]$Status,
+    [switch]$Stop
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -121,6 +122,20 @@ function Set-DefaultMic {
 
 function Install-VirtualDriver {
     Write-Host "[Windows] Verificando driver WaveRT do microfone virtual..."
+    # 0. Reativa se o dispositivo ja estiver registrado no PnP mas desabilitado
+    Get-PnpDevice | Where-Object { 
+        $_.InstanceId -like "*RealtimeNoise*" -or 
+        $_.FriendlyName -like "*Realtime Noise*" -or
+        $_.FriendlyName -like "*ClearCore*" -or
+        $_.FriendlyName -like "*Clearcore*"
+    } | ForEach-Object {
+        Enable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    Start-Service -Name "RealtimeNoise" -ErrorAction SilentlyContinue
+    if (Test-VirtualDevicePresent) {
+        return $true
+    }
+
     if (Test-Path $InfPath) {
         $driverDir = Split-Path -Parent $InfPath
         $sysFile = Join-Path $driverDir "RealtimeNoise.sys"
@@ -187,7 +202,47 @@ function Output-JsonStatus {
     $obj | ConvertTo-Json -Compress
 }
 
+function Stop-VirtualDriver {
+    # 1. Parar servico de audio em tempo real se existente
+    Stop-Service -Name "RealtimeNoise" -ErrorAction SilentlyContinue
+    # 2. Desativar o dispositivo PnP virtual para que o Windows não o liste como microfone ativo
+    Get-PnpDevice | Where-Object { 
+        $_.InstanceId -like "*RealtimeNoise*" -or 
+        $_.FriendlyName -like "*Realtime Noise*" -or
+        $_.FriendlyName -like "*ClearCore*" -or
+        $_.FriendlyName -like "*Clearcore*"
+    } | ForEach-Object {
+        Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    return $true
+}
+
 # Despacho de comandos
+if ($Stop) {
+    Stop-VirtualDriver | Out-Null
+    if ($Json) {
+        $obj = [PSCustomObject]@{
+            platform         = "windows"
+            platform_label   = "Windows (PortCls / WaveRT Driver)"
+            present          = $false
+            node_id          = $null
+            node_name        = $DeviceName
+            node_description = $DeviceDesc
+            driver_status    = "Stopped"
+            is_default       = $false
+            format           = "F32LE / PCM16"
+            rate             = 48000
+            channels         = 1
+            quantum          = 480
+            install_inf      = $InfPath
+        }
+        $obj | ConvertTo-Json -Compress
+    } else {
+        Write-Host "[OK] Microfone virtual desativado no Windows."
+    }
+    exit 0
+}
+
 if ($CheckOnly) {
     if (Test-VirtualDevicePresent) {
         if ($Json) { Output-JsonStatus }

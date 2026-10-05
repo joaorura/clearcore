@@ -17,8 +17,23 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
   setInputDevice: (deviceId) => ipcRenderer.invoke('set_input_device', deviceId),
   getHardwareBackends: () => ipcRenderer.invoke('get_hardware_backends'),
   setHardwareBackend: (backendId) => ipcRenderer.invoke('set_hardware_backend', backendId),
+  startAudioService: () => ipcRenderer.invoke('start_audio_service'),
+  stopAudioService: () => ipcRenderer.invoke('stop_audio_service'),
+  getServiceRunningState: () => ipcRenderer.invoke('get_service_running_state'),
+  getStartActivatedConfig: () => ipcRenderer.invoke('get_start_activated_config'),
+  setStartActivatedConfig: (enabled) => ipcRenderer.invoke('set_start_activated_config', enabled),
   getStudioPreset: () => ipcRenderer.invoke('get_studio_preset'),
   setStudioPreset: (preset) => ipcRenderer.invoke('set_studio_preset', preset),
+  onServiceStateUpdate: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('service-state-update', handler);
+    return () => ipcRenderer.removeListener('service-state-update', handler);
+  },
+  onStartActivatedConfigUpdate: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('start-activated-config-update', handler);
+    return () => ipcRenderer.removeListener('start-activated-config-update', handler);
+  },
   onStatusUpdate: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('status-update', handler);

@@ -320,6 +320,11 @@ StartupWMClass=clearcore
   const uninstallSh = `#!/usr/bin/env bash
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "\${SCRIPT_DIR}/resources/scripts/uninstall-linux.sh" ]]; then
+    exec "\${SCRIPT_DIR}/resources/scripts/uninstall-linux.sh" "$@"
+fi
+
 echo "=== Clearcore Uninstaller ==="
 
 # 1. Stop all running processes
@@ -344,15 +349,17 @@ fi
 rm -f "\${HOME}/.config/autostart/clearcore.desktop" 2>/dev/null || true
 rm -f "\${HOME}/.config/autostart/realtime-noise.desktop" 2>/dev/null || true
 
-# 4. Remove PipeWire node
+# 4. Remove PipeWire nodes (source, capture, sink)
 if command -v pw-cli >/dev/null 2>&1; then
-    NODE_ID=$(pw-cli list-objects Node 2>/dev/null | awk -v name="\\"realtime-noise-source\\"" '
-        $1 == "id" { id = $2; sub(/,/, "", id) }
-        $0 ~ "node.name = " name { print id; exit }
-    ')
-    if [[ -n "\${NODE_ID}" ]]; then
-        pw-cli destroy "\${NODE_ID}" >/dev/null 2>&1 || true
-    fi
+    NODE_IDS=$(pw-cli list-objects Node 2>/dev/null | awk '
+        $1 == "id" { cur_id = $2; sub(/,/, "", cur_id) }
+        $0 ~ "node.name = \\"realtime-noise" || $0 ~ "node.description = \\\".*Realtime Noise" {
+            if (cur_id != "") { print cur_id }
+        }
+    ' | sort -u)
+    for nid in \${NODE_IDS}; do
+        pw-cli destroy "\${nid}" >/dev/null 2>&1 || true
+    done
 fi
 
 # 5. Clean runtime locks, sockets, and shared memory
@@ -360,8 +367,18 @@ RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/tmp}"
 rm -f "\${RUNTIME_DIR}/clearcore_state" 2>/dev/null || true
 rm -f "\${RUNTIME_DIR}/hippocamp_pipewire_helper.lock" 2>/dev/null || true
 rm -f "\${RUNTIME_DIR}/realtime-noise.sock" 2>/dev/null || true
+rm -f /tmp/hippocamp_pipewire_helper*.lock 2>/dev/null || true
+rm -f /tmp/clearcore*.lock 2>/dev/null || true
+rm -f /tmp/clearcore_state* 2>/dev/null || true
+rm -f /tmp/realtime-noise*.sock 2>/dev/null || true
+rm -f /run/user/*/hippocamp_pipewire_helper*.lock 2>/dev/null || true
+rm -f /run/user/*/clearcore_state* 2>/dev/null || true
+rm -f /run/user/*/realtime-noise*.sock 2>/dev/null || true
 rm -f /tmp/realtime-noise-helper.log 2>/dev/null || true
 rm -f /tmp/realtime-noise-service.log 2>/dev/null || true
+rm -f /tmp/clearcore-*.log 2>/dev/null || true
+rm -rf "\${HOME}/.local/state/clearcore" 2>/dev/null || true
+rm -rf "\${HOME}/.config/clearcore" 2>/dev/null || true
 
 # 6. Remove installed files
 if [[ $EUID -eq 0 ]]; then
@@ -488,7 +505,13 @@ fi
 
 DRIVER_NAME="RealtimeNoiseHAL.driver"
 rm -rf "\${HOME}/Library/Audio/Plug-Ins/HAL/\${DRIVER_NAME}" 2>/dev/null || true
+rm -rf "\${HOME}/Library/Audio/Plug-Ins/HAL/\${DRIVER_NAME}.disabled" 2>/dev/null || true
 sudo rm -rf "/Library/Audio/Plug-Ins/HAL/\${DRIVER_NAME}" 2>/dev/null || true
+sudo rm -rf "/Library/Audio/Plug-Ins/HAL/\${DRIVER_NAME}.disabled" 2>/dev/null || true
+
+if command -v launchctl >/dev/null 2>&1; then
+    sudo launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || true
+fi
 killall coreaudiod >/dev/null 2>&1 || sudo killall coreaudiod >/dev/null 2>&1 || true
 
 rm -rf "/Applications/Clearcore.app" 2>/dev/null || sudo rm -rf "/Applications/Clearcore.app" 2>/dev/null || true

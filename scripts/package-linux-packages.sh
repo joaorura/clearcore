@@ -125,6 +125,31 @@ fi
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database /usr/share/applications 2>/dev/null || true
 
+%preun
+if [ "$1" -eq 0 ]; then
+    # Complete uninstallation of Clearcore package
+    pkill -x "clearcore" >/dev/null 2>&1 || true
+    pkill -x "pipewire_helper" >/dev/null 2>&1 || true
+    pkill -x "realtime-noise-service" >/dev/null 2>&1 || true
+    pkill -f "^pw-loopback.*realtime-noise" >/dev/null 2>&1 || true
+
+    # Destroy PipeWire virtual nodes (source, capture, sink)
+    if command -v pw-cli >/dev/null 2>&1; then
+        for nid in $(pw-cli list-objects Node 2>/dev/null | awk '
+            $1 == "id" { cur_id = $2; sub(/,/, "", cur_id) }
+            $0 ~ "node.name = \"realtime-noise" || $0 ~ "node.description = \".*Realtime Noise" {
+                if (cur_id != "") { print cur_id }
+            }
+        ' | sort -u); do
+            pw-cli destroy "$nid" >/dev/null 2>&1 || true
+        done
+    fi
+
+    # Clean runtime locks and sockets
+    rm -f /tmp/hippocamp_pipewire_helper*.lock /tmp/clearcore*.lock /tmp/clearcore_state* /tmp/realtime-noise*.sock 2>/dev/null || true
+    rm -f /run/user/*/hippocamp_pipewire_helper*.lock /run/user/*/clearcore_state* /run/user/*/realtime-noise*.sock 2>/dev/null || true
+fi
+
 %postun
 gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database /usr/share/applications 2>/dev/null || true
@@ -194,6 +219,48 @@ Description: Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
  Clearcore provides realtime voice isolation, neural EQ acoustic calibration,
  and studio DSP for Linux desktops via PipeWire.
 EOF
+
+    cat << 'EOF' > "${DEB_ROOT}/DEBIAN/prerm"
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|purge|deconfigure)
+        # Encerrar processos ativos do Clearcore
+        killall -q clearcore 2>/dev/null || pkill -x clearcore 2>/dev/null || true
+        killall -q pipewire_helper 2>/dev/null || pkill -x pipewire_helper 2>/dev/null || true
+        killall -q realtime-noise-service 2>/dev/null || pkill -x realtime-noise-service 2>/dev/null || true
+        pkill -f "^pw-loopback.*realtime-noise" 2>/dev/null || true
+
+        # Destruir nós virtuais do PipeWire (source, capture e sink)
+        if command -v pw-cli >/dev/null 2>&1; then
+            for nid in $(pw-cli list-objects Node 2>/dev/null | awk '
+                $1 == "id" { cur_id = $2; sub(/,/, "", cur_id) }
+                $0 ~ "node.name = \"realtime-noise" || $0 ~ "node.description = \".*Realtime Noise" {
+                    if (cur_id != "") { print cur_id }
+                }
+            ' | sort -u); do
+                pw-cli destroy "$nid" >/dev/null 2>&1 || true
+            done
+        fi
+
+        # Limpar travas, sockets e arquivos de estado
+        rm -f /tmp/hippocamp_pipewire_helper*.lock /tmp/clearcore*.lock /tmp/clearcore_state* /tmp/realtime-noise*.sock 2>/dev/null || true
+        rm -f /run/user/*/hippocamp_pipewire_helper*.lock /run/user/*/clearcore_state* /run/user/*/realtime-noise*.sock 2>/dev/null || true
+        ;;
+    failed-upgrade|upgrade)
+        # Ao atualizar, interromper processos anteriores
+        pkill -x "clearcore" >/dev/null 2>&1 || true
+        pkill -x "pipewire_helper" >/dev/null 2>&1 || true
+        pkill -x "realtime-noise-service" >/dev/null 2>&1 || true
+        ;;
+    *)
+        ;;
+esac
+
+exit 0
+EOF
+    chmod 755 "${DEB_ROOT}/DEBIAN/prerm"
 
     cat << 'EOF' > "${DEB_ROOT}/DEBIAN/postinst"
 #!/bin/sh

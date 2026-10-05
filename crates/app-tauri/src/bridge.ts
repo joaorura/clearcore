@@ -42,11 +42,17 @@ export interface ClearcoreApi {
   getInputDevices: () => Promise<InputDeviceInfo[]>;
   setInputDevice: (deviceId: string) => Promise<{ success: boolean; selectedId: string }>;
   getHardwareBackends: () => Promise<HardwareBackendsResponse>;
-  setHardwareBackend: (backendId: string) => Promise<{ success: boolean; reason?: string; active_backend: string }>;
+  startAudioService?: () => Promise<{ success: boolean; isRunning: boolean; virtualMic: VirtualMicStatus }>;
+  stopAudioService?: () => Promise<{ success: boolean; isRunning: boolean; virtualMic: VirtualMicStatus }>;
+  getServiceRunningState?: () => Promise<{ isRunning: boolean }>;
+  getStartActivatedConfig?: () => Promise<boolean>;
+  setStartActivatedConfig?: (enabled: boolean) => Promise<boolean>;
   getStudioPreset?: () => Promise<StudioPreset>;
   setStudioPreset?: (preset: StudioPreset) => Promise<{ success: boolean; preset: StudioPreset }>;
   getVoiceProfileStatus?: () => Promise<VoiceProfileStatus>;
   setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean }>;
+  onServiceStateUpdate?: (cb: (data: { isRunning: boolean }) => void) => () => void;
+  onStartActivatedConfigUpdate?: (cb: (enabled: boolean) => void) => () => void;
   onStatusUpdate: (cb: (data: { mode?: DenoiseMode }) => void) => () => void;
   onVirtualMicUpdate: (cb: (data: VirtualMicStatus) => void) => () => void;
   onInputDevicesUpdate: (cb: (data: { devices: InputDeviceInfo[]; selectedId: string | null }) => void) => () => void;
@@ -79,7 +85,31 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     if (cmd === 'get_input_devices') return (await api.getInputDevices()) as unknown as T;
     if (cmd === 'set_input_device') return (await api.setInputDevice(String(args?.deviceId ?? ''))) as unknown as T;
     if (cmd === 'get_hardware_backends') return (await api.getHardwareBackends()) as unknown as T;
-    if (cmd === 'set_hardware_backend') return (await api.setHardwareBackend(String(args?.backendId ?? 'auto'))) as unknown as T;
+    if (cmd === 'start_audio_service') {
+      if (typeof api.startAudioService === 'function') {
+        return (await api.startAudioService()) as unknown as T;
+      }
+    }
+    if (cmd === 'stop_audio_service') {
+      if (typeof api.stopAudioService === 'function') {
+        return (await api.stopAudioService()) as unknown as T;
+      }
+    }
+    if (cmd === 'get_service_running_state') {
+      if (typeof api.getServiceRunningState === 'function') {
+        return (await api.getServiceRunningState()) as unknown as T;
+      }
+    }
+    if (cmd === 'get_start_activated_config') {
+      if (typeof api.getStartActivatedConfig === 'function') {
+        return (await api.getStartActivatedConfig()) as unknown as T;
+      }
+    }
+    if (cmd === 'set_start_activated_config') {
+      if (typeof api.setStartActivatedConfig === 'function') {
+        return (await api.setStartActivatedConfig(Boolean(args?.enabled))) as unknown as T;
+      }
+    }
     if (cmd === 'get_studio_preset') {
       if (typeof api.getStudioPreset === 'function') {
         return (await api.getStudioPreset()) as unknown as T;
@@ -107,6 +137,33 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
   }
 
   // Graceful browser / test fallbacks
+  if (cmd === 'get_start_activated_config') {
+    const val = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_start_activated') : null;
+    return (val === null ? true : val === 'true') as unknown as T;
+  }
+  if (cmd === 'set_start_activated_config') {
+    const enabled = Boolean(args?.enabled);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('clearcore_start_activated', String(enabled));
+    }
+    return enabled as unknown as T;
+  }
+  if (cmd === 'get_service_running_state') {
+    const state = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_service_running') : null;
+    return { isRunning: state === null ? true : state === 'true' } as unknown as T;
+  }
+  if (cmd === 'start_audio_service') {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('clearcore_service_running', 'true');
+    }
+    return { success: true, isRunning: true, virtualMic: { present: true, node_id: 1, node_name: 'realtime-noise-source' } } as unknown as T;
+  }
+  if (cmd === 'stop_audio_service') {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('clearcore_service_running', 'false');
+    }
+    return { success: true, isRunning: false, virtualMic: { present: false, node_id: null, node_name: 'realtime-noise-source' } } as unknown as T;
+  }
   if (cmd === 'get_studio_preset') {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_studio_preset') : null;
     return (saved || 'Natural') as unknown as T;

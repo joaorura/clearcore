@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-echo "Stopping Clearcore Realtime Noise Daemon..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "Stopping Clearcore Realtime Noise Daemon & Virtual Microphone..."
+
+if [[ -f "${SCRIPT_DIR}/scripts/check-virtual-mic.sh" ]]; then
+    "${SCRIPT_DIR}/scripts/check-virtual-mic.sh" --stop >/dev/null 2>&1 || true
+fi
 
 systemctl --user stop realtime-noise-helper.service 2>/dev/null || true
 systemctl --user stop realtime-noise.service 2>/dev/null || true
@@ -13,4 +19,4 @@ if pgrep -f "realtime-noise-service" >/dev/null 2>&1; then
     pkill -9 -f "realtime-noise-service" || true
 fi
 
-echo "Service daemon stopped."
+echo "Service daemon and virtual microphone stopped."

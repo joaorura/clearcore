@@ -161,6 +161,14 @@ print_json_status() {
 EOF
 }
 
+stop_hal_driver() {
+    if [[ -d "${USER_HAL_DIR}/${DRIVER_NAME}" ]]; then
+        mv "${USER_HAL_DIR}/${DRIVER_NAME}" "${USER_HAL_DIR}/${DRIVER_NAME}.disabled" 2>/dev/null || true
+    fi
+    sudo killall coreaudiod >/dev/null 2>&1 || killall coreaudiod >/dev/null 2>&1 || true
+    return 0
+}
+
 # Despacho de parâmetros
 ACTION="verify_or_create"
 OUTPUT_JSON=false
@@ -179,6 +187,10 @@ while [[ $# -gt 0 ]]; do
             ACTION="recreate"
             shift
             ;;
+        --stop|--destroy)
+            ACTION="stop"
+            shift
+            ;;
         --set-default)
             ACTION="set_default"
             shift
@@ -192,6 +204,32 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "${ACTION}" == "stop" ]]; then
+    stop_hal_driver
+    if [[ "${OUTPUT_JSON}" == "true" ]]; then
+        cat <<EOF
+{
+  "platform": "macos",
+  "platform_label": "macOS (CoreAudio HAL)",
+  "present": false,
+  "node_id": null,
+  "node_name": "${MIC_NAME}",
+  "node_description": "${MIC_NAME}",
+  "driver_installed": false,
+  "driver_status": "Stopped",
+  "is_default": false,
+  "format": "F32LE",
+  "rate": 48000,
+  "channels": 1,
+  "quantum": 480
+}
+EOF
+    else
+        echo "[OK] Microfone virtual CoreAudio desativado no macOS."
+    fi
+    exit 0
+fi
 
 if [[ "${ACTION}" == "check_only" ]]; then
     if is_driver_installed || is_coreaudio_enumerated; then

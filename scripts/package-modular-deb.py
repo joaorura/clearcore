@@ -13,7 +13,7 @@ import tarfile
 import io
 import gzip
 
-def build_deb(out_deb, control_dict, data_root):
+def build_deb(out_deb, control_dict, data_root, scripts_dict=None):
     # 1. debian-binary
     deb_bin = b"2.0\n"
 
@@ -29,6 +29,14 @@ def build_deb(out_deb, control_dict, data_root):
         ti.size = len(ctrl_content)
         ti.mode = 0o644
         tar.addfile(ti, io.BytesIO(ctrl_content))
+
+        if scripts_dict:
+            for sname, sbody in scripts_dict.items():
+                sbytes = sbody.encode("utf-8") if isinstance(sbody, str) else sbody
+                sti = tarfile.TarInfo(f"./{sname}")
+                sti.size = len(sbytes)
+                sti.mode = 0o755
+                tar.addfile(sti, io.BytesIO(sbytes))
     ctrl_bytes = ctrl_buf.getvalue()
 
     # 3. data.tar.gz
@@ -116,8 +124,43 @@ def make_modular_debs(src_dir, out_dir, version="0.1.0-beta.3", arch="amd64"):
         "Depends": "pipewire (>= 0.3.0)",
         "Description": "Clearcore background noise suppression daemon and PipeWire bridge\n DeepFilterNet3 ONNX speech isolation, Neural EQ calibration, and studio DSP.",
     }
+    daemon_scripts = {
+        "prerm": """#!/bin/sh
+set -e
+case "$1" in
+    remove|purge|deconfigure)
+        killall -q realtime-noise-service 2>/dev/null || pkill -x realtime-noise-service 2>/dev/null || true
+        killall -q clearcore-pipewire-helper 2>/dev/null || pkill -x clearcore-pipewire-helper 2>/dev/null || true
+        killall -q pipewire_helper 2>/dev/null || pkill -x pipewire_helper 2>/dev/null || true
+        pkill -f "^pw-loopback.*realtime-noise" 2>/dev/null || true
+
+        if command -v pw-cli >/dev/null 2>&1; then
+            for nid in $(pw-cli list-objects Node 2>/dev/null | awk '
+                $1 == "id" { cur_id = $2; sub(/,/, "", cur_id) }
+                $0 ~ "node.name = \\"realtime-noise" || $0 ~ "node.description = \\\".*Realtime Noise" {
+                    if (cur_id != "") { print cur_id }
+                }
+            ' | sort -u); do
+                pw-cli destroy "$nid" >/dev/null 2>&1 || true
+            done
+        fi
+
+        rm -f /tmp/hippocamp_pipewire_helper*.lock /tmp/clearcore*.lock /tmp/clearcore_state* /tmp/realtime-noise*.sock 2>/dev/null || true
+        rm -f /run/user/*/hippocamp_pipewire_helper*.lock /run/user/*/clearcore_state* /run/user/*/realtime-noise*.sock 2>/dev/null || true
+        ;;
+    failed-upgrade|upgrade)
+        pkill -x "realtime-noise-service" >/dev/null 2>&1 || true
+        pkill -x "clearcore-pipewire-helper" >/dev/null 2>&1 || true
+        pkill -x "pipewire_helper" >/dev/null 2>&1 || true
+        ;;
+    *)
+        ;;
+esac
+exit 0
+"""
+    }
     daemon_deb = os.path.join(out_dir, f"clearcore-daemon_{version}_{arch}.deb")
-    build_deb(daemon_deb, daemon_control, daemon_root)
+    build_deb(daemon_deb, daemon_control, daemon_root, scripts_dict=daemon_scripts)
 
     # 2. GUI files
     os.makedirs(os.path.join(gui_root, "opt/clearcore"), exist_ok=True)
@@ -177,8 +220,27 @@ def make_modular_debs(src_dir, out_dir, version="0.1.0-beta.3", arch="amd64"):
         "Depends": f"clearcore-daemon (= {version})",
         "Description": "Clearcore Realtime AI Noise Suppression Virtual Microphone\n Desktop GUI and system tray controller for Clearcore.",
     }
+    gui_scripts = {
+        "prerm": """#!/bin/sh
+set -e
+pkill -x "clearcore" >/dev/null 2>&1 || true
+exit 0
+""",
+        "postinst": """#!/bin/sh
+set -e
+gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+update-desktop-database /usr/share/applications 2>/dev/null || true
+exit 0
+""",
+        "postrm": """#!/bin/sh
+set -e
+gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
+update-desktop-database /usr/share/applications 2>/dev/null || true
+exit 0
+""",
+    }
     gui_deb = os.path.join(out_dir, f"clearcore_{version}_{arch}.deb")
-    build_deb(gui_deb, gui_control, gui_root)
+    build_deb(gui_deb, gui_control, gui_root, scripts_dict=gui_scripts)
 
     shutil.rmtree(temp_work, ignore_errors=True)
     return daemon_deb, gui_deb

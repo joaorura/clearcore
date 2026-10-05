@@ -82,6 +82,8 @@ export interface Translations {
     disabled: string;
     tip: string;
     changeFailed: string;
+    startActivatedTitle: string;
+    startActivatedDesc: string;
   };
   diagnostics: {
     title: string;
@@ -274,6 +276,21 @@ export interface Translations {
     neuralEqStatusPending: string;
     neuralEqDetail: string;
     presetSwitchedFeedback: string;
+  };
+  serviceControl: {
+    title: string;
+    statusRunning: string;
+    statusStopped: string;
+    startBtn: string;
+    stopBtn: string;
+    starting: string;
+    stopping: string;
+    startSuccess: string;
+    stopSuccess: string;
+    startConfigTitle: string;
+    startConfigDesc: string;
+    startConfigEnabled: string;
+    startConfigDisabled: string;
   };
 }
 

@@ -270,6 +270,7 @@ function executeVirtualMicScript(action) {
       scriptPath = findScriptPath('check-virtual-mic-windows.ps1');
       args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Json'];
       if (action === 'recreate') args.push('-Recreate');
+      else if (action === 'stop') args.push('-Stop');
       else if (action === 'set_default') args.push('-SetDefault');
       else if (action === 'status') args.push('-Status');
     } else if (isMac) {
@@ -277,6 +278,7 @@ function executeVirtualMicScript(action) {
       scriptPath = findScriptPath('check-virtual-mic-macos.sh');
       args = [scriptPath, '--json'];
       if (action === 'recreate') args.push('--recreate');
+      else if (action === 'stop') args.push('--stop');
       else if (action === 'set_default') args.push('--set-default');
       else if (action === 'status') args.push('--status');
     } else {
@@ -284,6 +286,7 @@ function executeVirtualMicScript(action) {
       scriptPath = findScriptPath('check-virtual-mic.sh');
       args = [scriptPath, '--json'];
       if (action === 'recreate') args.push('--recreate');
+      else if (action === 'stop') args.push('--stop');
       else if (action === 'set_default') args.push('--set-default');
       else if (action === 'status') args.push('--status');
     }
@@ -303,7 +306,7 @@ function executeVirtualMicScript(action) {
           node_id: null,
           node_name: 'realtime-noise-source',
           node_description: 'Realtime Noise Virtual Microphone',
-          driver_status: 'Error',
+          driver_status: action === 'stop' ? 'Stopped' : 'Error',
           is_default: false,
           error: error.message,
         });
@@ -320,7 +323,7 @@ function executeVirtualMicScript(action) {
           node_id: null,
           node_name: 'realtime-noise-source',
           node_description: 'Realtime Noise Virtual Microphone',
-          driver_status: 'ParseError',
+          driver_status: action === 'stop' ? 'Stopped' : 'ParseError',
           is_default: false,
           error: `Parse error: ${err.message}`,
         });
@@ -335,6 +338,10 @@ function queryVirtualMicStatus() {
 
 function runRecreateVirtualMic() {
   return executeVirtualMicScript('recreate');
+}
+
+function runStopVirtualMic() {
+  return executeVirtualMicScript('stop');
 }
 
 function runSetDefaultVirtualMic() {
@@ -372,6 +379,108 @@ async function verifyAndAutoCreateVirtualMicOnStartup() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('virtual-mic-update', currentVirtualMicStatus);
   }
+}
+
+// Application Preferences (Persistent User Configuration)
+function getAppSettingsFile() {
+  const userData = app.getPath('userData');
+  return path.join(userData, 'app-settings.json');
+}
+
+function readAppSettings() {
+  try {
+    const file = getAppSettingsFile();
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf8'));
+    }
+  } catch (err) {
+    console.warn('[Clearcore] Could not read app-settings.json:', err.message);
+  }
+  return { startActivated: true };
+}
+
+function writeAppSettings(updates = {}) {
+  try {
+    const userData = app.getPath('userData');
+    if (!fs.existsSync(userData)) {
+      fs.mkdirSync(userData, { recursive: true });
+    }
+    const current = readAppSettings();
+    const updated = { ...current, ...updates };
+    fs.writeFileSync(getAppSettingsFile(), JSON.stringify(updated, null, 2), 'utf8');
+    return updated;
+  } catch (err) {
+    console.warn('[Clearcore] Could not write app-settings.json:', err.message);
+    return { startActivated: true, ...updates };
+  }
+}
+
+let isServiceRunning = true;
+
+async function startAudioService() {
+  console.log('[Clearcore Operation] Iniciando serviço e ativando microfone virtual...');
+  isServiceRunning = true;
+  await ensureDaemonRunning();
+  const res = await runRecreateVirtualMic();
+  currentVirtualMicStatus = res;
+  writeClearcoreSharedState({ mode: currentMode });
+  updateTrayMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('service-state-update', { isRunning: true });
+    mainWindow.webContents.send('virtual-mic-update', currentVirtualMicStatus);
+  }
+  return { success: true, isRunning: true, virtualMic: currentVirtualMicStatus };
+}
+
+async function stopAudioService() {
+  console.log('[Clearcore Operation] Parando serviço e desativando microfone virtual...');
+  isServiceRunning = false;
+  const res = await runStopVirtualMic();
+  currentVirtualMicStatus = res;
+  writeClearcoreSharedState({ mode: 'Mute' });
+  updateTrayMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('service-state-update', { isRunning: false });
+    mainWindow.webContents.send('virtual-mic-update', currentVirtualMicStatus);
+  }
+  return { success: true, isRunning: false, virtualMic: currentVirtualMicStatus };
+}
+
+function cleanupAndStopAll() {
+  console.log('[Clearcore Lifecycle] Encerrando app: garantindo remoção do microfone virtual e parada do daemon...');
+  try {
+    if (process.platform === 'linux') {
+      try {
+        const { execSync } = require('child_process');
+        const scriptPath = findScriptPath('check-virtual-mic.sh');
+        if (scriptPath && fs.existsSync(scriptPath)) {
+          try {
+            execSync(`bash "${scriptPath}" --stop`, { timeout: 2000 });
+          } catch {}
+        }
+        execSync(
+          'systemctl --user stop realtime-noise-helper.service 2>/dev/null || true; ' +
+          'systemctl --user reset-failed realtime-noise-helper.service 2>/dev/null || true; ' +
+          'pkill -f pipewire_helper 2>/dev/null || true; ' +
+          'pkill -f "pw-loopback.*realtime-noise" 2>/dev/null || true; ' +
+          'if command -v pw-cli >/dev/null 2>&1; then ' +
+          '  pw-cli list-objects Node 2>/dev/null | awk \'$1=="id"{id=$2;sub(/,/,"",id)} $0~/node\\.name = "realtime-noise/{if (id!="") print id}\' | while read -r id; do [ -n "$id" ] && pw-cli destroy "$id" 2>/dev/null || true; done; ' +
+          'fi; ' +
+          'rm -f "${XDG_RUNTIME_DIR:-/tmp}/hippocamp_pipewire_helper.lock" /tmp/hippocamp_pipewire_helper.lock 2>/dev/null || true;',
+          { timeout: 2000 }
+        );
+      } catch {}
+    } else if (process.platform === 'win32') {
+      try {
+        const { execSync } = require('child_process');
+        execSync(
+          'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-PnpDevice | Where-Object { $_.InstanceId -like \'*RealtimeNoise*\' } | Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue; Stop-Service -Name RealtimeNoise -ErrorAction SilentlyContinue"',
+          { timeout: 2000 }
+        );
+      } catch {}
+    }
+  } catch {}
+  stopDaemon();
 }
 
 // Autostart management
@@ -499,16 +608,29 @@ function updateTrayMenu() {
   const autostart = isAutostartEnabled();
   const platformLabel = currentVirtualMicStatus.platform_label || 'Virtual';
 
+  const appSettings = readAppSettings();
+  const startActivated = appSettings.startActivated !== false;
+
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: `Clearcore [${currentMode.toUpperCase()}]`,
+      label: `ClearCore [${isServiceRunning ? currentMode.toUpperCase() : 'PARADO'}]`,
       enabled: false,
+    },
+    {
+      label: isServiceRunning ? '🛑 Parar Serviço de Áudio' : '▶️ Iniciar Serviço de Áudio',
+      click: async () => {
+        if (isServiceRunning) {
+          await stopAudioService();
+        } else {
+          await startAudioService();
+        }
+      },
     },
     { type: 'separator' },
     {
       label: currentVirtualMicStatus.present
         ? `Microfone (${platformLabel}): 🟢 Ativo (ID: ${currentVirtualMicStatus.node_id || 'OK'})`
-        : `Microfone (${platformLabel}): 🔴 Não Criado (Clique para Criar / Instalar)`,
+        : `Microfone (${platformLabel}): 🔴 Desconectado`,
       click: async () => {
         if (!currentVirtualMicStatus.present) {
           const res = await runRecreateVirtualMic();
@@ -634,6 +756,18 @@ function updateTrayMenu() {
       },
     },
     {
+      label: 'Iniciar Ativado ao Abrir o App',
+      type: 'checkbox',
+      checked: startActivated,
+      click: (item) => {
+        writeAppSettings({ startActivated: item.checked });
+        updateTrayMenu();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('start-activated-config-update', item.checked);
+        }
+      },
+    },
+    {
       label: 'Reiniciar Geração de Áudio',
       click: async () => {
         try {
@@ -648,7 +782,7 @@ function updateTrayMenu() {
       label: 'Sair do ClearCore',
       click: () => {
         isQuitting = true;
-        stopDaemon();
+        cleanupAndStopAll();
         app.quit();
       },
     },
@@ -971,11 +1105,22 @@ app.whenReady().then(async () => {
   }
   createWindow();
 
-  // 1. Ensure daemon is running (auto-start sidecar if not running)
-  await ensureDaemonRunning();
+  // 1. Check user config: Start activated (default: true) or stopped
+  const settings = readAppSettings();
+  const shouldStartActivated = settings.startActivated !== false;
 
-  // 2. Active startup check for virtual microphone
-  await verifyAndAutoCreateVirtualMicOnStartup();
+  if (shouldStartActivated) {
+    console.log('[Startup] ClearCore configurado para iniciar ATIVADO (Padrão).');
+    await ensureDaemonRunning();
+    await verifyAndAutoCreateVirtualMicOnStartup();
+    isServiceRunning = true;
+  } else {
+    console.log('[Startup] ClearCore configurado para subir DESATIVADO (Parado).');
+    isServiceRunning = false;
+    currentVirtualMicStatus = await runStopVirtualMic();
+    writeClearcoreSharedState({ mode: 'Mute' });
+    updateTrayMenu();
+  }
 
   // Initial poll and recurring heartbeat
   pollDaemonStatus();
@@ -1000,12 +1145,46 @@ app.on('second-instance', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
-  stopDaemon();
+  cleanupAndStopAll();
+});
+
+process.on('SIGINT', () => {
+  isQuitting = true;
+  cleanupAndStopAll();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  isQuitting = true;
+  cleanupAndStopAll();
+  process.exit(0);
 });
 
 // IPC handlers for frontend
 ipcMain.handle('get_app_version', () => {
   return APP_VERSION;
+});
+
+ipcMain.handle('start_audio_service', async () => {
+  return await startAudioService();
+});
+
+ipcMain.handle('stop_audio_service', async () => {
+  return await stopAudioService();
+});
+
+ipcMain.handle('get_service_running_state', () => {
+  return { isRunning: isServiceRunning };
+});
+
+ipcMain.handle('get_start_activated_config', () => {
+  return readAppSettings().startActivated !== false;
+});
+
+ipcMain.handle('set_start_activated_config', (_event, enabled) => {
+  const updated = writeAppSettings({ startActivated: Boolean(enabled) });
+  updateTrayMenu();
+  return updated.startActivated;
 });
 
 ipcMain.handle('get_status', async () => {
@@ -1045,7 +1224,7 @@ ipcMain.handle('minimize_to_tray', () => {
 
 ipcMain.handle('quit_app', () => {
   isQuitting = true;
-  stopDaemon();
+  cleanupAndStopAll();
   app.quit();
 });
 

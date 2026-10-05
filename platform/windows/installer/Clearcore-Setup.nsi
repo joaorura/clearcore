@@ -108,10 +108,18 @@ Section "Uninstall"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Clearcore"
   DeleteRegKey HKCU "Software\Clearcore"
 
-  ; Remove driver registration if inf present
+  ; Stop and delete kernel driver service
+  nsExec::Exec 'net stop RealtimeNoise'
+  nsExec::Exec 'sc.exe delete RealtimeNoise'
+
+  ; Remove driver registration and DriverStore package
   IfFileExists "$INSTDIR\resources\driver\RealtimeNoise.inf" 0 SkipDriverUninstall
     ExecWait 'pnputil.exe /delete-driver "$INSTDIR\resources\driver\RealtimeNoise.inf" /uninstall /force'
   SkipDriverUninstall:
+  nsExec::Exec 'pnputil.exe /delete-driver RealtimeNoise.inf /uninstall /force'
+
+  ; Remove PnP devices
+  nsExec::Exec 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-PnpDevice | Where-Object { $_.InstanceId -like ''*RealtimeNoise*'' } | ForEach-Object { pnputil.exe /remove-device $_.InstanceId; Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue }"'
 
   ; Remove application files
   RMDir /r "$INSTDIR"

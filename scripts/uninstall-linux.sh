@@ -41,27 +41,38 @@ echo "🚀 Removendo inicialização automática..."
 rm -f "${HOME}/.config/autostart/clearcore.desktop" 2>/dev/null || true
 rm -f "${HOME}/.config/autostart/realtime-noise.desktop" 2>/dev/null || true
 
-# 4. Remover links e nós do PipeWire
-echo "🎤 Desconectando nó virtual do PipeWire..."
+# 4. Remover links e nós do PipeWire (source, capture e sink)
+echo "🎤 Desconectando e destruindo nós virtuais do PipeWire (source, capture, sink)..."
 if command -v pw-cli >/dev/null 2>&1; then
-    NODE_ID=$(pw-cli list-objects Node 2>/dev/null | awk -v name="\"realtime-noise-source\"" '
-        $1 == "id" { id = $2; sub(/,/, "", id) }
-        $0 ~ "node.name = " name { print id; exit }
-    ')
-    if [[ -n "${NODE_ID}" ]]; then
-        pw-cli destroy "${NODE_ID}" >/dev/null 2>&1 || true
-    fi
+    NODE_IDS=$(pw-cli list-objects Node 2>/dev/null | awk '
+        $1 == "id" { cur_id = $2; sub(/,/, "", cur_id) }
+        $0 ~ "node.name = \"realtime-noise" || $0 ~ "node.description = \".*Realtime Noise" {
+            if (cur_id != "") { print cur_id }
+        }
+    ' | sort -u)
+    for nid in ${NODE_IDS}; do
+        pw-cli destroy "${nid}" >/dev/null 2>&1 || true
+    done
 fi
 
 # 5. Limpar travas, sockets e arquivos de estado de tempo real
-echo "🧹 Limpando soquetes IPC e arquivos de memória compartilhada..."
+echo "🧹 Limpando soquetes IPC, travas de execução e arquivos de memória compartilhada..."
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
 rm -f "${RUNTIME_DIR}/clearcore_state" 2>/dev/null || true
 rm -f "${RUNTIME_DIR}/hippocamp_pipewire_helper.lock" 2>/dev/null || true
 rm -f "${RUNTIME_DIR}/realtime-noise.sock" 2>/dev/null || true
+rm -f /tmp/hippocamp_pipewire_helper*.lock 2>/dev/null || true
+rm -f /tmp/clearcore*.lock 2>/dev/null || true
+rm -f /tmp/clearcore_state* 2>/dev/null || true
+rm -f /tmp/realtime-noise*.sock 2>/dev/null || true
+rm -f /run/user/*/hippocamp_pipewire_helper*.lock 2>/dev/null || true
+rm -f /run/user/*/clearcore_state* 2>/dev/null || true
+rm -f /run/user/*/realtime-noise*.sock 2>/dev/null || true
 rm -f /tmp/realtime-noise-helper.log 2>/dev/null || true
 rm -f /tmp/realtime-noise-service.log 2>/dev/null || true
 rm -f /tmp/clearcore-*.log 2>/dev/null || true
+rm -rf "${HOME}/.local/state/clearcore" 2>/dev/null || true
+rm -rf "${HOME}/.config/clearcore" 2>/dev/null || true
 
 # 6. Remover arquivos instalados (Sistema ou Usuário)
 echo "📁 Removendo arquivos de instalação, atalhos e ícones..."

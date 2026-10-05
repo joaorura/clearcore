@@ -73,11 +73,13 @@ async function startElectron() {
       execSync('npm install', { cwd: appDir, stdio: 'inherit' });
     }
 
-    const electronProc = spawn(electronBin, ['electron/main.cjs', '--dev'], {
+    let electronProc = null;
+    electronProc = spawn(electronBin, ['electron/main.cjs', '--dev'], {
       cwd: appDir,
       stdio: 'inherit',
       shell: isWin,
     });
+    activeElectronProc = electronProc;
 
     electronProc.on('exit', (code) => {
       console.log(`\n[Dev] Electron closed (code=${code}). Stopping Vite dev server...`);
@@ -103,8 +105,15 @@ async function startElectron() {
   }
 }
 
+let activeElectronProc = null;
+
 const cleanup = () => {
   console.log('\n[Dev] Stopping dev environment...');
+  try {
+    if (activeElectronProc) {
+      activeElectronProc.kill('SIGTERM');
+    }
+  } catch {}
   try {
     viteProc.kill('SIGTERM');
   } catch {}

@@ -55,5 +55,9 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [UninstallRun]
 Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName} /T"; Flags: runhidden
 Filename: "taskkill.exe"; Parameters: "/F /IM realtime-noise-service.exe /T"; Flags: runhidden
+Filename: "net.exe"; Parameters: "stop RealtimeNoise"; Flags: runhidden
+Filename: "sc.exe"; Parameters: "delete RealtimeNoise"; Flags: runhidden
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\resources\scripts\uninstall-windows.ps1"""; Flags: runhidden
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-PnpDevice | Where-Object { $_.InstanceId -like '*RealtimeNoise*' } | ForEach-Object { pnputil.exe /remove-device $_.InstanceId; Disable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue }"""; Flags: runhidden
 Filename: "pnputil.exe"; Parameters: "/delete-driver ""{app}\resources\driver\RealtimeNoise.inf"" /uninstall /force"; Flags: runhidden
+Filename: "pnputil.exe"; Parameters: "/delete-driver RealtimeNoise.inf /uninstall /force"; Flags: runhidden
