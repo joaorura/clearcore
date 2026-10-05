@@ -30,9 +30,7 @@ pub use voice_samples::{
     VoiceSampleError, VoiceSampleManager,
 };
 
-use realtime_noise_ipc::enrollment_codes::{
-    ENROLL_FAILED, ENROLL_PAYLOAD_TOO_LARGE, MAX_REQUEST_LINE_BYTES,
-};
+use realtime_noise_ipc::enrollment_codes::{ENROLL_PAYLOAD_TOO_LARGE, MAX_REQUEST_LINE_BYTES};
 use realtime_noise_ipc::line_limit::{LineRead, is_invalid_utf8, read_line_limited};
 use realtime_noise_ipc::protocol::truncate_request_id;
 use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus, handle_request};
@@ -575,8 +573,8 @@ impl ServiceDaemon {
             // fixed error until the command is removed from the protocol.
             IpcCommand::GetVoiceProfileEmbedding => IpcResponse::error(
                 "get-voice-profile-embedding-resp",
-                IpcStatus::InternalError,
-                ENROLL_FAILED,
+                IpcStatus::InvalidCommand,
+                "DEPRECATED",
                 "deprecated",
             ),
             IpcCommand::ListIntakeSuggestions => {

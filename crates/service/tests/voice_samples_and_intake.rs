@@ -59,11 +59,8 @@ fn test_voice_samples_and_intake_ipc_lifecycle() {
 
     // The averaged-embedding command is deprecated: a fixed error, never an embedding.
     let emb_resp = send(&mut daemon, IpcCommand::GetVoiceProfileEmbedding);
-    assert_eq!(emb_resp.status, IpcStatus::InternalError);
-    assert_eq!(
-        emb_resp.error.as_ref().expect("error").code,
-        "ENROLL_FAILED"
-    );
+    assert_eq!(emb_resp.status, IpcStatus::InvalidCommand);
+    assert_eq!(emb_resp.error.as_ref().expect("error").code, "DEPRECATED");
 
     // Add first sample via IPC
     let sample1 = VoiceSample::new(
