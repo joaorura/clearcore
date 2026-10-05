@@ -67,6 +67,10 @@ const DECIMATED_PEAK_CEILING: f32 = 0.97;
 const HEADROOM_MARGIN_DB: f32 = 0.01;
 const JOIN_CROSSFADE_MS: u32 = 20;
 
+/// A job still running after this is failed (`stage: "timeout"`) and its slot freed; the
+/// worker thread itself cannot be stopped and its late result is discarded.
+const JOB_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 const SAMPLE_JOB_PREFIX: &str = "sample-";
 const PROFILE_JOB_PREFIX: &str = "profile-";
 
@@ -618,6 +622,8 @@ impl ServiceDaemon {
 
     /// Applies every finished job on the daemon thread (called before each request).
     pub(crate) fn drain_enrollment_jobs(&mut self) {
+        self.enrollment.sample_jobs.expire_older_than(JOB_WATCHDOG);
+        self.enrollment.profile_jobs.expire_older_than(JOB_WATCHDOG);
         for (job_id, outcome) in self.enrollment.sample_jobs.drain() {
             self.store_ingested(&job_id, &outcome);
         }

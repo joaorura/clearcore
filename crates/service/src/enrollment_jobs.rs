@@ -13,6 +13,7 @@ use realtime_noise_ipc::enrollment_codes::{ENROLL_BUSY, ENROLL_FAILED};
 use std::collections::{HashMap, VecDeque};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{Duration, Instant};
 
 const MAX_FINISHED_JOBS: usize = 64;
 /// Upper bound of jobs in the Running state; further spawns answer `ENROLL_BUSY`.
@@ -51,6 +52,8 @@ pub struct JobTable<T: Send + 'static> {
     next_id: u64,
     jobs: HashMap<String, JobInfo>,
     finished: VecDeque<String>,
+    /// Spawn time of every Running job (watchdog, see `expire_older_than`).
+    started: HashMap<String, Instant>,
     rx: Receiver<Completion<T>>,
     tx: Sender<Completion<T>>,
 }
@@ -68,6 +71,7 @@ impl<T: Send + 'static> JobTable<T> {
             next_id: 1,
             jobs: HashMap::new(),
             finished: VecDeque::new(),
+            started: HashMap::new(),
             rx,
             tx,
         }
@@ -130,6 +134,7 @@ impl<T: Send + 'static> JobTable<T> {
     fn register(&mut self, stage: &'static str) -> String {
         let job_id = format!("job-{}", self.next_id);
         self.next_id += 1;
+        self.started.insert(job_id.clone(), Instant::now());
         self.jobs.insert(
             job_id.clone(),
             JobInfo {
@@ -201,7 +206,30 @@ impl<T: Send + 'static> JobTable<T> {
         self.jobs.get(job_id)
     }
 
+    /// Watchdog: every job still Running after `max_age` becomes Failed (`ENROLL_FAILED`,
+    /// stage `timeout`), which frees its slot. Threads cannot be killed: the worker may keep
+    /// running and its late result is discarded by `drain`.
+    pub fn expire_older_than(&mut self, max_age: Duration) {
+        let expired: Vec<String> = self
+            .started
+            .iter()
+            .filter(|(_, started)| started.elapsed() > max_age)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in expired {
+            self.mark_failed(
+                &id,
+                JobFailure {
+                    error_code: ENROLL_FAILED,
+                    stage: "timeout",
+                    remaining_seconds: None,
+                },
+            );
+        }
+    }
+
     fn record_finished(&mut self, job_id: &str) {
+        self.started.remove(job_id);
         if !self.finished.iter().any(|id| id == job_id) {
             self.finished.push_back(job_id.to_owned());
         }
@@ -222,7 +250,6 @@ impl<T: Send + 'static> JobTable<T> {
 )]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
 
     fn wait_until<R>(mut probe: impl FnMut() -> Option<R>) -> R {
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -443,5 +470,50 @@ mod tests {
         // A rejected spawn consumes neither a job id nor a slot.
         let id = t.spawn("s", || Ok(3)).unwrap();
         assert_eq!(id, format!("job-{}", MAX_RUNNING_JOBS + 1));
+    }
+
+    #[test]
+    fn a_job_running_too_long_expires_and_frees_its_slot() {
+        let mut t = JobTable::<u32>::new();
+        let (release, gate) = mpsc::channel::<()>();
+        let gate = std::sync::Arc::new(std::sync::Mutex::new(gate));
+        let mut ids = Vec::new();
+        for _ in 0..MAX_RUNNING_JOBS {
+            let gate = std::sync::Arc::clone(&gate);
+            ids.push(
+                t.spawn("enroll", move || {
+                    let _ = gate.lock().unwrap().recv_timeout(Duration::from_secs(5));
+                    Ok(1)
+                })
+                .unwrap(),
+            );
+        }
+        assert!(t.spawn("enroll", || Ok(2)).is_err(), "table is full");
+        std::thread::sleep(Duration::from_millis(30));
+        t.expire_older_than(Duration::from_millis(10));
+        for id in &ids {
+            let info = t.info(id).unwrap();
+            assert_eq!(info.state, JobState::Failed);
+            assert_eq!(info.stage, "timeout");
+            assert_eq!(info.error_code, Some("ENROLL_FAILED"));
+        }
+        let fresh = t.spawn("enroll", || Ok(3)).unwrap();
+        // A young job is not expired.
+        t.expire_older_than(Duration::from_secs(60));
+        for _ in &ids {
+            release.send(()).unwrap();
+        }
+        let got = wait_until(|| {
+            let d = t.drain();
+            if d.is_empty() { None } else { Some(d) }
+        });
+        assert_eq!(
+            got,
+            vec![(fresh, 3)],
+            "late payloads of expired jobs are dropped"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(t.drain().is_empty());
+        assert_eq!(t.info(&ids[0]).unwrap().state, JobState::Failed);
     }
 }
