@@ -92,6 +92,32 @@ fn synthetic_speech(seconds: f32) -> Vec<f32> {
     out.iter().map(|v| v * 0.5 / peak).collect()
 }
 
+/// Stretches (seconds) of `speech_over_noise` that contain only the white noise.
+const NOISE_ONLY: [(f32, f32); 2] = [(0.05, 0.55), (3.45, 3.95)];
+
+/// 4 s: constant white noise at about -34 dBFS everywhere, synthetic speech from 0.6 to 3.4 s.
+fn speech_over_noise() -> Vec<f32> {
+    let speech = synthetic_speech(2.8);
+    let mut seed = 0x9e37_79b9_u32;
+    (0..192_000_usize)
+        .map(|i| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let white = ((seed >> 8) as f32 / 8_388_608.0 - 1.0) * 0.035;
+            let voice = i
+                .checked_sub(28_800)
+                .and_then(|j| speech.get(j))
+                .copied()
+                .unwrap_or(0.0);
+            voice + white
+        })
+        .collect()
+}
+
+fn energy_db(x: &[f32]) -> f32 {
+    let mean_square = x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32;
+    10.0 * (mean_square + 1e-12).log10()
+}
+
 fn wait_job(daemon: &mut ServiceDaemon, id: &str) -> Value {
     let start = Instant::now();
     loop {
@@ -132,7 +158,7 @@ fn real_denoiser_and_development_model_build_and_apply_a_profile() {
     daemon.set_repo_root(repo_root);
     daemon.attach_profile_store(ProfileStore::new(temp.path()));
 
-    let clip = synthetic_speech(3.0);
+    let clip = speech_over_noise();
     let bytes: Vec<u8> = clip.iter().flat_map(|v| v.to_le_bytes()).collect();
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     let mut speech_total = 0.0;
@@ -161,14 +187,21 @@ fn real_denoiser_and_development_model_build_and_apply_a_profile() {
         let (stored, _) =
             realtime_noise_model::wav::decode_wav_pcm16_mono(&std::fs::read(wav).expect("wav"))
                 .expect("decode");
-        let max_diff = stored
-            .iter()
-            .zip(&clip)
-            .fold(0.0_f32, |m, (s, r)| m.max((s - r).abs()));
-        eprintln!("max |stored - raw| = {max_diff:.4}");
+        // Content check: the stretches with ONLY the constant white noise must come out at
+        // least 6 dB quieter than they went in.
+        for (start, end) in NOISE_ONLY {
+            let range = (start * 48_000.0) as usize..(end * 48_000.0) as usize;
+            let before = energy_db(&clip[range.clone()]);
+            let after = energy_db(&stored[range]);
+            eprintln!(
+                "noise-only {start:.2}-{end:.2} s: in {before:.1} dB, out {after:.1} dB, drop {:.1} dB",
+                before - after
+            );
+            assert!(before - after >= 6.0, "noise was not reduced by 6 dB");
+        }
     }
     let ingest_elapsed = ingest_start.elapsed();
-    eprintln!("3 x 3 s ingested in {ingest_elapsed:?}; stored speech {speech_total:.2} s");
+    eprintln!("3 x 4 s ingested in {ingest_elapsed:?}; stored speech {speech_total:.2} s");
     assert!(speech_total >= 6.0, "{speech_total}");
 
     let build_start = Instant::now();
