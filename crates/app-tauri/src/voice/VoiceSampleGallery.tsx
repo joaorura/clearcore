@@ -1,12 +1,13 @@
 import type { EnrollmentLabels, ServiceSample, SpeechBudget } from './enrollmentTypes';
+import { formatSecondsLocale } from './format';
 
 const badge = { fontSize: 11, padding: '2px 8px', borderRadius: 10, border: '1px solid var(--border-color)' } as const;
 
 export function VoiceSampleGallery(p: {
   samples: ServiceSample[]; budget: SpeechBudget; labels: EnrollmentLabels;
-  onDelete: (id: string) => void; deletingId?: string | null; highlightDelete?: boolean;
+  onDelete: (id: string) => void; deletingId?: string | null; highlightDelete?: boolean; lang?: string;
 }) {
-  const { samples, budget, labels, onDelete, deletingId, highlightDelete } = p;
+  const { samples, budget, labels, onDelete, deletingId, highlightDelete, lang = 'en-US' } = p;
   return (
     <ul className="voice-sample-gallery" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {samples.map((s) => {
@@ -21,7 +22,7 @@ export function VoiceSampleGallery(p: {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600 }}>{s.name}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                {s.speechSeconds.toFixed(1)} {labels.seconds} · {s.deviceLabel}
+                {formatSecondsLocale(s.speechSeconds, lang)} {labels.seconds} · {s.deviceLabel}
               </div>
               {!s.needsReenroll && (
                 <div className="sample-usage-bar" style={{ height: 4, marginTop: 4, borderRadius: 2, background: 'var(--border-color)' }}>

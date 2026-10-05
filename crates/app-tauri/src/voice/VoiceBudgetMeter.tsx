@@ -1,13 +1,13 @@
 import type { EnrollmentLabels, SpeechBudget } from './enrollmentTypes';
+import { formatSecondsLocale } from './format';
 
 function pctOf(used: number, max: number): number {
   if (!Number.isFinite(used) || !Number.isFinite(max) || max <= 0) return 0;
   return Math.min(100, Math.max(0, (used / max) * 100));
 }
 
-const fmt = (n: number) => (Math.round(n * 10) / 10).toFixed(1);
-
-export function VoiceBudgetMeter({ budget, labels }: { budget: SpeechBudget; labels: EnrollmentLabels }) {
+export function VoiceBudgetMeter({ budget, labels, lang = 'en-US' }: { budget: SpeechBudget; labels: EnrollmentLabels; lang?: string }) {
+  const fmt = (n: number) => formatSecondsLocale(n, lang);
   const pct = pctOf(budget.usedSeconds, budget.maxSeconds);
   const full = pct >= 100;
   return (

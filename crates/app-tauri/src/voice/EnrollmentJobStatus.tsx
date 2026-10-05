@@ -1,12 +1,11 @@
 import type { EnrollmentJob, EnrollmentLabels, JobStage } from './enrollmentTypes';
+import { formatDecimalLocale, formatSecondsLocale } from './format';
 
 const stageKey: Record<JobStage, keyof EnrollmentLabels> = {
   queued: 'stageQueued', denoise: 'stageDenoise', trim: 'stageTrim', eq: 'stageEq', enroll: 'stageEnroll', apply: 'stageApply',
 };
 
-const one = (n: number) => (Math.round(n * 10) / 10).toFixed(1);
-
-export function EnrollmentJobStatus({ job, labels }: { job: EnrollmentJob | null; labels: EnrollmentLabels }) {
+export function EnrollmentJobStatus({ job, labels, lang = 'en-US' }: { job: EnrollmentJob | null; labels: EnrollmentLabels; lang?: string }) {
   if (!job) return null;
   if (job.state === 'failed') {
     const code = job.errorCode ?? 'UNKNOWN';
@@ -23,9 +22,9 @@ export function EnrollmentJobStatus({ job, labels }: { job: EnrollmentJob | null
         <strong style={{ color: '#4ade80' }}>{labels.jobDone}</strong>
         {q && (
           <ul style={{ listStyle: 'none', margin: '4px 0 0', padding: 0, color: 'var(--text-muted)' }}>
-            <li>{labels.qualityPeak}: {q.peak.toFixed(2)}</li>
-            <li>{labels.qualityLevel}: {one(q.rmsDbfs)} dBFS</li>
-            <li>{labels.qualitySpeech}: {one(q.speechSeconds)} {labels.seconds}</li>
+            <li>{labels.qualityPeak}: {formatDecimalLocale(q.peak, 2, lang)}</li>
+            <li>{labels.qualityLevel}: {formatDecimalLocale(q.rmsDbfs, 1, lang)} dBFS</li>
+            <li>{labels.qualitySpeech}: {formatSecondsLocale(q.speechSeconds, lang)} {labels.seconds}</li>
           </ul>
         )}
       </div>

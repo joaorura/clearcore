@@ -10,7 +10,7 @@ import { VoiceBudgetMeter } from './voice/VoiceBudgetMeter';
 import { VoiceSampleGallery } from './voice/VoiceSampleGallery';
 import { BudgetErrorBanner } from './voice/BudgetErrorBanner';
 import { EnrollmentJobStatus } from './voice/EnrollmentJobStatus';
-import { formatSeconds } from './voice/speechBudget';
+import { formatSecondsLocale } from './voice/format';
 import { MAX_RECORD_SECONDS, MIN_RECORD_SECONDS } from './voice/enrollmentTypes';
 import type { CapturedPcm, DeviceInfo } from './voice/enrollmentTypes';
 import { acquireRawPhysicalStream, PhysicalMicUnavailableError } from './voice/captureDevice';
@@ -216,8 +216,7 @@ export function shouldShowTakeError(res: unknown): boolean {
 
 /** formatSeconds() always uses a point; pt-BR shows a decimal comma. */
 export function formatSecondsForLocale(seconds: number, locale: string): string {
-  const s = formatSeconds(seconds);
-  return locale.toLowerCase().startsWith('pt') ? s.replace('.', ',') : s;
+  return formatSecondsLocale(seconds, locale);
 }
 
 /** Interpolates `{remaining}` with the localized figure; leaves the template alone when unknown. */
@@ -828,7 +827,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
           {jobBusy && !currentJob && (
             <div role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('voiceProfile.sendingSample')}</div>
           )}
-          <EnrollmentJobStatus job={currentJob} labels={labels} />
+          <EnrollmentJobStatus job={currentJob} labels={labels} lang={locale} />
           {enrollErrorText && (
             <div role="alert" style={{ color: '#f87171', fontSize: 13, marginTop: 4 }}>{enrollErrorText}</div>
           )}
@@ -1070,7 +1069,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
           {sampleList && (
             <div style={{ marginBottom: 12 }}>
-              <VoiceBudgetMeter budget={sampleList.budget} labels={labels} />
+              <VoiceBudgetMeter budget={sampleList.budget} labels={labels} lang={locale} />
             </div>
           )}
 
@@ -1094,6 +1093,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
               onDelete={(id) => void handleDeleteSample(id)}
               deletingId={deletingId}
               highlightDelete={budgetError !== null}
+              lang={locale}
             />
           ) : (
             <div className="empty-state-card">
@@ -1269,7 +1269,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
                 {jobBusy && !currentJob && (
                   <div role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('voiceProfile.sendingSample')}</div>
                 )}
-                <EnrollmentJobStatus job={currentJob} labels={labels} />
+                <EnrollmentJobStatus job={currentJob} labels={labels} lang={locale} />
                 {enrollErrorText && (
                   <div role="alert" style={{ color: '#f87171', fontSize: 13, marginTop: 4 }}>{enrollErrorText}</div>
                 )}
