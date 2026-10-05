@@ -113,7 +113,9 @@ function sendIpcRequest(command, payload = {}, timeoutMs = 3000) {
         if (parsed.status === 'Ok') {
           resolve(parsed.payload);
         } else {
-          reject(new Error(parsed.error ? parsed.error.message : 'IPC request rejected'));
+          const rejection = new Error(parsed.error ? parsed.error.message : 'IPC request rejected');
+          if (parsed.error && typeof parsed.error.code === 'string') rejection.code = parsed.error.code;
+          reject(rejection);
         }
       } catch (err) {
         reject(new Error(`Failed to parse daemon response: ${err.message}`));
@@ -1607,12 +1609,18 @@ ipcMain.handle('set_voice_profile', async (_event, args) => {
           });
         }
       } catch (e) {
-        forwardError = String((e && e.message) || 'voice profile forward failed').slice(0, 200);
-        console.log('[Clearcore IPC] Daemon voice profile forward failed');
+        forwardError = voiceProfileMerge.classifyForwardError(e);
+        console.log('[Clearcore IPC] Daemon voice profile forward failed:', forwardError);
       }
+    } else {
+      forwardError = 'service_unavailable';
     }
 
-    const result = forwardError ? { ...updated, voice_profile_error: forwardError } : updated;
+    const result = voiceProfileMerge.buildSetVoiceProfileResult({
+      updated,
+      serviceStatus: await getServiceVoiceProfileStatus(),
+      forwardError,
+    });
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('voice-profile-update', result);
     }
