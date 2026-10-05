@@ -255,6 +255,19 @@ const VOICE_PROFILE_MARKERS: [&str; 5] = [
     "integrity_hash",
 ];
 
+/// Files and locations of the voice profile directory (profiles, recorded samples, intake
+/// suggestions) and raw audio. Any text naming one of them is dropped whole: diagnostics never
+/// carry voice samples, WAVs or profiles, nor paths that lead to them.
+const VOICE_ARTIFACT_EXCLUSIONS: [&str; 7] = [
+    "active_profile",
+    "voice_samples",
+    "intake_suggestions",
+    "profile.bin",
+    ".wav",
+    "samples/",
+    "samples\\",
+];
+
 /// A run of this many consecutive numbers looks like a vector (`FiLM`, EQ gains, embedding).
 const NUMERIC_VECTOR_RUN: usize = 8;
 
@@ -262,6 +275,7 @@ fn contains_voice_profile_material(text: &str) -> bool {
     let lower = text.to_lowercase();
     if VOICE_PROFILE_MARKERS
         .iter()
+        .chain(VOICE_ARTIFACT_EXCLUSIONS.iter())
         .any(|marker| lower.contains(marker))
     {
         return true;
