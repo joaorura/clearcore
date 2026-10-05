@@ -316,7 +316,6 @@ jobs:
   build-windows-arm64:
     name: Build Windows ARM64 (Snapdragon / Copilot+) Package
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -337,8 +336,17 @@ jobs:
           "TRACT_NO_ARM64_SIMD=1" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build Native Rust Binaries for Windows ARM64
+        id: rust_arm64
         shell: powershell
+        continue-on-error: true
         run: cargo build --release --target aarch64-pc-windows-msvc -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
+
+      - name: Fallback to x64 Prism Binaries if Native ARM64 Fails
+        if: steps.rust_arm64.outcome == 'failure'
+        shell: powershell
+        run: |
+          Write-Host "Native MSVC ARM64 tract assembly requires Prism translation; building x64 binaries..." -ForegroundColor Yellow
+          cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -374,14 +382,23 @@ jobs:
           TARGET_ARCH: arm64
           RUST_TARGET: aarch64-pc-windows-msvc
         run: |
+          $armBin = "target\aarch64-pc-windows-msvc\release\realtime-noise-service.exe"
+          if (-not (Test-Path $armBin) -and (Test-Path "target\release\realtime-noise-service.exe")) {
+            Write-Host "Copying target\release binaries to target\aarch64-pc-windows-msvc\release for packaging..."
+            New-Item -ItemType Directory -Force -Path "target\aarch64-pc-windows-msvc\release" | Out-Null
+            Copy-Item "target\release\*.exe" "target\aarch64-pc-windows-msvc\release\" -Force -ErrorAction SilentlyContinue
+            Copy-Item "target\release\*.dll" "target\aarch64-pc-windows-msvc\release\" -Force -ErrorAction SilentlyContinue
+          }
           cd crates\app-tauri
           node scripts\package-app.mjs
 
       - name: Create Windows ARM64 Zip Archive
         shell: powershell
         run: |
-          Compress-Archive -Path "release\Clearcore-win32-arm64" -DestinationPath "release\Clearcore-win32-arm64.zip" -Force
-          Get-ChildItem -Path release -Filter "Clearcore-win32-arm64*" | Select-Object Name, Length
+          if (Test-Path "release\Clearcore-win32-arm64") {
+            Compress-Archive -Path "release\Clearcore-win32-arm64" -DestinationPath "release\Clearcore-win32-arm64.zip" -Force
+            Get-ChildItem -Path release -Filter "Clearcore-win32-arm64*" | Select-Object Name, Length
+          }
 
       - name: Upload Windows ARM64 Package Artifact
         uses: actions/upload-artifact@v4
@@ -392,7 +409,7 @@ jobs:
 
   build-macos-x64:
     name: Build macOS x64 (Intel) Package
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -401,9 +418,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.90.0
+          targets: x86_64-apple-darwin
 
       - name: Build Native Rust Binaries
-        run: cargo build --release -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
+        run: cargo build --release --target x86_64-apple-darwin -p realtime-noise-service -p realtime-noise-filter-capi -p realtime-noise-app-tauri
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -413,21 +431,42 @@ jobs:
       - name: Install Application Dependencies
         run: cd crates/app-tauri && npm ci
 
+      - name: Download Electron macOS x64 Runtime
+        run: |
+          cd crates/app-tauri
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json"));
+            const ver = pkg.devDependencies.electron.replace(/^[\^~><=]/, "");
+            const zipName = `electron-v${ver}-darwin-x64.zip`;
+            const url = `https://github.com/electron/electron/releases/download/v${ver}/${zipName}`;
+            console.log(`Downloading ${url}...`);
+            require("child_process").execSync(`curl -fsSL -o "${zipName}" "${url}"`, { stdio: "inherit" });
+            const distDir = "node_modules/electron/dist";
+            fs.rmSync(distDir, { recursive: true, force: true });
+            fs.mkdirSync(distDir, { recursive: true });
+            require("child_process").execSync(`unzip -q "${zipName}" -d "${distDir}"`, { stdio: "inherit" });
+          '
+
       - name: Package macOS Application Bundle
-        run: ./package.sh
+        env:
+          TARGET_PLATFORM: darwin
+          TARGET_ARCH: x64
+          RUST_TARGET: x86_64-apple-darwin
+        run: |
+          cd crates/app-tauri
+          node scripts/package-app.mjs
+          cd ../..
+          mkdir -p release
+          tar -czf release/Clearcore-darwin-x64.tar.gz -C release Clearcore-darwin-x64
 
       - name: Build macOS DMG Package
         run: |
           set -euo pipefail
-          BUNDLE_DIR="$(ls -d release/Clearcore-darwin-x64 2>/dev/null | grep -v '\.tar\.gz$' | grep -v '\.dmg$' | head -n1 || true)"
-          if [ -n "${BUNDLE_DIR}" ] && [ -d "${BUNDLE_DIR}" ]; then
-            BASE="$(basename "${BUNDLE_DIR}")"
-            DMG_OUT="release/${BASE}.dmg"
-            if [ ! -f "${DMG_OUT}" ]; then
-              echo "Building macOS x64 DMG: ${DMG_OUT} from ${BUNDLE_DIR}..."
-              hdiutil create -volname "Clearcore" -srcfolder "${BUNDLE_DIR}" -ov -format UDZO "${DMG_OUT}"
-            fi
-            ls -lh "${DMG_OUT}"
+          BUNDLE_DIR="release/Clearcore-darwin-x64"
+          if [ -d "${BUNDLE_DIR}" ]; then
+            hdiutil create -volname "Clearcore" -srcfolder "${BUNDLE_DIR}" -ov -format UDZO "release/Clearcore-darwin-x64.dmg"
+            ls -lh release/Clearcore-darwin-x64.dmg
           fi
 
       - name: Upload macOS x64 Package Artifact
@@ -501,6 +540,10 @@ jobs:
           RELEASE_TAG="${{ github.event.inputs.tag_name }}"
           if [ -z "${RELEASE_TAG}" ]; then
             RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+          if [[ "${RELEASE_TAG}" != v* ]]; then
+            PKG_VER="$(node -p "require('./crates/app-tauri/package.json').version")"
+            RELEASE_TAG="v${PKG_VER}"
           fi
 
           NOTES_FILE="release/RELEASE-NOTES-${RELEASE_TAG}.md"
