@@ -10,7 +10,8 @@ const RATE = 48000;
 const MAX_NAME = 64;
 const MAX_LABEL = 128;
 const MAX_META_BYTES = 256; // service limit on metadata, in UTF-8 bytes
-const JOB_ID_RE = /^job-[0-9]+$/;
+// The service prefixes the job table: sample-job-N (sample/take ingestion), profile-job-N (build).
+const JOB_ID_RE = /^(?:sample|profile)-job-[0-9]{1,9}$/;
 const KNOWN_CODES = new Set([
   'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE', 'ENROLL_JOB_NOT_FOUND',

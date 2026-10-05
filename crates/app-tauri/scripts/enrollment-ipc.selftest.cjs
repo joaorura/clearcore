@@ -11,10 +11,17 @@ for (const bad of [{ sampleRate: 44100 }, { pcm: new Float32Array([NaN]) }, { pc
   assert.throws(() => m.buildAddVoiceSampleCommand({ pcm: f, sampleRate: 48000, name: 'n', device: { label: 'Mic', idHash: hash }, ...bad }),
                 (e) => e.code === 'ENROLL_INVALID_AUDIO');
 }
-assert.deepStrictEqual(m.buildGetJobCommand({ jobId: 'job-12' }), { GetEnrollmentJob: { job_id: 'job-12' } });
+assert.deepStrictEqual(m.buildGetJobCommand({ jobId: 'profile-job-12' }), { GetEnrollmentJob: { job_id: 'profile-job-12' } });
 assert.throws(() => m.buildGetJobCommand({ jobId: '../x' }));
-assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', stage: 'zzz', error_code: 'ENROLL_BUDGET_EXCEEDED', remaining_seconds: 2.5 }).stage, 'queued');
-assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', stage: 'trim', error_code: 'ENROLL_BUDGET_EXCEEDED', remaining_seconds: 2.5 }).remainingSeconds, 2.5);
+// Job ids: the service prefixes the table (sample-job-N / profile-job-N); anything else is refused.
+assert.deepStrictEqual(m.buildGetJobCommand({ jobId: 'sample-job-1' }), { GetEnrollmentJob: { job_id: 'sample-job-1' } });
+for (const badId of ['job-1', 'sample-job-', 'profile-job-', 'sample-job-1;x', 'sample-job-1 ', 'other-job-1', '', 'sample-job-' + '9'.repeat(10), 'sample-job-' + '1'.repeat(400)]) {
+  assert.throws(() => m.buildGetJobCommand({ jobId: badId }), undefined, badId);
+  assert.strictEqual(m.mapJob({ job_id: badId, state: 'running' }).state, 'failed', badId);
+}
+assert.strictEqual(m.mapJob({ job_id: 'profile-job-12', state: 'running' }).jobId, 'profile-job-12');
+assert.strictEqual(m.mapJob({ job_id: 'sample-job-1', state: 'failed', stage: 'zzz', error_code: 'ENROLL_BUDGET_EXCEEDED', remaining_seconds: 2.5 }).stage, 'queued');
+assert.strictEqual(m.mapJob({ job_id: 'sample-job-1', state: 'failed', stage: 'trim', error_code: 'ENROLL_BUDGET_EXCEEDED', remaining_seconds: 2.5 }).remainingSeconds, 2.5);
 assert.strictEqual(m.mapSampleList({ samples: [{ id: 's', name: 'n', timestamp: '1', speech_seconds: 4, device_label: 'M', used_in_profile: true, needs_reenroll: false, other_microphone: false }], budget: { used_seconds: 4, max_seconds: 90, remaining_seconds: 86 } }).budget.remainingSeconds, 86);
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('secret text'), { code: 'ENROLL_BUDGET_EXCEEDED' })), 'ENROLL_BUDGET_EXCEEDED');
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('connect'), { code: 'ECONNREFUSED' })), 'SERVICE_UNAVAILABLE');
@@ -38,7 +45,7 @@ assert.throws(() => m.buildAddVoiceSampleCommand({ pcm: f, sampleRate: 48000, na
 assert.throws(() => m.buildAddVoiceSampleCommand({ pcm: 'nope', sampleRate: 48000, name: 'n', device: dev }), (e) => e.code === 'ENROLL_INVALID_AUDIO');
 assert.deepStrictEqual(m.buildBuildProfileCommand({ name: ' Ana ' }), { BuildVoiceProfile: { name: 'Ana' } });
 // stage / job mapping
-const j = m.mapJob({ job_id: 'job-2', state: 'done', stage: 'apply', sample_id: 's1', profile_id: 'p1', quality: { peak: 0.5, rms_dbfs: -20, active_fraction: 0.7, speech_seconds: 3 } });
+const j = m.mapJob({ job_id: 'sample-job-2', state: 'done', stage: 'apply', sample_id: 's1', profile_id: 'p1', quality: { peak: 0.5, rms_dbfs: -20, active_fraction: 0.7, speech_seconds: 3 } });
 assert.deepStrictEqual(j.quality, { peak: 0.5, rmsDbfs: -20, activeFraction: 0.7, speechSeconds: 3 });
 assert.strictEqual(j.sampleId, 's1'); assert.strictEqual(j.profileId, 'p1');
 assert.strictEqual(j.errorCode, null); assert.strictEqual(j.remainingSeconds, null);
@@ -54,22 +61,22 @@ assert.strictEqual(m.classifyEnrollError(new Error('boom')), 'ENROLL_FAILED');
 
 // handlers: fake ipcMain collects channels; fake sendIpcRequest records (command, timeout)
 const handlers = {}; const sent = [];
-let nextResult = { job_id: 'job-1' };
+let nextResult = { job_id: 'sample-job-1' };
 let nextError = null;
 m.registerEnrollmentHandlers({ handle: (ch, fn) => { handlers[ch] = fn; } },
   { sendIpcRequest: async (cmd, payload, timeout) => { sent.push([cmd, timeout]); if (nextError) throw nextError; return nextResult; } });
 assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', 'enrollment_build_profile', 'enrollment_delete_sample', 'enrollment_get_job', 'enrollment_list_samples']);
 (async () => {
   const r = await handlers.enrollment_add_sample({}, { pcm: f, sampleRate: 48000, name: 'n', device: { label: 'M', idHash: hash } });
-  assert.deepStrictEqual(r, { jobId: 'job-1' }); assert.strictEqual(sent[0][1], 60000);
+  assert.deepStrictEqual(r, { jobId: 'sample-job-1' }); assert.strictEqual(sent[0][1], 60000);
   const bad = await handlers.enrollment_add_sample({}, { pcm: f, sampleRate: 1, name: 'n', device: { label: 'M', idHash: hash } });
   assert.deepStrictEqual(bad, { errorCode: 'ENROLL_INVALID_AUDIO' });
   assert.strictEqual(sent.length, 1);
 
   await handlers.enrollment_build_profile({}, { name: 'Ana' });
   assert.deepStrictEqual(sent[1], [{ BuildVoiceProfile: { name: 'Ana' } }, 5000]);
-  nextResult = { job_id: 'job-3', state: 'running', stage: 'eq' };
-  const g = await handlers.enrollment_get_job({}, { jobId: 'job-3' });
+  nextResult = { job_id: 'sample-job-3', state: 'running', stage: 'eq' };
+  const g = await handlers.enrollment_get_job({}, { jobId: 'sample-job-3' });
   assert.strictEqual(g.stage, 'eq'); assert.strictEqual(sent[2][1], 5000);
   assert.deepStrictEqual(await handlers.enrollment_get_job({}, { jobId: '../x' }), { errorCode: 'ENROLL_FAILED' });
   nextResult = { samples: [], budget: { used_seconds: 0, max_seconds: 90, remaining_seconds: 90 } };
@@ -114,20 +121,20 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
   const n3 = mk('语'.repeat(64), 'M').name;
   assert.ok(Buffer.byteLength(n3) <= 256); assert.strictEqual(Array.from(n3).length, 64);
   // fail closed
-  for (const bad of [{}, { state: 'weird' }, { job_id: 'x', state: 'running' }, { job_id: 'job-1' }, { job_id: 'job-1', state: 'weird' }, null, undefined]) {
+  for (const bad of [{}, { state: 'weird' }, { job_id: 'x', state: 'running' }, { job_id: 'sample-job-1' }, { job_id: 'sample-job-1', state: 'weird' }, null, undefined]) {
     const j = m.mapJob(bad);
     assert.strictEqual(j.state, 'failed'); assert.strictEqual(j.errorCode, 'ENROLL_FAILED');
   }
-  assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'running' }).state, 'running');
-  assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', error_code: 'bogus' }).errorCode, 'ENROLL_FAILED');
-  assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', remaining_seconds: Infinity }).remainingSeconds, null);
-  assert.strictEqual(m.mapJob({ job_id: 'job-1', state: 'failed', remaining_seconds: NaN }).remainingSeconds, null);
+  assert.strictEqual(m.mapJob({ job_id: 'sample-job-1', state: 'running' }).state, 'running');
+  assert.strictEqual(m.mapJob({ job_id: 'sample-job-1', state: 'failed', error_code: 'bogus' }).errorCode, 'ENROLL_FAILED');
+  assert.strictEqual(m.mapJob({ job_id: 'sample-job-1', state: 'failed', remaining_seconds: Infinity }).remainingSeconds, null);
+  assert.strictEqual(m.mapJob({ job_id: 'sample-job-1', state: 'failed', remaining_seconds: NaN }).remainingSeconds, null);
   // sample list filtering
   const sl = m.mapSampleList({ samples: [null, 5, {}, { id: 3 }, { id: 'ok', name: 'n' }], budget: {} });
   assert.deepStrictEqual(sl.samples.map((x) => x.id), ['ok']);
 }
 (async () => {
-  const hs = {}; let res = { job_id: 'job-9' };
+  const hs = {}; let res = { job_id: 'sample-job-9' };
   m.registerEnrollmentHandlers({ handle: (ch, fn) => { hs[ch] = fn; } }, { sendIpcRequest: async () => res });
   const dev = { label: 'M', idHash: hash };
   res = { job_id: 'oops' };
@@ -136,7 +143,7 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
   res = {};
   assert.deepStrictEqual(await hs.enrollment_build_profile({}, { name: 'n' }), { errorCode: 'ENROLL_FAILED' });
   // PCM buffer zeroed after send (success and failure)
-  res = { job_id: 'job-9' };
+  res = { job_id: 'sample-job-9' };
   const p1 = new Float32Array([0.5, 0.25]);
   await hs.enrollment_add_sample({}, { pcm: p1, sampleRate: 48000, name: 'n', device: dev });
   assert.ok(p1.every((v) => v === 0));
@@ -146,5 +153,10 @@ assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', '
   const p3 = new Float32Array([0.5]);
   await hs.enrollment_add_sample({}, { pcm: p3, sampleRate: 1, name: 'n', device: dev });
   assert.ok(p3.every((v) => v === 0));
+  res = { job_id: 'profile-job-4' };
+  assert.deepStrictEqual(await hs.enrollment_build_profile({}, { name: 'n' }), { jobId: 'profile-job-4' });
+  res = { job_id: 'job-4' };
+  assert.deepStrictEqual(await hs.enrollment_build_profile({}, { name: 'n' }), { errorCode: 'ENROLL_FAILED' });
+  assert.deepStrictEqual(await hs.enrollment_add_sample({}, { pcm: new Float32Array([0.5]), sampleRate: 48000, name: 'n', device: dev }), { errorCode: 'ENROLL_FAILED' });
   console.log('enrollment-ipc round-1 selftest passed.');
 })().catch((e) => { console.error(e); process.exit(1); });
