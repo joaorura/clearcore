@@ -77,6 +77,12 @@ describe('EnrollPanel', () => {
     const m = html(<EnrollPanel {...enrollProps({ captureError: 'no-mic', feedback: { jobBusy: true, currentJob: runningJob, enrollErrorText: 'bad' } })} />);
     expect(m).toContain('no-mic'); expect(m).toContain('stageTrim'); expect(m).toContain('bad');
   });
+  it('shows sending indicator and disables stepper while submitting sample', () => {
+    const m = html(<EnrollPanel {...enrollProps({ isSubmitting: true })} />);
+    expect(m).toContain('voiceProfile.sendingSample');
+    expect(m).not.toContain('voiceProfile.recordSample');
+    expect(m).toMatch(/<button[^>]*class="stepper-segment[^"]*"[^>]*disabled=""/);
+  });
 });
 
 const list: SampleList = {

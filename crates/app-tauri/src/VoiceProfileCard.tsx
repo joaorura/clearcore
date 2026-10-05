@@ -110,8 +110,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const { profileStatus } = profile;
   const takes = useCallTakes();
   const { callTakes, refreshCallTakes } = takes;
-  const steps = useGuidedSteps({ recorder: rec, t, flash, deleteReplacedSample: removeSample });
-  const { currentStep, setCurrentStep, isReadingMode, completedSteps } = steps;
+  const steps = useGuidedSteps({
+    recorder: rec,
+    t,
+    flash,
+    deleteReplacedSample: removeSample,
+    samples,
+  });
+  const { currentStep, setCurrentStep, isReadingMode, completedSteps, isSubmitting } = steps;
   const modal = useVoluntarySample({ recorder: rec, playback, jobs, t, samplesCount: samples.length, flash });
   const { isModalOpen, modalSampleName, setModalSampleName, modalCaptured } = modal;
 
@@ -128,7 +134,11 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       const list = await refreshSamples();
       await refreshCallTakes();
       const initialProfile = await profile.loadInitialStatus(list?.samples.length ?? 0);
-      if (hasServiceVoiceProfile(initialProfile)) setCurrentStep(5);
+      if (hasServiceVoiceProfile(initialProfile)) {
+        setCurrentStep(5);
+      } else if (list?.samples && list.samples.length > 0) {
+        steps.syncFromSamples(list.samples, true);
+      }
     };
     void initVoiceData();
   }, [refreshSamples, refreshCallTakes]);
@@ -163,13 +173,13 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const feedbackView = { jobBusy, currentJob, enrollErrorText };
   const feedbackFor = (tab: VoiceTabId) => jobFeedbackFor(tab, jobs.source, feedbackView);
   const badges = voiceTabBadges(samples.length, callTakes.length);
-  // While the microphone records, the other tabs stay closed so the stop button stays in view.
+  // While the microphone records or sample is being submitted, the other tabs stay closed.
   const tabs: TabDef[] = [
     { id: 'enroll', label: t('voiceProfile.tabEnroll') },
     { id: 'gallery', label: t('voiceProfile.tabGallery'), badge: badges.gallery },
     { id: 'calls', label: t('voiceProfile.tabCalls'), badge: badges.calls },
     { id: 'profile', label: t('voiceProfile.tabProfile') },
-  ].map((tab) => ({ ...tab, disabled: isRecording && tab.id !== activeTab }));
+  ].map((tab) => ({ ...tab, disabled: (isRecording || isSubmitting) && tab.id !== activeTab }));
 
   const renderPanel = (id: string) => {
     switch (parseVoiceTab(id)) {
@@ -229,13 +239,14 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             isReadingMode={isReadingMode}
             completedSteps={completedSteps}
             isRecording={isRecording}
+            isSubmitting={isSubmitting}
             liveVoiceLevel={liveVoiceLevel}
             recordingElapsedSeconds={recordingElapsedSeconds}
             captureError={isModalOpen ? null : captureError}
             jobBusy={jobBusy}
             isStarting={isStarting}
             feedback={isModalOpen ? null : feedbackFor('enroll')}
-            onSelectStep={(step) => setCurrentStep(stepAfterSelect(currentStep, step, isRecording))}
+            onSelectStep={(step) => setCurrentStep(stepAfterSelect(currentStep, step, isRecording || isSubmitting))}
             onToggleReadingMode={steps.toggleReadingMode}
             onStartStep={(step) => void steps.startStep(step)}
             onFinishStep={(step) => void steps.finishStep(step)}

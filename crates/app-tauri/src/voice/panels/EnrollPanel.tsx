@@ -17,6 +17,8 @@ export interface EnrollPanelProps {
   /** Null while the voluntary sample modal shows it instead. */
   captureError: string | null;
   jobBusy: boolean;
+  /** True while the recorded sample is being submitted/processed in the guided flow. */
+  isSubmitting?: boolean;
   /** The microphone is being opened: recording cannot be started again. */
   isStarting?: boolean;
   /** Feedback of the sample job started here (null when another tab started the job). */
@@ -34,6 +36,7 @@ export interface EnrollPanelProps {
 /** Guided 5-step enrollment: question, live level, record/stop, take preview and job feedback. */
 export function EnrollPanel(p: EnrollPanelProps) {
   const { t, currentStep, completedSteps, isReadingMode, isRecording } = p;
+  const isProcessing = Boolean(p.jobBusy || p.isSubmitting);
   const completedCount = Object.keys(completedSteps).length;
   const isAllStepsCompleted = completedCount >= GUIDED_STEP_COUNT;
   const currentQ = STEP_QUESTIONS[currentStep - 1] ?? STEP_QUESTIONS[0];
@@ -89,7 +92,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
                   className={`stepper-segment ${isDone ? 'done' : isCur ? 'current' : 'pending'}`}
                   aria-label={t('voiceProfile.stepTitle', { n: String(step) })}
                   aria-current={isCur ? 'step' : undefined}
-                  disabled={isRecording}
+                  disabled={isRecording || isProcessing}
                   onClick={() => p.onSelectStep(step)}
                   title={t('voiceProfile.stepTitle', { n: String(step) })}
                   style={{ background: 'transparent', border: 'none', padding: 0, font: 'inherit', color: 'inherit' }}
@@ -120,7 +123,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
               {p.captureError}
             </div>
           )}
-          {!isRecording && !p.jobBusy && p.feedback?.enrollErrorText && (
+          {!isRecording && !isProcessing && p.feedback?.enrollErrorText && (
             <div role="alert" className="feedback-banner" style={{ color: '#f87171', marginBottom: 10, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.12)', borderRadius: 6 }}>
               ⚠️ {p.feedback.enrollErrorText}
             </div>
@@ -129,7 +132,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
           <div className="stepper-action-row">
             {isRecording ? (
               <RecordingIndicator t={t} locale={p.locale} elapsed={p.recordingElapsedSeconds} onStop={() => p.onFinishStep(currentStep)} showHint />
-            ) : p.jobBusy ? (
+            ) : isProcessing ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: 'rgba(59, 130, 246, 0.15)', borderRadius: 8, color: '#93c5fd' }}>
                 <span style={{ fontSize: '1.1rem' }}>⏳</span>
                 <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{t('voiceProfile.sendingSample')}</span>
@@ -137,23 +140,23 @@ export function EnrollPanel(p: EnrollPanelProps) {
             ) : currentTake ? (
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 {/* No "Ouvir": the raw take was zeroed once sent to the service. */}
-                <button className="action-btn" disabled={p.jobBusy || p.isStarting} onClick={() => p.onRedoStep(currentStep)}>
+                <button className="action-btn" disabled={isProcessing || p.isStarting} onClick={() => p.onRedoStep(currentStep)}>
                   {t('voiceProfile.redoSample')}
                 </button>
                 {currentStep < GUIDED_STEP_COUNT && (
-                  <button className="action-btn primary-next-btn" onClick={p.onNextStep}>
+                  <button className="action-btn primary-next-btn" disabled={isProcessing} onClick={p.onNextStep}>
                     {t('voiceProfile.nextStep')}
                   </button>
                 )}
               </div>
             ) : (
-              <button className="record-btn-trigger" disabled={p.jobBusy || p.isStarting} onClick={() => p.onStartStep(currentStep)}>
+              <button className="record-btn-trigger" disabled={isProcessing || p.isStarting} onClick={() => p.onStartStep(currentStep)}>
                 🎙️ {t('voiceProfile.recordSample')}
               </button>
             )}
 
             {isAllStepsCompleted && (
-              <button className="activate-profile-master-btn" disabled={p.jobBusy || isRecording} onClick={p.onBuildProfile}>
+              <button className="activate-profile-master-btn" disabled={isProcessing || isRecording} onClick={p.onBuildProfile}>
                 {t('voiceProfile.activateProfileBtn')}
               </button>
             )}

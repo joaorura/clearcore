@@ -1,5 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
-import { GUIDED_STEP_COUNT, STEP_QUESTIONS, replacedSampleToDelete, stepAfterSubmit, type CompletedSteps } from './guidedSteps';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ServiceSample } from '../enrollmentTypes';
+import {
+  GUIDED_STEP_COUNT,
+  STEP_QUESTIONS,
+  initialStepFromCompleted,
+  replacedSampleToDelete,
+  stepAfterSubmit,
+  syncCompletedStepsFromSamples,
+  type CompletedSteps,
+} from './guidedSteps';
 import type { EnrollmentRecorder } from './useEnrollmentRecorder';
 import type { Translate } from './voiceProfileLogic';
 
@@ -11,12 +20,15 @@ export interface GuidedSteps {
   setCurrentStep: (step: number) => void;
   isReadingMode: boolean;
   completedSteps: CompletedSteps;
+  setCompletedSteps: React.Dispatch<React.SetStateAction<CompletedSteps>>;
   startStep: (step: number) => Promise<void>;
   finishStep: (step: number) => Promise<void>;
   redoStep: (step: number) => void;
   nextStep: () => void;
   toggleReadingMode: () => void;
   resetSteps: () => void;
+  isSubmitting: boolean;
+  syncFromSamples: (samples: ServiceSample[], advanceStep?: boolean) => void;
 }
 
 /** The 5-step guided enrollment: each accepted take is one sample in the service. */
@@ -26,11 +38,16 @@ export function useGuidedSteps(opts: {
   flash: (message: string, ms: number) => void;
   /** Deletes a sample in the service (the old take of a step recorded again). */
   deleteReplacedSample: (sampleId: string) => Promise<unknown>;
+  samples?: ServiceSample[];
 }): GuidedSteps {
-  const { recorder, t, flash, deleteReplacedSample } = opts;
+  const { recorder, t, flash, deleteReplacedSample, samples } = opts;
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [isReadingMode, setIsReadingMode] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [completedSteps, setCompletedSteps] = useState<CompletedSteps>({});
+  const hasExplicitlyResetRef = useRef<boolean>(false);
+  const hasAutoInitializedStepRef = useRef<boolean>(false);
+
   // Read at the end of a recording (the limit timer holds an older closure).
   const completedRef = useRef<CompletedSteps>(completedSteps);
   completedRef.current = completedSteps;
@@ -43,31 +60,61 @@ export function useGuidedSteps(opts: {
     }
   }, []);
 
-  const finishStep = async (step: number) => {
-    const captured = await recorder.stopCapture();
-    if (!captured) return;
-
-    const previous = completedRef.current[step];
-    const { outcome, sampleId } = await recorder.submitSample(captured, t(STEP_QUESTIONS[step - 1].categoryKey), 'enroll');
-    // A failed take keeps the step (and its sample in the service) as it was.
-    if (outcome.kind !== 'done') {
-      console.warn('[VoiceProfile] finishStep not done:', outcome);
-      return;
-    }
+  const syncFromSamples = useCallback((newSamples: ServiceSample[], advanceStep = false) => {
+    if (hasExplicitlyResetRef.current) return;
     setCompletedSteps((prev) => {
-      const take = stepAfterSubmit(prev[step], outcome, sampleId, captured);
-      return take ? { ...prev, [step]: take } : prev;
+      const synced = syncCompletedStepsFromSamples(newSamples, prev, t);
+      if (advanceStep && Object.keys(synced).length > 0) {
+        setCurrentStep(initialStepFromCompleted(synced));
+      }
+      return synced;
     });
-    flash(t('voiceProfile.sampleCompleted'), 3500);
-    if (step < GUIDED_STEP_COUNT) {
-      setCurrentStep(step + 1);
+  }, [t]);
+
+  // Synchronize wizard steps when existing daemon gallery samples load or update
+  useEffect(() => {
+    if (!samples || hasExplicitlyResetRef.current) return;
+    setCompletedSteps((prev) => {
+      const synced = syncCompletedStepsFromSamples(samples, prev, t);
+      if (!hasAutoInitializedStepRef.current && samples.length > 0) {
+        hasAutoInitializedStepRef.current = true;
+        setCurrentStep(initialStepFromCompleted(synced));
+      }
+      return synced;
+    });
+  }, [samples, t]);
+
+  const finishStep = async (step: number) => {
+    setIsSubmitting(true);
+    try {
+      const captured = await recorder.stopCapture();
+      if (!captured) return;
+
+      const previous = completedRef.current[step];
+      const { outcome, sampleId } = await recorder.submitSample(captured, t(STEP_QUESTIONS[step - 1].categoryKey), 'enroll');
+      // A failed take keeps the step (and its sample in the service) as it was.
+      if (outcome.kind !== 'done') {
+        console.warn('[VoiceProfile] finishStep not done:', outcome);
+        return;
+      }
+      hasExplicitlyResetRef.current = false;
+      setCompletedSteps((prev) => {
+        const take = stepAfterSubmit(prev[step], outcome, sampleId, captured);
+        return take ? { ...prev, [step]: take } : prev;
+      });
+      flash(t('voiceProfile.sampleCompleted'), 3500);
+      if (step < GUIDED_STEP_COUNT) {
+        setCurrentStep(step + 1);
+      }
+      // Known limit: the new sample is added BEFORE the old one is deleted, so the old one still
+      // counts against the 90 s budget while the new one is checked. With the budget almost full,
+      // the new take is refused with ENROLL_BUDGET_EXCEEDED: safe (nothing is lost, the old sample
+      // stays) and the card opens the gallery so the user can free speech first.
+      const replaced = replacedSampleToDelete(previous, outcome, sampleId);
+      if (replaced !== null) await deleteReplacedSample(replaced);
+    } finally {
+      setIsSubmitting(false);
     }
-    // Known limit: the new sample is added BEFORE the old one is deleted, so the old one still
-    // counts against the 90 s budget while the new one is checked. With the budget almost full,
-    // the new take is refused with ENROLL_BUDGET_EXCEEDED: safe (nothing is lost, the old sample
-    // stays) and the card opens the gallery so the user can free speech first.
-    const replaced = replacedSampleToDelete(previous, outcome, sampleId);
-    if (replaced !== null) await deleteReplacedSample(replaced);
   };
 
   // Up to MAX_RECORD_SECONDS with manual stop; the limit finishes the step by itself.
@@ -93,13 +140,19 @@ export function useGuidedSteps(opts: {
   };
 
   return {
-    currentStep, setCurrentStep, isReadingMode, completedSteps,
+    currentStep, setCurrentStep, isReadingMode, completedSteps, setCompletedSteps,
     startStep, finishStep, redoStep,
     nextStep: () => { if (currentStep < GUIDED_STEP_COUNT) setCurrentStep(currentStep + 1); },
     toggleReadingMode,
+    isSubmitting,
+    syncFromSamples,
     // "Full re-enrollment" only restarts the guided flow here: it clears completedSteps and so
     // forgets the steps' sampleIds. The old samples stay in the service and keep using the speech
     // budget; nothing deletes them automatically (spec §4.4) — the user deletes them in the gallery.
-    resetSteps: () => { setCompletedSteps({}); setCurrentStep(1); },
+    resetSteps: () => {
+      hasExplicitlyResetRef.current = true;
+      setCompletedSteps({});
+      setCurrentStep(1);
+    },
   };
 }

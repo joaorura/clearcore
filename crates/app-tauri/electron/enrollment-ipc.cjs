@@ -203,8 +203,9 @@ function registerEnrollmentHandlers(ipcMain, { sendIpcRequest }) {
       try {
         return await fn(args || {});
       } catch (err) {
-        console.error(`[Clearcore Voice IPC] ${channel} failed:`, err?.message || err);
-        return { errorCode: classify(err) };
+        const code = classify(err);
+        console.error(`[Clearcore Voice IPC] ${channel} failed:`, code);
+        return { errorCode: code };
       }
     });
   };
