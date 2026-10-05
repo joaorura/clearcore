@@ -278,3 +278,17 @@ fn latest_pending_request_wins() {
     assert_eq!(*rig.calls.lock().unwrap(), vec![None]);
     rig.engine.stop().unwrap();
 }
+
+#[test]
+fn backend_error_text_never_reaches_voice_profile_error() {
+    let mut rig = rig();
+    rig.supports.store(false, Ordering::SeqCst);
+    let _ = rig
+        .engine
+        .set_voice_profile(VoiceProfileUpdate::Set(profile("a")));
+    let message = rig.engine.voice_profile_error().unwrap();
+    assert!(
+        !message.contains("voice profile conditioning"),
+        "backend error text leaked into the status field: {message}"
+    );
+}

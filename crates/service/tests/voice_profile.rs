@@ -631,3 +631,85 @@ fn backend_swap_reapplies_the_stored_profile() {
     assert_eq!(status.payload["is_voice_profile_active"], true);
     assert_eq!(status.payload["voice_profile_error"], json!(null));
 }
+
+#[test]
+fn set_backend_over_ipc_reapplies_the_stored_profile() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _) = daemon_with(&dir, true);
+    set_profile(&mut daemon, &profile_json("a"));
+    assert_eq!(
+        send(&mut daemon, IpcCommand::GetStatus).payload["active_voice_profile_id"],
+        "a"
+    );
+
+    // The real IPC path instantiates a real backend by name ("cpu" = Tract).
+    let response = send(
+        &mut daemon,
+        IpcCommand::SetBackend(realtime_noise_ipc::BackendPayload::Direct("cpu".to_owned())),
+    );
+    assert_eq!(response.status, IpcStatus::Ok);
+
+    // Whatever the resolved backend is, the stored profile must have been retried on it: the
+    // reported state is either "applied, no error" or "not applied, with a generic error".
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["stored_voice_profile_id"], "a");
+    let active = status.payload["active_voice_profile_id"].clone();
+    let error = status.payload["voice_profile_error"].clone();
+    assert!(
+        (active == "a" && error.is_null()) || (active.is_null() && error.is_string()),
+        "incoherent status after SetBackend: active={active} error={error}"
+    );
+}
+
+#[test]
+fn reapply_after_the_profile_file_vanished_drops_the_stale_id() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _) = daemon_with(&dir, true);
+    set_profile(&mut daemon, &profile_json("a"));
+    // The first backend rejects the profile, so the second reapply has to reload it from disk.
+    daemon.install_backend(
+        Box::new(ProfileBackend {
+            supports: false,
+            calls: Calls::default(),
+            knobs: Knobs::default(),
+        }),
+        "no-support",
+    );
+    for entry in std::fs::read_dir(&dir).expect("dir") {
+        std::fs::remove_file(entry.expect("entry").path()).expect("rm");
+    }
+
+    daemon.install_backend(
+        Box::new(ProfileBackend {
+            supports: true,
+            calls: Calls::default(),
+            knobs: Knobs::default(),
+        }),
+        "support",
+    );
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["stored_voice_profile_id"], json!(null));
+    assert_eq!(status.payload["voice_profile_selected"], false);
+    assert!(status.payload["voice_profile_error"].is_string());
+}
+
+#[test]
+fn public_select_backend_reapplies_the_stored_profile() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _) = daemon_with(&dir, true);
+    set_profile(&mut daemon, &profile_json("a"));
+
+    let _ = daemon.select_backend("cpu");
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    let active = status.payload["active_voice_profile_id"].clone();
+    let error = status.payload["voice_profile_error"].clone();
+    assert!(
+        (active == "a" && error.is_null()) || (active.is_null() && error.is_string()),
+        "incoherent status after select_backend: active={active} error={error}"
+    );
+}

@@ -144,6 +144,8 @@ pub(crate) struct EngineSharedState {
     pub(crate) voice_profile_error: Option<String>,
 }
 
+const VOICE_PROFILE_NOT_APPLIED: &str = "voice profile not applied by backend";
+
 /// Applies a voice profile update to the active backend and records the outcome.
 /// A failed update leaves the previously applied profile id unchanged.
 pub(crate) fn apply_profile_update(state: &mut EngineSharedState, update: &VoiceProfileUpdate) {
@@ -160,7 +162,8 @@ pub(crate) fn apply_profile_update(state: &mut EngineSharedState, update: &Voice
             state.applied_voice_profile_id = id;
             state.voice_profile_error = None;
         }
-        Err(e) => state.voice_profile_error = Some(e.to_string()),
+        // Constant on purpose: backend errors can embed profile hashes (biometric data).
+        Err(_) => state.voice_profile_error = Some(VOICE_PROFILE_NOT_APPLIED.into()),
     }
 }
 

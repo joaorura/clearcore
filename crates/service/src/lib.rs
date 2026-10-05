@@ -50,6 +50,7 @@ pub struct ServiceDaemon {
 /// received JSON may appear in a response, not even in an error.
 const INVALID_PROFILE_MESSAGE: &str = "Invalid voice profile";
 const PERSIST_FAILED_MESSAGE: &str = "Failed to persist voice profile";
+const MISSING_MESSAGE: &str = "The stored voice profile is no longer on disk";
 const NOT_APPLIED_MESSAGE: &str = "The backend could not apply the stored voice profile";
 const LOAD_FAILED_MESSAGE: &str =
     "The stored voice profile failed validation or has insecure permissions";
@@ -248,16 +249,21 @@ impl ServiceDaemon {
         reapply_stored_profile(
             &mut self.supervisor,
             self.profile_store.as_ref(),
-            self.stored_voice_profile_id.as_deref(),
+            &mut self.stored_voice_profile_id,
             &mut self.voice_profile_error,
         );
     }
 
+    /// Resolves and installs a backend by name, then retries the stored voice profile on it.
     pub fn select_backend(&mut self, request: &str) -> BackendResolutionInfo {
-        self.supervisor.select_backend(
+        select_backend_and_reapply(
+            &mut self.supervisor,
             request,
             self.model_dir.as_deref(),
             self.repo_root.as_deref(),
+            self.profile_store.as_ref(),
+            &mut self.stored_voice_profile_id,
+            &mut self.voice_profile_error,
         )
     }
 
@@ -309,6 +315,11 @@ impl ServiceDaemon {
                                 "dsp_preset": preset_ipc,
                                 "crash_count_15m": status.crash_count_15m,
                                 "total_crashes": status.total_crashes,
+                                // Voice profile fields describe the SERVICE's own backend: the
+                                // profile is "applied" when that backend accepted it. The packaged
+                                // audio path (filter-capi / helper) does not use it yet (stage 2).
+                                // Reported in every mode, including Mute, Bypass and
+                                // TerminalSafeState.
                                 "active_voice_profile_id": self.supervisor.active_voice_profile_id(),
                                 "stored_voice_profile_id": self.stored_voice_profile_id,
                                 "voice_profile_selected": self.stored_voice_profile_id.is_some(),
@@ -338,15 +349,13 @@ impl ServiceDaemon {
                     }
                     IpcCommand::SetBackend(payload) => {
                         let req_name = payload.as_str();
-                        let info = self.supervisor.select_backend(
+                        let info = select_backend_and_reapply(
+                            &mut self.supervisor,
                             req_name,
                             self.model_dir.as_deref(),
                             self.repo_root.as_deref(),
-                        );
-                        reapply_stored_profile(
-                            &mut self.supervisor,
                             self.profile_store.as_ref(),
-                            self.stored_voice_profile_id.as_deref(),
+                            &mut self.stored_voice_profile_id,
                             &mut self.voice_profile_error,
                         );
                         IpcResponse::success(
@@ -726,16 +735,31 @@ fn restore_previous(
     }
 }
 
+/// Single path for every backend selection (IPC `SetBackend` and `ServiceDaemon::select_backend`).
+fn select_backend_and_reapply(
+    supervisor: &mut EngineSupervisor,
+    request: &str,
+    model_dir: Option<&Path>,
+    repo_root: Option<&Path>,
+    store: Option<&ProfileStore>,
+    stored_slot: &mut Option<String>,
+    error: &mut Option<String>,
+) -> BackendResolutionInfo {
+    let info = supervisor.select_backend(request, model_dir, repo_root);
+    reapply_stored_profile(supervisor, store, stored_slot, error);
+    info
+}
+
 fn reapply_stored_profile(
     supervisor: &mut EngineSupervisor,
     store: Option<&ProfileStore>,
-    stored_id: Option<&str>,
+    stored_slot: &mut Option<String>,
     error: &mut Option<String>,
 ) {
-    let (Some(store), Some(stored_id)) = (store, stored_id) else {
+    let (Some(store), Some(id)) = (store, stored_slot.clone()) else {
         return;
     };
-    if supervisor.active_voice_profile_id() == Some(stored_id) {
+    if supervisor.active_voice_profile_id() == Some(id.as_str()) {
         *error = None;
         return;
     }
@@ -746,7 +770,11 @@ fn reapply_stored_profile(
                 .err()
                 .map(|_| NOT_APPLIED_MESSAGE.to_owned());
         }
-        Ok(None) => {}
+        Ok(None) => {
+            // The file vanished behind our back: the id no longer names anything on disk.
+            *stored_slot = None;
+            *error = Some(MISSING_MESSAGE.to_owned());
+        }
         Err(_) => *error = Some(LOAD_FAILED_MESSAGE.to_owned()),
     }
 }
