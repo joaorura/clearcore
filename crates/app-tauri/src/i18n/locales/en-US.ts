@@ -332,7 +332,7 @@ export const enUS: Translations = {
         ENROLL_CLIPPING: 'The audio clipped. Move a little away from the microphone or lower the gain and record again.',
         ENROLL_TOO_QUIET: 'The audio is too quiet. Move closer to the microphone and record again.',
         ENROLL_TOO_LITTLE_SPEECH: 'There is too little speech in the recording. Speak for longer and record again.',
-        ENROLL_MODEL_NOT_CONFIGURED: 'The enrollment model is not configured in the service.',
+        ENROLL_MODEL_NOT_CONFIGURED: 'Model unavailable in the service: the voice enrollment model is not configured or no isolation model (denoiser) is available.',
         ENROLL_BUDGET_EXCEEDED: '90 s speech limit reached. Delete some audio from the gallery.',
         ENROLL_INVALID_AUDIO: 'The captured audio is invalid.',
         ENROLL_PAYLOAD_TOO_LARGE: 'The recording is too large to send.',

@@ -1,7 +1,7 @@
 # ClearCore Voice Enrollment Pipeline Design
 
 **Date:** 2026-10-05  
-**Status:** Draft for owner review; implementation pending  
+**Status:** Implemented (development-integrated: the enrollment model is the M3 development asset loaded only through `CLEARCORE_DEV_ENROLLMENT_ASSET`/`_SHA256`, the packaged virtual microphone does not apply the profile yet, and no improvement of isolation is claimed; see §10). The IPC contract as built is `docs/ipc-v1.md` §3.1.  
 **Builds on:** `2026-10-05-voice-profile-activation-and-runtime-guidance-design.md` (Stage 1, merged in `c893ea7`)  
 **Repositories:** `clearcore` (this spec) and `clearcore-train` (dev model asset, read-only here)
 

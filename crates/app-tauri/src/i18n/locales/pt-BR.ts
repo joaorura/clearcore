@@ -332,7 +332,7 @@ export const ptBR: Translations = {
         ENROLL_CLIPPING: 'O áudio saturou (clipping). Afaste-se um pouco do microfone ou reduza o ganho e grave de novo.',
         ENROLL_TOO_QUIET: 'O áudio ficou baixo demais. Aproxime-se do microfone e grave de novo.',
         ENROLL_TOO_LITTLE_SPEECH: 'Há pouca fala na gravação. Fale por mais tempo e grave de novo.',
-        ENROLL_MODEL_NOT_CONFIGURED: 'O modelo de enrollment não está configurado no serviço.',
+        ENROLL_MODEL_NOT_CONFIGURED: 'Modelo indisponível no serviço: o modelo de cadastro de voz não está configurado ou não há modelo de isolamento (denoiser) disponível.',
         ENROLL_BUDGET_EXCEEDED: 'Limite de 90 s de fala atingido. Apague algum áudio da galeria.',
         ENROLL_INVALID_AUDIO: 'O áudio capturado é inválido.',
         ENROLL_PAYLOAD_TOO_LARGE: 'A gravação é grande demais para ser enviada.',
