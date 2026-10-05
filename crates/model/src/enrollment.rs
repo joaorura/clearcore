@@ -21,11 +21,15 @@ use crate::voice_profile::{
 
 pub const ENROLLMENT_SAMPLE_RATE_HZ: u32 = 16_000;
 pub const ENROLLMENT_MIN_DURATION_SECS: f32 = 6.0;
-pub const ENROLLMENT_MAX_DURATION_SECS: f32 = 12.0;
+/// Engineering cap, not a training range.
+///
+/// The model was trained on 6-12 s recordings and durations up to 90 s were measured stable
+/// (spec section 3). The service enforces the same 90 s through its speech budget.
+pub const ENROLLMENT_MAX_DURATION_SECS: f32 = 90.0;
 /// 6 s at 16 kHz.
 pub const ENROLLMENT_MIN_SAMPLES: usize = 96_000;
-/// 12 s at 16 kHz.
-pub const ENROLLMENT_MAX_SAMPLES: usize = 192_000;
+/// 90 s at 16 kHz.
+pub const ENROLLMENT_MAX_SAMPLES: usize = 1_440_000;
 /// Highest accepted absolute sample value; above it the recording is considered clipped.
 pub const ENROLLMENT_MAX_PEAK: f32 = 0.99;
 /// Minimum overall level (RMS, dBFS) so a silent recording is refused.
@@ -345,9 +349,13 @@ pub use onnx::OnnxEnrollmentModel;
 
 #[cfg(feature = "tract")]
 mod onnx {
-    use std::io::{Cursor, Read};
+    use std::{
+        io::{Cursor, Read},
+        path::Component,
+    };
 
     use flate2::read::GzDecoder;
+    use sha2::{Digest, Sha256};
     use tar::Archive;
     use tract_onnx::prelude::*;
 
@@ -355,6 +363,8 @@ mod onnx {
     use crate::{ModelRole, VerifiedAsset};
 
     const MEMBER: &str = "enrollment.onnx";
+    /// Members a development archive may contain; anything else is rejected.
+    const DEV_ARCHIVE_MEMBER_ALLOWLIST: &[&str] = &["enrollment.onnx"];
     const OUTPUTS: [&str; 4] = ["gamma_enc", "beta_enc", "gamma_df", "beta_df"];
 
     /// Runs the `voice-enrollment-asset-v1` ONNX through tract.
@@ -399,6 +409,62 @@ mod onnx {
             Err(EnrollmentError::Model(format!(
                 "asset has no {MEMBER} member"
             )))
+        }
+
+        /// Development-only loader for the unsigned `voice-enrollment-asset-v1` archive.
+        ///
+        /// `expected_sha256_hex` is the lowercase hex SHA-256 of the WHOLE archive. Only the
+        /// allowlisted members are accepted and read; any other member, absolute path or `..`
+        /// component is rejected. Error messages are fixed strings and never echo a hash.
+        pub fn from_dev_archive(
+            archive_tar_gz: &[u8],
+            expected_sha256_hex: &str,
+        ) -> Result<Self, EnrollmentError> {
+            let fail = |message: &str| EnrollmentError::Model(message.to_owned());
+            let digest = Sha256::digest(archive_tar_gz);
+            let mut actual = String::with_capacity(64);
+            for byte in digest {
+                actual.extend(
+                    [byte >> 4, byte & 0x0f]
+                        .into_iter()
+                        .filter_map(|n| char::from_digit(u32::from(n), 16)),
+                );
+            }
+            if expected_sha256_hex.len() != 64 || actual != expected_sha256_hex {
+                return Err(fail("development archive hash mismatch"));
+            }
+            let mut archive = Archive::new(GzDecoder::new(archive_tar_gz));
+            let entries = archive
+                .entries()
+                .map_err(|_| fail("development archive is unreadable"))?;
+            let mut onnx_bytes = None;
+            for entry in entries {
+                let mut entry = entry.map_err(|_| fail("development archive is unreadable"))?;
+                let path = entry
+                    .path()
+                    .map_err(|_| fail("development archive has an invalid member path"))?
+                    .into_owned();
+                let safe = path
+                    .components()
+                    .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+                if !safe {
+                    return Err(fail("development archive has an unsafe member path"));
+                }
+                let name = path.to_str().map(|n| n.trim_start_matches("./"));
+                if !name.is_some_and(|n| DEV_ARCHIVE_MEMBER_ALLOWLIST.contains(&n)) {
+                    return Err(fail("development archive has an unlisted member"));
+                }
+                if name == Some(MEMBER) {
+                    let mut bytes = Vec::new();
+                    entry
+                        .read_to_end(&mut bytes)
+                        .map_err(|_| fail("development archive member is unreadable"))?;
+                    onnx_bytes = Some(bytes);
+                }
+            }
+            let bytes =
+                onnx_bytes.ok_or_else(|| fail("development archive has no model member"))?;
+            Self::from_onnx_bytes(bytes)
         }
 
         /// Parses ONNX bytes extracted from an already verified asset. Crate-private on purpose: it does
@@ -525,7 +591,7 @@ mod tests {
             check(&at_min[..ENROLLMENT_MIN_SAMPLES - 1], RATE),
             Err(EnrollmentError::TooShort { .. })
         ));
-        let at_max = burst_speech(12.0, 0.2, 500, 100);
+        let at_max = burst_speech(90.0, 0.2, 500, 100);
         assert_eq!(at_max.len(), ENROLLMENT_MAX_SAMPLES);
         assert!(check(&at_max, RATE).is_ok());
         let mut too_long = at_max;
@@ -537,6 +603,17 @@ mod tests {
         assert!(matches!(
             check(&[], RATE),
             Err(EnrollmentError::TooShort { samples: 0 })
+        ));
+    }
+
+    #[test]
+    fn sixty_seconds_are_accepted_and_ninety_one_are_not() {
+        let ok = burst_speech(60.0, 0.2, 500, 100);
+        assert!(check(&ok, RATE).is_ok());
+        let long = burst_speech(91.0, 0.2, 500, 100);
+        assert!(matches!(
+            check(&long, RATE),
+            Err(EnrollmentError::TooLong { .. })
         ));
     }
 
@@ -950,6 +1027,90 @@ mod onnx_tests {
             )),
             Err(EnrollmentError::Model(_))
         ));
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hex = String::new();
+        for byte in Sha256::digest(bytes) {
+            hex.extend(
+                [byte >> 4, byte & 0x0f]
+                    .into_iter()
+                    .filter_map(|n| char::from_digit(u32::from(n), 16)),
+            );
+        }
+        hex
+    }
+
+    fn archive_with_members(members: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut builder = Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+        for (name, bytes) in members {
+            let mut header = Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            builder
+                .append_data(&mut header, name, *bytes)
+                .expect("append");
+        }
+        builder.into_inner().expect("tar").finish().expect("gzip")
+    }
+
+    #[test]
+    fn dev_archive_rejects_wrong_hash_and_unlisted_members() {
+        let onnx = onnx_bytes();
+        let evil = archive_with_members(&[("enrollment.onnx", &onnx), ("evil.bin", b"x")]);
+        let evil_hash = sha256_hex(&evil);
+        match OnnxEnrollmentModel::from_dev_archive(&evil, &evil_hash) {
+            Err(EnrollmentError::Model(message)) => assert!(!message.contains(&evil_hash)),
+            other => panic!("unlisted member must be rejected, got ok={}", other.is_ok()),
+        }
+        let good = archive_with_members(&[("enrollment.onnx", &onnx)]);
+        let wrong = "00".repeat(32);
+        match OnnxEnrollmentModel::from_dev_archive(&good, &wrong) {
+            Err(EnrollmentError::Model(message)) => {
+                assert_eq!(message, "development archive hash mismatch");
+                assert!(!message.contains(&sha256_hex(&good)));
+            }
+            other => panic!("wrong hash must be rejected, got ok={}", other.is_ok()),
+        }
+        // Uppercase hex is not the documented form either.
+        assert!(
+            OnnxEnrollmentModel::from_dev_archive(&good, &sha256_hex(&good).to_uppercase())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn dev_archive_loads_the_fixture_model() -> TestResult {
+        let good = archive_with_members(&[("enrollment.onnx", &onnx_bytes())]);
+        let model = OnnxEnrollmentModel::from_dev_archive(&good, &sha256_hex(&good))?;
+        let mut engine = SpeakerEnrollmentEngine::new(model);
+        let mut recording = EnrollmentRecording::new(tone(0.3, 0.0), ENROLLMENT_SAMPLE_RATE_HZ);
+        let profile = engine.enroll(
+            &mut recording,
+            &ProfileMetadata {
+                id: "spk-dev".to_owned(),
+                name: "Speaker".to_owned(),
+                created_at_utc: "2026-10-02T12:00:00Z".to_owned(),
+            },
+            None,
+        )?;
+        profile.verify_integrity()?;
+        assert!(!profile.film.is_identity());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "reads the real M3 archive"]
+    fn dev_archive_loads_the_real_m3_archive() -> TestResult {
+        let path =
+            "/home/joaorura/orca/projects/clearcore-train/runs/m3/voice-enrollment-asset-v1.tar.gz";
+        let Ok(bytes) = fs::read(path) else {
+            eprintln!("real M3 archive not present; skipping");
+            return Ok(());
+        };
+        OnnxEnrollmentModel::from_dev_archive(&bytes, &sha256_hex(&bytes))?;
+        Ok(())
     }
 
     #[test]
