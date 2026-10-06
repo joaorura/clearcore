@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use crate::backend::{BackendResolutionInfo, instantiate_backend_with_fallback};
+use crate::backend::{
+    BackendResolutionInfo, instantiate_backend_with_fallback, is_explicit_accelerator_request,
+};
 use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
@@ -352,27 +354,29 @@ impl EngineSupervisor {
         repo_root: Option<&Path>,
     ) -> BackendResolutionInfo {
         self.requested_backend_name = request.to_string();
-        if let Some(archive) = &self.dev_base_model {
-            match archive.instantiate(CpuProfile::Avx2Minimum) {
-                Ok(backend) => {
-                    self.dev_base_model_error = None;
-                    let info = BackendResolutionInfo {
-                        name: "tract".to_string(),
-                        runtime: "tract".to_string(),
-                        device: "CPU".to_string(),
-                        is_hardware_accelerated: false,
-                        is_fallback: false,
-                        fallback_reason: None,
-                    };
-                    self.set_backend(Box::new(backend), &info.name);
-                    return info;
-                }
-                Err(error) => {
-                    eprintln!(
-                        "Development pDFNet3 model was not loaded ({}); using the default model",
-                        error.code()
-                    );
-                    self.dev_base_model_error = Some(error.code());
+        if !is_explicit_accelerator_request(request) {
+            if let Some(archive) = &self.dev_base_model {
+                match archive.instantiate(CpuProfile::Avx2Minimum) {
+                    Ok(backend) => {
+                        self.dev_base_model_error = None;
+                        let info = BackendResolutionInfo {
+                            name: "tract".to_string(),
+                            runtime: "tract".to_string(),
+                            device: "CPU".to_string(),
+                            is_hardware_accelerated: false,
+                            is_fallback: false,
+                            fallback_reason: None,
+                        };
+                        self.set_backend(Box::new(backend), &info.name);
+                        return info;
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "Development pDFNet3 model was not loaded ({}); using the default model",
+                            error.code()
+                        );
+                        self.dev_base_model_error = Some(error.code());
+                    }
                 }
             }
         }

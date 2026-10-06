@@ -7,7 +7,7 @@ pub mod supervisor;
 
 pub use backend::{
     BackendResolutionInfo, find_repo_root, find_stateful_model_dir,
-    instantiate_backend_with_fallback,
+    instantiate_backend_with_fallback, is_explicit_accelerator_request,
 };
 pub use backoff::{BACKOFF_SECONDS, BackoffTracker, FIFTEEN_MINUTES, MAX_CRASHES_PER_15_MINUTES};
 pub use supervisor::{

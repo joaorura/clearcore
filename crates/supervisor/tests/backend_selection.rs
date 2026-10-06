@@ -102,3 +102,46 @@ fn supervisor_process_frame_honours_bypass_and_mute() {
     let mute_out = supervisor.process_frame(&test_frame).expect("mute");
     assert!(mute_out.iter().all(|&s| s == 0.0));
 }
+
+#[test]
+fn supervisor_selects_tensorrt_with_stateful_neural_inference_on_hardware() {
+    let root = find_repo_root();
+    let stateful_dir = find_stateful_model_dir();
+    let mut supervisor = EngineSupervisor::default();
+
+    let info = supervisor.select_backend("tensorrt", stateful_dir.as_deref(), root.as_deref());
+    if realtime_noise_accelerators::TensorRtBackend::is_available() {
+        assert_eq!(info.name, "nvidia-tensorrt");
+        assert!(info.is_hardware_accelerated);
+        assert!(!info.is_fallback);
+        assert_eq!(supervisor.active_backend_name(), "nvidia-tensorrt");
+        assert!(supervisor.is_hardware_accelerated());
+        assert_eq!(supervisor.active_backend_device().as_deref(), Some("GPU"));
+
+        // Verify inference processes real audio frame without errors
+        let test_frame: AudioFrame = [0.1; HOP_SAMPLES];
+        let processed = supervisor.process_frame(&test_frame).expect("inference");
+        assert!(processed.iter().all(|&s| s.is_finite()));
+    }
+}
+
+#[test]
+fn supervisor_selects_openvino_npu_explicitly_when_available() {
+    let root = find_repo_root();
+    let stateful_dir = find_stateful_model_dir();
+    let mut supervisor = EngineSupervisor::default();
+
+    let info = supervisor.select_backend("openvino-npu", stateful_dir.as_deref(), root.as_deref());
+    if realtime_noise_accelerators::OpenVINOBackend::is_available() && stateful_dir.is_some() {
+        assert_eq!(info.name, "openvino-npu");
+        assert!(info.is_hardware_accelerated);
+        assert!(!info.is_fallback);
+        assert_eq!(supervisor.active_backend_name(), "openvino-npu");
+        assert!(supervisor.is_hardware_accelerated());
+        assert_eq!(supervisor.active_backend_device().as_deref(), Some("NPU"));
+
+        let test_frame: AudioFrame = [0.1; HOP_SAMPLES];
+        let processed = supervisor.process_frame(&test_frame).expect("inference");
+        assert!(processed.iter().all(|&s| s.is_finite()));
+    }
+}

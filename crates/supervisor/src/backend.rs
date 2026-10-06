@@ -19,14 +19,20 @@ pub struct BackendResolutionInfo {
     pub fallback_reason: Option<String>,
 }
 
-/// Attempts to locate the directory containing stateful model graphs (`models/stateful/enc.onnx`).
+fn has_stateful_models(p: &Path) -> bool {
+    p.join("enc.onnx").exists()
+        || p.join("tensorrt/enc.engine").exists()
+        || p.join("enc.engine").exists()
+}
+
+/// Attempts to locate the directory containing stateful model graphs (`models/stateful/enc.onnx` or TensorRT engines).
 #[must_use]
 pub fn find_stateful_model_dir() -> Option<PathBuf> {
     if let Ok(path) =
         std::env::var("CLEARCORE_STATEFUL_DIR").or_else(|_| std::env::var("CLEARCORE_MODEL_DIR"))
     {
         let p = PathBuf::from(path);
-        if p.join("enc.onnx").exists() {
+        if has_stateful_models(&p) {
             return Some(p);
         }
     }
@@ -36,7 +42,7 @@ pub fn find_stateful_model_dir() -> Option<PathBuf> {
         for _ in 0..5 {
             if let Some(p) = cur {
                 let candidate = p.join("models/stateful");
-                if candidate.join("enc.onnx").exists() {
+                if has_stateful_models(&candidate) {
                     return Some(candidate);
                 }
                 cur = p.parent();
@@ -49,11 +55,11 @@ pub fn find_stateful_model_dir() -> Option<PathBuf> {
         for _ in 0..5 {
             if let Some(p) = cur {
                 let candidate = p.join("models/stateful");
-                if candidate.join("enc.onnx").exists() {
+                if has_stateful_models(&candidate) {
                     return Some(candidate);
                 }
                 let candidate_res = p.join("resources/models/stateful");
-                if candidate_res.join("enc.onnx").exists() {
+                if has_stateful_models(&candidate_res) {
                     return Some(candidate_res);
                 }
                 cur = p.parent();
@@ -124,6 +130,67 @@ fn parse_openvino_target(request: &str) -> Option<OpenVinoTarget> {
 /// If `request` resolves to `TensorRT` or `OpenVINO` and hardware/models are present,
 /// compiles and instantiates the respective hardware backend. If hardware or models are missing,
 /// or if Tract CPU is explicitly requested, instantiates `TractBackend` (or pure-Rust Tract baseline).
+/// Returns whether the backend request explicitly targets a hardware accelerator.
+#[must_use]
+pub fn is_explicit_accelerator_request(request: &str) -> bool {
+    let norm = request.trim().to_ascii_lowercase().replace('_', "-");
+    matches!(
+        norm.as_str(),
+        "tensorrt"
+            | "nvidia-tensorrt"
+            | "nvidia"
+            | "cuda"
+            | "gpu"
+            | "openvino"
+            | "openvino-npu"
+            | "npu"
+            | "intel-npu"
+            | "openvino-gpu"
+            | "intel-gpu"
+            | "arc"
+            | "directml"
+            | "vulkan"
+            | "ryzenai"
+            | "coreml"
+    )
+}
+
+fn instantiate_tensorrt_backend(
+    model_dir: Option<&Path>,
+) -> Result<TensorRtBackend, String> {
+    if !TensorRtBackend::is_available() {
+        return Err("TensorRT native runtime (libnvinfer) is not available on this host".to_string());
+    }
+
+    if let Some(dir) = model_dir {
+        match TensorRtBackend::load_stateful(
+            dir,
+            0,
+            "df-compatible-release-asset-v1",
+            APPROVED_ASSET_SHA256,
+        ) {
+            Ok(backend) => return Ok(backend),
+            Err(load_err) => {
+                eprintln!(
+                    "TensorRT load_stateful failed ({load_err}); falling back to hardware context"
+                );
+            }
+        }
+    }
+
+    TensorRtBackend::try_new_hardware(
+        "df-compatible-release-asset-v1",
+        APPROVED_ASSET_SHA256,
+        0,
+    )
+    .map_err(|e| format!("TensorRT hardware initialization failed: {e}"))
+}
+
+/// Instantiates an inference backend based on `request`, falling back safely to Tract CPU.
+///
+/// If `request` resolves to `TensorRT` or `OpenVINO` and hardware/models are present,
+/// compiles and instantiates the respective hardware backend. If hardware or models are missing,
+/// or if Tract CPU is explicitly requested, instantiates `TractBackend` (or pure-Rust Tract baseline).
 #[must_use]
 pub fn instantiate_backend_with_fallback(
     request: &str,
@@ -148,11 +215,7 @@ pub fn instantiate_backend_with_fallback(
         if matches!(norm.as_str(), "auto" | "" | "default") {
             // Auto initialization: if NVIDIA GPU and TensorRT are available, try TensorRT first!
             if TensorRtBackend::is_available() {
-                match TensorRtBackend::try_new_hardware(
-                    "df-compatible-release-asset-v1",
-                    APPROVED_ASSET_SHA256,
-                    0,
-                ) {
+                match instantiate_tensorrt_backend(resolved_model_dir.as_deref()) {
                     Ok(backend) => {
                         let device = backend.device_name().to_string();
                         let descriptor = backend.descriptor();
@@ -213,11 +276,7 @@ pub fn instantiate_backend_with_fallback(
         } else if matches!(norm.as_str(), "tensorrt" | "nvidia-tensorrt" | "nvidia" | "cuda") {
             // Explicit TensorRT request
             if TensorRtBackend::is_available() {
-                match TensorRtBackend::try_new_hardware(
-                    "df-compatible-release-asset-v1",
-                    APPROVED_ASSET_SHA256,
-                    0,
-                ) {
+                match instantiate_tensorrt_backend(resolved_model_dir.as_deref()) {
                     Ok(backend) => {
                         let device = backend.device_name().to_string();
                         let descriptor = backend.descriptor();
@@ -244,11 +303,7 @@ pub fn instantiate_backend_with_fallback(
         } else if norm == "gpu" {
             // Generic GPU request: try TensorRT first, then OpenVINO GPU
             if TensorRtBackend::is_available() {
-                match TensorRtBackend::try_new_hardware(
-                    "df-compatible-release-asset-v1",
-                    APPROVED_ASSET_SHA256,
-                    0,
-                ) {
+                match instantiate_tensorrt_backend(resolved_model_dir.as_deref()) {
                     Ok(backend) => {
                         let device = backend.device_name().to_string();
                         let descriptor = backend.descriptor();
