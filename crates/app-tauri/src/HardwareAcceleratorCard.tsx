@@ -17,7 +17,6 @@ export const HardwareAcceleratorCard: React.FC = () => {
   const [autoResolvedBackend, setAutoResolvedBackend] = useState<{ id: string; name: string } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedHelpBackend, setSelectedHelpBackend] = useState<HardwareBackendItem | null>(null);
-  const [selectedOsTab, setSelectedOsTab] = useState<'ubuntu' | 'fedora' | 'arch' | 'python' | 'windows'>('ubuntu');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -531,19 +530,12 @@ export const HardwareAcceleratorCard: React.FC = () => {
       {/* Installation Help Modal */}
       {selectedHelpBackend && (() => {
         const helpDetails = getBackendHelpDetails(selectedHelpBackend.id);
-        const activeCmd = helpDetails?.nativeCommands.find((c) => c.id === selectedOsTab) || helpDetails?.nativeCommands[0];
         const userOsLabel =
-          selectedOsTab === 'windows'
+          typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
             ? 'Windows'
-            : selectedOsTab === 'ubuntu'
-              ? 'Linux (Ubuntu/Debian)'
-              : selectedOsTab === 'fedora'
-                ? 'Linux (Fedora/RHEL)'
-                : selectedOsTab === 'arch'
-                  ? 'Linux (Arch Linux)'
-                  : typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
-                    ? 'Windows'
-                    : 'Linux';
+            : typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent)
+              ? 'macOS'
+              : 'Linux';
         const llmPrompt =
           getBackendLlmPrompt(selectedHelpBackend.id, {
             os: userOsLabel,
@@ -785,113 +777,7 @@ export const HardwareAcceleratorCard: React.FC = () => {
                 </div>
               )}
 
-              {/* Native Commands by Operating System */}
-              {helpDetails?.nativeCommands && helpDetails.nativeCommands.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div
-                    style={{
-                      fontWeight: 600,
-                      fontSize: '0.88rem',
-                      marginBottom: 8,
-                      color: 'var(--text-main)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                    }}
-                  >
-                    <span>💻</span>
-                    <span>{t('hardwareBackend.nativeCommandsTitle')}</span>
-                  </div>
 
-                  {/* Tabs */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 6,
-                      marginBottom: 10,
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    {helpDetails.nativeCommands.map((cmd) => {
-                      const isActive = selectedOsTab === cmd.id;
-                      return (
-                        <button
-                          key={cmd.id}
-                          onClick={() => setSelectedOsTab(cmd.id)}
-                          style={{
-                            background: isActive ? '#38bdf8' : '#0f172a',
-                            color: isActive ? '#0f172a' : '#cbd5e1',
-                            border: `1px solid ${isActive ? '#38bdf8' : '#334155'}`,
-                            borderRadius: 6,
-                            padding: '5px 12px',
-                            cursor: 'pointer',
-                            fontSize: '0.8rem',
-                            fontWeight: isActive ? 700 : 500,
-                            transition: 'all 0.15s ease',
-                          }}
-                        >
-                          {cmd.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Tab Panel */}
-                  {activeCmd && (
-                    <div
-                      style={{
-                        backgroundColor: '#0f172a',
-                        border: '1px solid #334155',
-                        borderRadius: 6,
-                        padding: '12px 14px',
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          marginBottom: 6,
-                        }}
-                      >
-                        <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600 }}>
-                          {activeCmd.label}
-                        </span>
-                        <button
-                          className="action-btn"
-                          onClick={() => handleCopyCommand(activeCmd.command, `tab-${activeCmd.id}`)}
-                          style={{
-                            fontSize: '0.75rem',
-                            padding: '3px 10px',
-                            backgroundColor: copiedKey === `tab-${activeCmd.id}` ? '#15803d' : '#2b3140',
-                            color: copiedKey === `tab-${activeCmd.id}` ? '#ffffff' : 'var(--text-main)',
-                          }}
-                        >
-                          {copiedKey === `tab-${activeCmd.id}` ? t('hardwareBackend.copiedBtn') : t('hardwareBackend.copyCommandBtn')}
-                        </button>
-                      </div>
-                      <pre
-                        style={{
-                          margin: 0,
-                          fontSize: '0.82rem',
-                          color: '#38bdf8',
-                          overflowX: 'auto',
-                          fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        {activeCmd.command}
-                      </pre>
-                      {activeCmd.note && (
-                        <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#94a3b8' }}>
-                          💡 {activeCmd.note}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Fallback / Detector Suggested Command if available */}
               {selectedHelpBackend.install_command && (
