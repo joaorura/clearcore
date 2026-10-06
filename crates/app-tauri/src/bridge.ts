@@ -25,6 +25,10 @@ export interface HardwareBackendsResponse {
   };
   /** Motivo curto quando o detector de hardware falhou (a lista vem do fallback do app). */
   detection_error?: string;
+  /** Indica se há GPU NVIDIA detectada cujo engine TensorRT ainda precisa ser compilado */
+  model_compilation_needed?: boolean;
+  /** Indica se o engine TensorRT já foi compilado para a GPU local */
+  model_compiled?: boolean;
 }
 
 export interface ClearcoreApi {

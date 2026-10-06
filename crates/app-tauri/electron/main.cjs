@@ -1494,13 +1494,33 @@ function queryHardwareBackends() {
     }
   } catch {}
 
+  // Probe whether TensorRT model engines are compiled locally for the current GPU
+  let hasTensorRtEnginesCompiled = false;
+  try {
+    const candidateEngineDirs = [
+      path.join(process.cwd(), 'models', 'stateful', 'tensorrt'),
+      path.join(process.cwd(), 'models', 'tensorrt'),
+      path.join(__dirname, '..', 'models', 'stateful', 'tensorrt'),
+      path.join(__dirname, '..', '..', '..', 'models', 'stateful', 'tensorrt'),
+      path.join(os.homedir(), '.local', 'share', 'clearcore', 'models', 'tensorrt'),
+    ];
+    for (const edir of candidateEngineDirs) {
+      if (
+        fs.existsSync(path.join(edir, 'enc.engine')) &&
+        fs.existsSync(path.join(edir, 'df_dec.engine')) &&
+        fs.existsSync(path.join(edir, 'erb_dec.engine'))
+      ) {
+        hasTensorRtEnginesCompiled = true;
+        break;
+      }
+    }
+  } catch {}
+
   // Resolve Auto backend
   let fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
   if (isMac && process.arch === 'arm64') {
     fallbackAutoResolved = { id: 'apple_coreml', name: 'Apple Silicon (CoreML)' };
   } else if (hasNvidiaGpu && hasTensorRtRuntime) {
-    fallbackAutoResolved = { id: 'nvidia_tensorrt', name: 'NVIDIA GPU (TensorRT / CUDA)' };
-  } else if (hasNvidiaGpu) {
     fallbackAutoResolved = { id: 'nvidia_tensorrt', name: 'NVIDIA GPU (TensorRT / CUDA)' };
   } else if (isAmd) {
     // On AMD: never select OpenVINO! Prefer Pure-Rust CPU Tract (or Ryzen AI if configured)
@@ -1672,6 +1692,8 @@ function queryHardwareBackends() {
       },
     ],
     active_backend: currentSelectedBackend,
+    model_compilation_needed: hasNvidiaGpu && !hasTensorRtEnginesCompiled,
+    model_compiled: hasTensorRtEnginesCompiled,
     ...(detectionError ? { detection_error: detectionError } : {}),
   };
 }
@@ -1701,6 +1723,49 @@ ipcMain.handle('set_hardware_backend', async (_event, backendId) => {
     }
   }
   return result;
+});
+
+ipcMain.handle('compile_tensorrt_models', async () => {
+  try {
+    const homeDir = os.homedir();
+    let trtexecPath = 'trtexec';
+
+    // Locate trtexec binary if not in default PATH
+    const trtCandidates = [
+      path.join(homeDir, 'opt', 'TensorRT-11.3.0.99', 'bin', 'trtexec'),
+      '/opt/tensorrt/bin/trtexec',
+      '/usr/local/tensorrt/bin/trtexec',
+      '/usr/bin/trtexec',
+    ];
+    for (const cand of trtCandidates) {
+      if (fs.existsSync(cand)) {
+        trtexecPath = cand;
+        break;
+      }
+    }
+
+    const modelsBaseDir = path.join(process.cwd(), 'models', 'stateful');
+    const outDir = path.join(modelsBaseDir, 'tensorrt');
+    if (!fs.existsSync(outDir)) {
+      fs.mkdirSync(outDir, { recursive: true });
+    }
+
+    const { execSync } = require('child_process');
+    const models = ['enc', 'df_dec', 'erb_dec'];
+    for (const m of models) {
+      const onnx = path.join(modelsBaseDir, `${m}.onnx`);
+      const engine = path.join(outDir, `${m}.engine`);
+      if (fs.existsSync(onnx)) {
+        console.log(`[TensorRT Compiler] Compiling ${m}.onnx -> ${m}.engine using ${trtexecPath}...`);
+        execSync(`"${trtexecPath}" --onnx="${onnx}" --saveEngine="${engine}"`, { timeout: 120000 });
+      }
+    }
+
+    return { success: true, compiled: true };
+  } catch (err) {
+    console.error('[TensorRT Compiler] Compilation error:', err);
+    return { success: false, error: err.message };
+  }
 });
 
 // Studio DSP Preset Handlers

@@ -216,7 +216,7 @@ pub fn instantiate_backend_with_fallback(
             // Auto initialization: if NVIDIA GPU and TensorRT are available, try TensorRT first!
             if TensorRtBackend::is_available() {
                 match instantiate_tensorrt_backend(resolved_model_dir.as_deref()) {
-                    Ok(backend) => {
+                    Ok(backend) if backend.executes_engine() => {
                         let device = backend.device_name().to_string();
                         let descriptor = backend.descriptor();
                         let info = BackendResolutionInfo {
@@ -228,6 +228,11 @@ pub fn instantiate_backend_with_fallback(
                             fallback_reason: None,
                         };
                         return (Box::new(backend), info);
+                    }
+                    Ok(_) => {
+                        fallback_reason = Some(
+                            "TensorRT GPU detectada, mas os engines do modelo ainda não foram compilados localmente".to_string(),
+                        );
                     }
                     Err(err) => {
                         fallback_reason =

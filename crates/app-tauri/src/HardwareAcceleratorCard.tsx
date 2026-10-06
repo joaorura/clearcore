@@ -21,6 +21,8 @@ export const HardwareAcceleratorCard: React.FC = () => {
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [detectionError, setDetectionError] = useState<string | null>(null);
+  const [modelCompilationNeeded, setModelCompilationNeeded] = useState<boolean>(false);
+  const [isCompiling, setIsCompiling] = useState<boolean>(false);
 
   const fetchBackends = async () => {
     setIsLoading(true);
@@ -35,11 +37,31 @@ export const HardwareAcceleratorCard: React.FC = () => {
           setAutoResolvedBackend(res.auto_resolved_backend);
         }
         setDetectionError(res.detection_error || null);
+        setModelCompilationNeeded(Boolean(res.model_compilation_needed));
       }
     } catch (err) {
       console.warn('Failed to load hardware backends:', err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCompileTensorRt = async () => {
+    setIsCompiling(true);
+    setActionFeedback('Compilando modelos neurais para a sua GPU NVIDIA... Isso pode levar de 30 a 60 segundos.');
+    try {
+      const res = await invokeBridge<{ success: boolean; error?: string }>('compile_tensorrt_models');
+      if (res && res.success) {
+        setModelCompilationNeeded(false);
+        setActionFeedback('✅ Modelos compilados com sucesso para sua GPU NVIDIA! O acelerador TensorRT agora está pronto.');
+        await fetchBackends();
+      } else {
+        setActionError(`Falha na compilação do modelo: ${res?.error || 'Erro desconhecido'}`);
+      }
+    } catch (err: unknown) {
+      setActionError(`Erro ao compilar: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsCompiling(false);
     }
   };
 
@@ -249,6 +271,53 @@ export const HardwareAcceleratorCard: React.FC = () => {
           }}
         >
           ✓ {actionFeedback}
+        </div>
+      )}
+
+      {/* Banner de Compilação do Modelo TensorRT para GPU NVIDIA */}
+      {modelCompilationNeeded && (
+        <div
+          style={{
+            padding: '14px 16px',
+            background: 'linear-gradient(135deg, rgba(30, 58, 138, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%)',
+            border: '1px solid #3b82f6',
+            borderRadius: 8,
+            marginBottom: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '1.4rem' }}>⚡</span>
+            <div>
+              <div style={{ fontWeight: 600, color: '#93c5fd', fontSize: '0.95rem' }}>
+                GPU NVIDIA Detectada: Compilação de Modelo Necessária
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 2 }}>
+                Para atingir a máxima performance e menor latência na sua GPU com TensorRT, os modelos neurais precisam ser compilados localmente para a arquitetura do seu hardware.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+            <button
+              className="action-btn"
+              disabled={isCompiling}
+              onClick={handleCompileTensorRt}
+              style={{
+                background: '#2563eb',
+                color: '#ffffff',
+                border: 'none',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                padding: '8px 18px',
+                borderRadius: 6,
+                cursor: isCompiling ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {isCompiling ? '⏳ Compilando modelos para sua GPU (aguarde)...' : '⚙️ Compilar Modelos para esta GPU'}
+            </button>
+          </div>
         </div>
       )}
 
