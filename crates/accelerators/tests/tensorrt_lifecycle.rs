@@ -224,3 +224,48 @@ fn descriptor_does_not_assert_a_runtime_version_it_cannot_know() {
     assert_eq!(backend.native_runtime_version(), None);
     assert!(!backend.executes_inference());
 }
+
+#[test]
+fn stateful_tensorrt_backend_runs_real_neural_inference_on_gpu() {
+    let dir = models_dir();
+    if !dir.join("tensorrt/enc.engine").exists() || !TensorRtBackend::is_available() {
+        eprintln!("TensorRT hardware or engines not present; skipping hardware lifecycle test");
+        return;
+    }
+
+    let mut backend = TensorRtBackend::load_stateful(&dir, 0, "dfn3-asset", "sha-test")
+        .expect("load_stateful TensorRtBackend");
+
+    assert!(backend.is_hardware_backed());
+    assert!(backend.executes_engine());
+    assert!(backend.executes_inference());
+    assert!(backend.is_hardware_accelerated());
+    assert!(backend.native_runtime_version().is_some());
+    assert_eq!(
+        backend.algorithmic_latency_samples(),
+        ALGORITHM_LATENCY_SAMPLES
+    );
+
+    let descriptor = backend.descriptor();
+    assert_eq!(descriptor.backend, "tensorrt");
+    assert_eq!(descriptor.runtime, "tensorrt");
+
+    // Process multiple audio frames
+    let input: AudioFrame = std::array::from_fn(|i| ((i as f32) * 0.05).sin() * 0.25);
+    for _ in 0..5 {
+        let frame = backend.process(&input).expect("process frame through GPU");
+        assert_eq!(frame.algorithmic_latency_samples, ALGORITHM_LATENCY_SAMPLES);
+        assert_eq!(frame.provenance.backend, "tensorrt");
+        assert!(frame.samples.iter().all(|s| s.is_finite()));
+    }
+
+    // Reset works
+    assert!(backend.reset().is_ok());
+
+    // Simulated failure works
+    backend.set_simulated_failure(true);
+    assert!(backend.process(&input).is_err());
+    backend.set_simulated_failure(false);
+    assert!(backend.process(&input).is_ok());
+}
+

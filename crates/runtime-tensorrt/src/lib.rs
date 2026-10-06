@@ -10,6 +10,7 @@ pub use cuda::{
 };
 pub use error::{CudaError, TensorRtError};
 pub use precision::PrecisionTarget;
+pub use tensorrt::dfn3;
 pub use tensorrt::{
     Dfn3Engines, Dfn3Output, TensorRtContext, TensorRtDfn3Session, TensorRtEngine,
     TensorRtExecutionContext, TensorRtInferenceContext, TensorRtLibrary, TensorRtRuntime,
