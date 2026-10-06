@@ -249,6 +249,8 @@ export interface Translations {
     nextStep: string;
     activateProfileBtn: string;
     profileActivatedSuccess: string;
+    profileCompletedTitle: string;
+    profileCompletedDesc: string;
     reEnrollBtn: string;
     tabEnroll: string;
     tabGallery: string;
@@ -386,6 +388,8 @@ export interface Translations {
     neuralEqStatusCalibrated: string;
     neuralEqStatusPending: string;
     neuralEqDetail: string;
+    neuralEqCardCalibratedBadge: string;
+    neuralEqCardActiveDesc: string;
     presetSwitchedFeedback: string;
   };
   serviceControl: {

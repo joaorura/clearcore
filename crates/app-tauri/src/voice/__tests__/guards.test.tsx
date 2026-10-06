@@ -4,6 +4,8 @@ import type { EnrollmentLabels, ServiceSample } from '../enrollmentTypes';
 import { VoiceSampleGallery } from '../VoiceSampleGallery';
 import { CallsPanel } from '../panels/CallsPanel';
 import { ApprovalGuard } from '../hooks/useCallTakes';
+import { EnrollPanel } from '../panels/EnrollPanel';
+import { ProfilePanel } from '../panels/ProfilePanel';
 
 const labels = { deleteAction: 'del', deleting: 'deleting', seconds: 's', usedInProfile: 'u', notUsed: 'n', otherMicrophone: 'o', needsReenroll: 'r', errors: {} } as unknown as EnrollmentLabels;
 const sample: ServiceSample = { id: 'a', name: 'A', timestamp: '', speechSeconds: 3, deviceLabel: 'M', usedInProfile: true, needsReenroll: false, otherMicrophone: false };
@@ -34,5 +36,30 @@ describe('approve take is guarded against double clicks', () => {
     expect(m).toMatch(/<button[^>]*class="action-btn take-approve-btn"[^>]*disabled=""/);
     const idle = html(<CallsPanel t={t} locale="pt-BR" takes={[take]} playingAudioId={null} errorText={null} onPlay={() => {}} onApprove={() => {}} onDismiss={() => {}} />);
     expect(idle).not.toMatch(/<button[^>]*class="action-btn take-approve-btn"[^>]*disabled=""/);
+  });
+});
+
+describe('build profile is guarded against multiple clicks and shows loading', () => {
+  it('EnrollPanel activate-profile-master-btn is disabled and displays building text when isBuilding is true', () => {
+    const t = (k: string) => k;
+    const done = { 1: { duration: 3 }, 2: { duration: 3 }, 3: { duration: 3 }, 4: { duration: 3 }, 5: { duration: 3 } };
+    const props = {
+      t, locale: 'pt-BR', labels, isEnrolled: false, currentStep: 5, isReadingMode: false, completedSteps: done,
+      isRecording: false, liveVoiceLevel: 0, recordingElapsedSeconds: 0, captureError: null, jobBusy: false,
+      isBuilding: true, feedback: null, onSelectStep: () => {}, onToggleReadingMode: () => {}, onStartStep: () => {},
+      onFinishStep: () => {}, onRedoStep: () => {}, onNextStep: () => {}, onBuildProfile: () => {}, onResetEnrollment: () => {},
+    };
+    const m = html(<EnrollPanel {...props} />);
+    expect(m).toMatch(/<button[^>]*class="activate-profile-master-btn"[^>]*disabled=""[^>]*>⏳ voiceProfile.buildingProfile/);
+  });
+
+  it('ProfilePanel action button is disabled and displays building text when isBuilding is true', () => {
+    const t = (k: string) => k;
+    const props = {
+      t, locale: 'pt-BR', labels, profileStatus: { is_enrolled: false, active_samples_count: 2 },
+      samplesCount: 2, canBuild: true, busy: false, isBuilding: true, feedback: null, onBuildProfile: () => {},
+    };
+    const m = html(<ProfilePanel {...props} />);
+    expect(m).toMatch(/<button[^>]*class="action-btn"[^>]*disabled=""[^>]*>⏳ voiceProfile.buildingProfile/);
   });
 });

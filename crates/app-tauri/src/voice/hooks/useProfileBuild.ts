@@ -27,6 +27,8 @@ export interface ProfileBuild {
   buildProfile: (origin: Extract<JobOrigin, 'enroll' | 'profile'>) => Promise<boolean>;
   /** Ids of the samples the last successful build in this session used (null: none yet). */
   idsAtBuild: string[] | null;
+  /** True while the neural profile is actively being built and applied. */
+  isBuilding: boolean;
 }
 
 /**
@@ -42,6 +44,8 @@ export function useProfileBuild(opts: {
   const { t, labels, jobs, refreshSamples } = opts;
   const [profileStatus, setProfileStatus] = useState<VoiceProfileStatus>({ is_enrolled: false, active_samples_count: 0 });
   const [idsAtBuild, setIdsAtBuild] = useState<string[] | null>(null);
+  const [isBuilding, setIsBuilding] = useState<boolean>(false);
+  const buildingRef = useRef<boolean>(false);
   // The build poller stops when the card unmounts.
   const jobScopeRef = useRef<JobAbortScope | null>(null);
   if (jobScopeRef.current === null) jobScopeRef.current = new JobAbortScope();
@@ -53,8 +57,27 @@ export function useProfileBuild(opts: {
     const api = typeof window !== 'undefined' ? window.clearcoreApi : undefined;
     if (!api?.onVoiceProfileUpdate) return;
     return api.onVoiceProfileUpdate((profile) => {
-      setProfileStatus((prev) => applySetVoiceProfileResult(prev, prev, profile));
+      setProfileStatus((prev) => {
+        const next = applySetVoiceProfileResult(prev, prev, profile);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: next }));
+        }
+        return next;
+      });
     });
+  }, []);
+
+  // Window-level reactive updates from custom events
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleEvent = (e: Event) => {
+      const custom = e as CustomEvent<VoiceProfileStatus>;
+      if (custom.detail) {
+        setProfileStatus((prev) => applySetVoiceProfileResult(prev, prev, custom.detail));
+      }
+    };
+    window.addEventListener('clearcore_profile_updated', handleEvent);
+    return () => window.removeEventListener('clearcore_profile_updated', handleEvent);
   }, []);
 
   const loadInitialStatus = async (loadedSamplesCount: number): Promise<VoiceProfileStatus> => {
@@ -70,6 +93,9 @@ export function useProfileBuild(opts: {
   };
 
   const runBuild = async (origin: Extract<JobOrigin, 'enroll' | 'profile'>): Promise<boolean> => {
+    if (buildingRef.current) return false;
+    buildingRef.current = true;
+    setIsBuilding(true);
     jobs.begin(origin, 'build');
     let done = false;
     try {
@@ -90,28 +116,41 @@ export function useProfileBuild(opts: {
         if (outcome.kind === 'done') done = true;
         else jobs.applyOutcome(outcome, 'build');
       }
+
+      const list = await refreshSamples();
+      if (done && list) setIdsAtBuild(profileSampleIds(list.samples));
+      let serviceStatus: VoiceProfileStatus | null = null;
+      try {
+        let res = await invokeBridge<unknown>('get_voice_profile');
+        serviceStatus = normalizeVoiceProfileStatus(res);
+        // If done, retry briefly (up to ~300ms) if neural_eq_calibrated has not yet updated
+        // in the service supervisor state
+        if (done && !serviceStatus.neural_eq_calibrated) {
+          for (let attempt = 0; attempt < 5; attempt++) {
+            await new Promise((r) => setTimeout(r, 60));
+            res = await invokeBridge<unknown>('get_voice_profile');
+            serviceStatus = normalizeVoiceProfileStatus(res);
+            if (serviceStatus.neural_eq_calibrated) break;
+          }
+        }
+        setProfileStatus((prev) => mergeVoiceProfileStatus(prev, res, list?.samples.length ?? 0));
+      } catch {
+        // the status keeps what the service last reported
+      }
+      if (done && typeof window !== 'undefined' && serviceStatus) {
+        window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: serviceStatus }));
+      }
     } catch (err) {
       if (isAbortError(err)) return false; // unmounted: nothing more to show
       jobs.failWith(err);
     } finally {
       jobs.setJobBusy(false);
+      buildingRef.current = false;
+      setIsBuilding(false);
     }
 
-    const list = await refreshSamples();
-    if (done && list) setIdsAtBuild(profileSampleIds(list.samples));
-    let serviceStatus: VoiceProfileStatus | null = null;
-    try {
-      const res = await invokeBridge<unknown>('get_voice_profile');
-      serviceStatus = normalizeVoiceProfileStatus(res);
-      setProfileStatus((prev) => mergeVoiceProfileStatus(prev, res, list?.samples.length ?? 0));
-    } catch {
-      // the status keeps what the service last reported
-    }
-    if (done && typeof window !== 'undefined' && serviceStatus) {
-      window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: serviceStatus }));
-    }
     return done;
   };
 
-  return { profileStatus, loadInitialStatus, buildProfile: runBuild, idsAtBuild };
+  return { profileStatus, loadInitialStatus, buildProfile: runBuild, idsAtBuild, isBuilding };
 }

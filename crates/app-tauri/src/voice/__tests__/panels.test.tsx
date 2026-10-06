@@ -83,6 +83,20 @@ describe('EnrollPanel', () => {
     expect(m).not.toContain('voiceProfile.recordSample');
     expect(m).toMatch(/<button[^>]*class="stepper-segment[^"]*"[^>]*disabled=""/);
   });
+  it('disables activate profile button and shows building feedback when isBuilding is true', () => {
+    const done = { 1: { duration: 3 }, 2: { duration: 3 }, 3: { duration: 3 }, 4: { duration: 3 }, 5: { duration: 3 } };
+    const m = html(<EnrollPanel {...enrollProps({ completedSteps: done, currentStep: 5, isBuilding: true })} />);
+    expect(m).toContain('voiceProfile.buildingProfile');
+    expect(m).toMatch(/<button[^>]*class="activate-profile-master-btn"[^>]*disabled=""[^>]*>⏳ voiceProfile.buildingProfile/);
+  });
+  it('renders prominent completed card with redo button when flow is completed and profile is enrolled', () => {
+    const done = { 1: { duration: 3 }, 2: { duration: 3 }, 3: { duration: 3 }, 4: { duration: 3 }, 5: { duration: 3 } };
+    const m = html(<EnrollPanel {...enrollProps({ isEnrolled: true, completedSteps: done })} />);
+    expect(m).toContain('enroll-completed-card');
+    expect(m).toContain('voiceProfile.profileCompletedTitle');
+    expect(m).toContain('voiceProfile.profileCompletedDesc');
+    expect(m).toContain('voiceProfile.reEnrollBtn');
+  });
 });
 
 const list: SampleList = {
@@ -162,6 +176,17 @@ describe('ProfilePanel', () => {
     const none = html(<ProfilePanel {...profileProps({ canBuild: false })} />);
     expect(none).not.toContain('voiceProfile.activateProfileBtn'); expect(none).not.toContain('voiceProfile.rebuildProfileBtn');
     expect(html(<ProfilePanel {...profileProps({ busy: true })} />)).toMatch(/<button[^>]*disabled=""[^>]*>voiceProfile.activateProfileBtn/);
+  });
+  it('shows prominent active banner when profile is active with re-enroll option', () => {
+    const active: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, is_voice_profile_active: true };
+    const m = html(<ProfilePanel {...profileProps({ profileStatus: active, onResetEnrollment: noop })} />);
+    expect(m).toContain('profile-active-banner');
+    expect(m).toContain('voiceProfile.profileCompletedTitle');
+    expect(m).toContain('voiceProfile.reEnrollBtn');
+  });
+  it('shows building indicator on button and disables it when isBuilding is true', () => {
+    const m = html(<ProfilePanel {...profileProps({ isBuilding: true })} />);
+    expect(m).toMatch(/<button[^>]*disabled=""[^>]*>⏳ voiceProfile.buildingProfile/);
   });
   it('shows the build job stage and the sample count', () => {
     const m = html(<ProfilePanel {...profileProps({ feedback: { jobBusy: true, currentJob: { ...runningJob, stage: 'enroll' }, enrollErrorText: null } })} />);

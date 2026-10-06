@@ -25,19 +25,17 @@ describe('VoiceProfileCard tabs', () => {
     withStoredTab('profile');
     const m = render();
     expect(m).toContain('id="voice-profile-panel-profile"');
-    expect(m).toContain('Modelo de enrollment de desenvolvimento, ainda não aprovado');
   });
   it('ignores an invalid stored value', () => {
     withStoredTab('samples');
     expect(render()).toContain('id="voice-profile-panel-enroll"');
   });
-  it('shows the development model notice exactly once, above the tabs, on every tab', () => {
+  it('does not show the development model notice on any tab in production UI', () => {
     const notice = 'Modelo de enrollment de desenvolvimento, ainda não aprovado';
     for (const tab of ['enroll', 'gallery', 'calls', 'profile']) {
       withStoredTab(tab);
       const m = render();
-      expect(m.split(notice).length - 1, tab).toBe(1);
-      expect(m.indexOf(notice), tab).toBeLessThan(m.indexOf('role="tablist"'));
+      expect(m, tab).not.toContain(notice);
       expect(m, tab).toContain(`id="voice-profile-panel-${tab}"`);
     }
   });

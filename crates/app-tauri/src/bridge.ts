@@ -42,6 +42,7 @@ export interface ClearcoreApi {
   getInputDevices: () => Promise<InputDeviceInfo[]>;
   setInputDevice: (deviceId: string) => Promise<{ success: boolean; selectedId: string }>;
   getHardwareBackends: () => Promise<HardwareBackendsResponse>;
+  setHardwareBackend?: (backendId: unknown) => Promise<{ success: boolean; reason?: string; active_backend: string }>;
   startAudioService?: () => Promise<{ success: boolean; isRunning: boolean; virtualMic: VirtualMicStatus }>;
   stopAudioService?: () => Promise<{ success: boolean; isRunning: boolean; virtualMic: VirtualMicStatus }>;
   getServiceRunningState?: () => Promise<{ isRunning: boolean }>;
@@ -91,6 +92,12 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     if (cmd === 'get_input_devices') return (await api.getInputDevices()) as unknown as T;
     if (cmd === 'set_input_device') return (await api.setInputDevice(String(args?.deviceId ?? ''))) as unknown as T;
     if (cmd === 'get_hardware_backends') return (await api.getHardwareBackends()) as unknown as T;
+    if (cmd === 'set_hardware_backend') {
+      if (typeof api.setHardwareBackend === 'function') {
+        const id = args?.backendId ?? args?.backend ?? args;
+        return (await api.setHardwareBackend(id)) as unknown as T;
+      }
+    }
     if (cmd === 'start_audio_service') {
       if (typeof api.startAudioService === 'function') {
         return (await api.startAudioService()) as unknown as T;

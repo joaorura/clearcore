@@ -15,9 +15,13 @@ export interface ProfilePanelProps {
   canBuild: boolean;
   /** A job or a recording is running. */
   busy: boolean;
+  /** True while the neural profile is actively being built and applied. */
+  isBuilding?: boolean;
   /** Feedback of the build job. */
   feedback: JobFeedbackView | null;
   onBuildProfile: () => void;
+  /** Callback to restart guided enrollment flow. */
+  onResetEnrollment?: () => void;
   /** Samples changed since the last build in this session: ask to rebuild (never automatic). */
   stale?: boolean;
 }
@@ -37,6 +41,43 @@ export function ProfilePanel(p: ProfilePanelProps) {
       {unsupported && (
         <div id="voice-profile-unsupported" role="status" style={{ color: '#fbbf24', fontSize: 13, marginBottom: 8 }}>
           {unsupportedText}
+        </div>
+      )}
+      {status.active && (
+        <div
+          role="status"
+          className="profile-active-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 16px',
+            background: 'rgba(34, 197, 94, 0.12)',
+            border: '1px solid rgba(34, 197, 94, 0.35)',
+            borderRadius: 8,
+            marginBottom: 16,
+            color: '#4ade80',
+          }}
+        >
+          <span style={{ fontSize: '1.4rem' }}>✅</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+              {t('voiceProfile.profileCompletedTitle')}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {t('voiceProfile.appliedInServiceNote')}
+            </div>
+          </div>
+          {p.onResetEnrollment && (
+            <button
+              className="action-btn"
+              onClick={p.onResetEnrollment}
+              style={{ fontSize: '0.8rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+              title={t('voiceProfile.reEnrollHint')}
+            >
+              {t('voiceProfile.reEnrollBtn')}
+            </button>
+          )}
         </div>
       )}
       <div className="profile-overview-box">
@@ -82,13 +123,17 @@ export function ProfilePanel(p: ProfilePanelProps) {
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
           <button
             className="action-btn"
-            disabled={p.busy || unsupported}
+            disabled={p.busy || p.isBuilding || unsupported}
             title={unsupported ? unsupportedText : undefined}
             aria-describedby={unsupported ? 'voice-profile-unsupported' : undefined}
             onClick={p.onBuildProfile}
             style={{ fontSize: '0.8rem', padding: '6px 12px' }}
           >
-            {hasServiceVoiceProfile(profileStatus) ? t('voiceProfile.rebuildProfileBtn') : t('voiceProfile.activateProfileBtn')}
+            {p.isBuilding
+              ? `⏳ ${t('voiceProfile.buildingProfile')}`
+              : hasServiceVoiceProfile(profileStatus)
+                ? t('voiceProfile.rebuildProfileBtn')
+                : t('voiceProfile.activateProfileBtn')}
           </button>
         </div>
       )}

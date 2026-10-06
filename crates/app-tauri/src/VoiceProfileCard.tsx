@@ -4,7 +4,6 @@ import type { CallSuggestionTake, InputDeviceInfo } from './types';
 import { errorLabel } from './voice/enrollmentErrors';
 import { buildEnrollmentLabels, hasServiceVoiceProfile, profileSampleIds, samplesUsedInProfile, showStaleProfileNotice } from './voice/hooks/voiceProfileLogic';
 import { stepAfterSelect } from './voice/hooks/guidedSteps';
-import { DevModelNotice } from './voice/DevModelNotice';
 import { useJobFeedback } from './voice/hooks/useJobFeedback';
 import { useVoiceSamples } from './voice/hooks/useVoiceSamples';
 import { useEnrollmentRecorder } from './voice/hooks/useEnrollmentRecorder';
@@ -144,7 +143,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   }, [refreshSamples, refreshCallTakes]);
 
   const handleBuildProfile = async (origin: 'enroll' | 'profile') => {
-    if (await profile.buildProfile(origin)) flash(t('voiceProfile.profileActivatedSuccess'), 5000);
+    if (profile.isBuilding) return;
+    if (await profile.buildProfile(origin)) flash(t('voiceProfile.profileActivatedSuccess'), 6000);
   };
 
   const handleDeleteSample = async (id: string) => {
@@ -173,13 +173,13 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const feedbackView = { jobBusy, currentJob, enrollErrorText };
   const feedbackFor = (tab: VoiceTabId) => jobFeedbackFor(tab, jobs.source, feedbackView);
   const badges = voiceTabBadges(samples.length, callTakes.length);
-  // While the microphone records or sample is being submitted, the other tabs stay closed.
+  // While the microphone records, sample is being submitted, or profile is building, the other tabs stay closed.
   const tabs: TabDef[] = [
     { id: 'enroll', label: t('voiceProfile.tabEnroll') },
     { id: 'gallery', label: t('voiceProfile.tabGallery'), badge: badges.gallery },
     { id: 'calls', label: t('voiceProfile.tabCalls'), badge: badges.calls },
     { id: 'profile', label: t('voiceProfile.tabProfile') },
-  ].map((tab) => ({ ...tab, disabled: (isRecording || isSubmitting) && tab.id !== activeTab }));
+  ].map((tab) => ({ ...tab, disabled: (isRecording || isSubmitting || profile.isBuilding) && tab.id !== activeTab }));
 
   const renderPanel = (id: string) => {
     switch (parseVoiceTab(id)) {
@@ -223,8 +223,13 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             samplesCount={sampleList ? samplesUsedInProfile(samples) : profileStatus.active_samples_count}
             canBuild={samples.length > 0}
             busy={jobBusy || isRecording}
+            isBuilding={profile.isBuilding}
             feedback={feedbackFor('profile')}
             onBuildProfile={() => void handleBuildProfile('profile')}
+            onResetEnrollment={() => {
+              steps.resetSteps();
+              changeTab({ by: 'user', id: 'enroll' });
+            }}
             stale={showStaleProfileNotice(profileStatus, sampleList ? profileSampleIds(samples) : null, profile.idsAtBuild)}
           />
         );
@@ -244,6 +249,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             recordingElapsedSeconds={recordingElapsedSeconds}
             captureError={isModalOpen ? null : captureError}
             jobBusy={jobBusy}
+            isBuilding={profile.isBuilding}
             isStarting={isStarting}
             feedback={isModalOpen ? null : feedbackFor('enroll')}
             onSelectStep={(step) => setCurrentStep(stepAfterSelect(currentStep, step, isRecording || isSubmitting))}
@@ -264,7 +270,6 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <h2 className="card-title" style={{ margin: 0 }}>{t('voiceProfile.title')}</h2>
-          <span className="profile-badge-ecapa">{t('voiceProfile.badge')}</span>
           <span className={`status-pill ${status.active ? 'pill-active' : 'pill-pending'}`}>{status.text}</span>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6, lineHeight: 1.45 }}>
@@ -272,19 +277,13 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
         </p>
       </div>
 
-      {/* Always visible, whatever the tab, while the enrollment model is the development asset (spec §9). */}
-      <div style={{ marginBottom: 12 }}>
-        <DevModelNotice
-          labels={labels}
-          devBaseModel={profileStatus.dev_base_model}
-          devBaseModelError={profileStatus.dev_base_model_error}
-        />
-        {legacyNotice && (
+      {legacyNotice && (
+        <div style={{ marginBottom: 12 }}>
           <div role="note" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             {t('voiceProfile.legacySamplesNotice')}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {feedbackMessage && <div className="feedback-banner success-banner">{feedbackMessage}</div>}
 

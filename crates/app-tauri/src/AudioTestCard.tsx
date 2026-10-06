@@ -50,6 +50,49 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
   // Synchronized HTML5 Audio Elements
   const rawAudioElementRef = useRef<HTMLAudioElement | null>(null);
   const filteredAudioElementRef = useRef<HTMLAudioElement | null>(null);
+  const playSessionRef = useRef<number>(0);
+  const lastEndedTimeRef = useRef<number>(0);
+
+  const stopAndResetPlayback = useCallback(() => {
+    playSessionRef.current += 1;
+    const rawAudio = rawAudioElementRef.current;
+    const filteredAudio = filteredAudioElementRef.current;
+
+    if (rawAudio) {
+      try {
+        rawAudio.pause();
+      } catch {}
+      rawAudio.currentTime = 0;
+    }
+    if (filteredAudio) {
+      try {
+        filteredAudio.pause();
+      } catch {}
+      filteredAudio.currentTime = 0;
+    }
+    setIsAbPlaying(false);
+    setAbCurrentTime(0);
+  }, []);
+
+  const handleEnded = useCallback(() => {
+    const now = Date.now();
+    // Guard/debounce to avoid double trigger when both raw and filtered audio end almost simultaneously
+    if (now - lastEndedTimeRef.current < 500) {
+      return;
+    }
+    lastEndedTimeRef.current = now;
+
+    // Guaranteed order: pause both elements first, then reset currentTime = 0, stopping any further playback
+    stopAndResetPlayback();
+  }, [stopAndResetPlayback]);
+
+  const handleAudioError = useCallback(
+    (e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
+      console.warn('Audio element error during playback:', e);
+      stopAndResetPlayback();
+    },
+    [stopAndResetPlayback]
+  );
 
   const cleanupAudioStreams = useCallback(() => {
     if (animationFrameRef.current !== null) {
@@ -89,20 +132,26 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
 
   useEffect(() => {
     return () => {
+      stopAndResetPlayback();
       cleanupAudioStreams();
       revokeUrls();
     };
-  }, [cleanupAudioStreams, revokeUrls]);
+  }, [stopAndResetPlayback, cleanupAudioStreams, revokeUrls]);
 
   // Synchronize Volumes during A/B Playback
   useEffect(() => {
-    if (rawAudioElementRef.current && filteredAudioElementRef.current) {
+    const rawAudio = rawAudioElementRef.current;
+    const filteredAudio = filteredAudioElementRef.current;
+    if (rawAudio && filteredAudio) {
       if (activeAbTrack === 'before') {
-        rawAudioElementRef.current.volume = 1;
-        filteredAudioElementRef.current.volume = 0;
+        rawAudio.volume = 1;
+        filteredAudio.volume = 0;
       } else {
-        rawAudioElementRef.current.volume = 0;
-        filteredAudioElementRef.current.volume = 1;
+        rawAudio.volume = 0;
+        filteredAudio.volume = 1;
+      }
+      if (Math.abs(rawAudio.currentTime - filteredAudio.currentTime) > 0.05) {
+        filteredAudio.currentTime = rawAudio.currentTime;
       }
     }
   }, [activeAbTrack]);
@@ -165,6 +214,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
   };
 
   const startRecording = async () => {
+    stopAndResetPlayback();
     setErrorMessage(null);
     revokeUrls();
     setNoiseReductionDb(null);
@@ -436,6 +486,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
   };
 
   const handleDiscard = () => {
+    stopAndResetPlayback();
     revokeUrls();
     setRecordingSeconds(0);
     setErrorMessage(null);
@@ -452,14 +503,34 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
 
     if (!rawAudio || !filteredAudio) return;
 
-    if (isAbPlaying) {
-      rawAudio.pause();
-      filteredAudio.pause();
+    const isCurrentlyPlaying =
+      isAbPlaying ||
+      (!rawAudio.paused && !rawAudio.ended) ||
+      (!filteredAudio.paused && !filteredAudio.ended);
+
+    if (isCurrentlyPlaying) {
+      playSessionRef.current += 1;
+      try {
+        rawAudio.pause();
+      } catch {}
+      try {
+        filteredAudio.pause();
+      } catch {}
       setIsAbPlaying(false);
     } else {
+      lastEndedTimeRef.current = 0;
+
       // Synchronize timestamps before starting
-      const targetTime = rawAudio.currentTime || 0;
-      filteredAudio.currentTime = targetTime;
+      let targetTime = rawAudio.currentTime || 0;
+      const dur = abDuration || rawAudio.duration || 0;
+      if (dur > 0 && targetTime >= dur - 0.05) {
+        targetTime = 0;
+        rawAudio.currentTime = 0;
+        filteredAudio.currentTime = 0;
+        setAbCurrentTime(0);
+      } else {
+        filteredAudio.currentTime = targetTime;
+      }
 
       // Apply volume balance based on active selection
       if (activeAbTrack === 'before') {
@@ -470,9 +541,28 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
         filteredAudio.volume = 1;
       }
 
+      const session = ++playSessionRef.current;
       Promise.all([rawAudio.play(), filteredAudio.play()])
-        .then(() => setIsAbPlaying(true))
-        .catch((e) => console.warn('Playback error:', e));
+        .then(() => {
+          if (playSessionRef.current === session) {
+            setIsAbPlaying(true);
+          } else {
+            try {
+              rawAudio.pause();
+            } catch {}
+            try {
+              filteredAudio.pause();
+            } catch {}
+          }
+        })
+        .catch((e) => {
+          if ((e as Error)?.name !== 'AbortError') {
+            console.warn('Playback error:', e);
+          }
+          if (playSessionRef.current === session) {
+            setIsAbPlaying(false);
+          }
+        });
     }
   };
 
@@ -761,6 +851,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
             <audio
               ref={rawAudioElementRef}
               src={rawAudioUrl}
+              preload="auto"
               onTimeUpdate={() => {
                 if (rawAudioElementRef.current) {
                   setAbCurrentTime(rawAudioElementRef.current.currentTime);
@@ -780,22 +871,23 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
                   }
                 }
               }}
-              onEnded={() => {
-                setIsAbPlaying(false);
-                setAbCurrentTime(0);
-                if (rawAudioElementRef.current) rawAudioElementRef.current.currentTime = 0;
-                if (filteredAudioElementRef.current) filteredAudioElementRef.current.currentTime = 0;
-              }}
+              onEnded={handleEnded}
+              onError={handleAudioError}
             />
             <audio
               ref={filteredAudioElementRef}
               src={filteredAudioUrl}
-              onEnded={() => {
-                setIsAbPlaying(false);
-                setAbCurrentTime(0);
-                if (rawAudioElementRef.current) rawAudioElementRef.current.currentTime = 0;
-                if (filteredAudioElementRef.current) filteredAudioElementRef.current.currentTime = 0;
+              preload="auto"
+              onLoadedMetadata={() => {
+                if (filteredAudioElementRef.current && (!abDuration || abDuration <= 0)) {
+                  const d = filteredAudioElementRef.current.duration;
+                  if (Number.isFinite(d) && d > 0) {
+                    setAbDuration(d);
+                  }
+                }
               }}
+              onEnded={handleEnded}
+              onError={handleAudioError}
             />
           </div>
         </div>

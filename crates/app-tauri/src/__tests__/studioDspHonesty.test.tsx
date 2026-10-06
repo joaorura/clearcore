@@ -31,5 +31,15 @@ describe('Studio DSP honesty (spec §9)', () => {
     expect(html).not.toContain(ptBR.studioDsp.neuralEqStatusCalibrated);
     expect(html).not.toMatch(/🟢 Calibrado/);
     expect(html).toContain(ptBR.studioDsp.neuralEqStatusPending);
+    expect(html).not.toContain(ptBR.studioDsp.neuralEqCardCalibratedBadge);
+  });
+
+  it('calibration card copy explains active calibration honestly without fake gains or buzzwords', () => {
+    for (const locale of [ptBR, enUS]) {
+      expect(locale.studioDsp.neuralEqCardCalibratedBadge).toBeDefined();
+      expect(locale.studioDsp.neuralEqCardActiveDesc).toBeDefined();
+      expect(locale.studioDsp.neuralEqCardCalibratedBadge).not.toMatch(DISHONEST);
+      expect(locale.studioDsp.neuralEqCardActiveDesc).not.toMatch(DISHONEST);
+    }
   });
 });

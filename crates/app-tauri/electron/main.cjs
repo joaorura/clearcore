@@ -7,7 +7,7 @@ const { execFile, spawn } = require('child_process');
 const clearcoreState = require('./clearcore-state.cjs');
 const { planCaptureLinks } = require('./capture-link-plan.cjs');
 const { parseHardwareJson } = require('./hardware-json.cjs');
-const { resolveBackendSelection } = require('./backend-selection.cjs');
+const { resolveBackendSelection, mapBackendToDaemon } = require('./backend-selection.cjs');
 const updater = require('./updater.cjs');
 const voiceProfileStore = require('./voice-profile-store.cjs');
 const voiceProfileMerge = require('./voice-profile-merge.cjs');
@@ -1603,12 +1603,24 @@ ipcMain.handle('get_hardware_backends', () => {
   return queryHardwareBackends();
 });
 
-ipcMain.handle('set_hardware_backend', (_event, backendId) => {
-  // So 'auto' e 'cpu_tract' processam audio hoje (o motor e sempre o Tract na CPU);
-  // os demais voltam { success: false, reason: 'not_implemented' } sem mudar nada.
+ipcMain.handle('set_hardware_backend', async (_event, backendId) => {
   const result = resolveBackendSelection(backendId);
   if (result.success) {
     currentSelectedBackend = result.active_backend;
+    if (await isDaemonResponsive()) {
+      try {
+        const daemonBackend = mapBackendToDaemon(result.active_backend);
+        const daemonResp = await sendIpcRequest({ SetBackend: daemonBackend });
+        if (daemonResp && typeof daemonResp === 'object') {
+          return {
+            ...result,
+            daemon_response: daemonResp,
+          };
+        }
+      } catch (e) {
+        console.log('[Clearcore IPC] Daemon SetBackend forward skipped/failed:', e.message);
+      }
+    }
   }
   return result;
 });

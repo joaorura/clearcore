@@ -110,8 +110,18 @@ export const StudioDspCard: React.FC = () => {
   const [isNeuralEqCalibrated, setIsNeuralEqCalibrated] = useState<boolean>(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
-  // Load preset on startup
+  // Load preset and calibration on startup, plus register reactive listeners
   useEffect(() => {
+    const refreshCalibration = async () => {
+      try {
+        const res = await invokeBridge<unknown>('get_voice_profile');
+        const status = (res as { profile?: unknown } | null)?.profile ?? res;
+        setIsNeuralEqCalibrated(neuralEqCalibratedFrom(status));
+      } catch {
+        // unreachable service: stays not calibrated
+      }
+    };
+
     const loadPreset = async () => {
       try {
         const presetRes = await invokeBridge<StudioPreset>('get_studio_preset');
@@ -121,18 +131,10 @@ export const StudioDspCard: React.FC = () => {
           const saved = localStorage.getItem(STORAGE_PRESET_KEY) as StudioPreset;
           if (saved) setActivePreset(saved);
         }
-
       } catch {
         // Fallback
       }
-      try {
-        // Calibration as the service reports it now (flat or { profile } envelope).
-        const res = await invokeBridge<unknown>('get_voice_profile');
-        const status = (res as { profile?: unknown } | null)?.profile ?? res;
-        setIsNeuralEqCalibrated(neuralEqCalibratedFrom(status));
-      } catch {
-        // unreachable service: stays not calibrated
-      }
+      await refreshCalibration();
     };
     loadPreset();
 
@@ -140,7 +142,17 @@ export const StudioDspCard: React.FC = () => {
       setIsNeuralEqCalibrated(neuralEqCalibratedFrom((e as CustomEvent<unknown>).detail));
     };
     window.addEventListener('clearcore_profile_updated', handleProfileUpdate);
-    return () => window.removeEventListener('clearcore_profile_updated', handleProfileUpdate);
+
+    // Also register onVoiceProfileUpdate bridge listener if available
+    const api = typeof window !== 'undefined' ? window.clearcoreApi : undefined;
+    const cleanupBridgeListener = api?.onVoiceProfileUpdate?.((profile) => {
+      setIsNeuralEqCalibrated(neuralEqCalibratedFrom(profile));
+    });
+
+    return () => {
+      window.removeEventListener('clearcore_profile_updated', handleProfileUpdate);
+      if (cleanupBridgeListener) cleanupBridgeListener();
+    };
   }, []);
 
   const handleSelectPreset = async (preset: StudioPreset) => {
@@ -314,6 +326,31 @@ export const StudioDspCard: React.FC = () => {
             {isNeuralEqCalibrated ? t('studioDsp.neuralEqStatusCalibrated') : t('studioDsp.neuralEqStatusPending')}
           </span>
         </div>
+
+        {/* Calibration Info Card (displays when calibrated by the service) */}
+        {isNeuralEqCalibrated && (
+          <div
+            className="neural-eq-calibrated-card"
+            style={{
+              background: 'rgba(34, 197, 94, 0.08)',
+              border: '1px solid rgba(34, 197, 94, 0.25)',
+              borderRadius: 6,
+              padding: '12px 14px',
+              marginTop: 10,
+              marginBottom: 10,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: '0.85rem' }}>🎯</span>
+              <strong style={{ fontSize: '0.85rem', color: '#4ade80' }}>
+                {t('studioDsp.neuralEqCardCalibratedBadge')}
+              </strong>
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: 0, lineHeight: 1.45 }}>
+              {t('studioDsp.neuralEqCardActiveDesc')}
+            </p>
+          </div>
+        )}
 
         {/* No per-band values: the service does not report them, and none are invented here. */}
 

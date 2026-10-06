@@ -17,6 +17,8 @@ export interface EnrollPanelProps {
   /** Null while the voluntary sample modal shows it instead. */
   captureError: string | null;
   jobBusy: boolean;
+  /** True while the neural profile is actively being built and applied. */
+  isBuilding?: boolean;
   /** True while the recorded sample is being submitted/processed in the guided flow. */
   isSubmitting?: boolean;
   /** The microphone is being opened: recording cannot be started again. */
@@ -36,7 +38,8 @@ export interface EnrollPanelProps {
 /** Guided 5-step enrollment: question, live level, record/stop, take preview and job feedback. */
 export function EnrollPanel(p: EnrollPanelProps) {
   const { t, currentStep, completedSteps, isReadingMode, isRecording } = p;
-  const isProcessing = Boolean(p.jobBusy || p.isSubmitting);
+  const isBuilding = Boolean(p.isBuilding || (p.jobBusy && p.feedback?.jobBusy && !p.isSubmitting));
+  const isProcessing = Boolean(p.jobBusy || p.isSubmitting || p.isBuilding || isBuilding);
   const completedCount = Object.keys(completedSteps).length;
   const isAllStepsCompleted = completedCount >= GUIDED_STEP_COUNT;
   const currentQ = STEP_QUESTIONS[currentStep - 1] ?? STEP_QUESTIONS[0];
@@ -45,7 +48,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
 
   return (
     <div>
-      {p.isEnrolled && (
+      {p.isEnrolled && showFlow && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
           <button className="action-btn" onClick={p.onResetEnrollment} title={t('voiceProfile.reEnrollHint')} style={{ fontSize: '0.8rem', padding: '6px 12px' }}>
             {t('voiceProfile.reEnrollBtn')}
@@ -53,10 +56,54 @@ export function EnrollPanel(p: EnrollPanelProps) {
         </div>
       )}
 
-      {p.isEnrolled && (
+      {p.isEnrolled && showFlow && (
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', margin: '0 0 12px', textAlign: 'right' }}>
           {t('voiceProfile.reEnrollHint')}
         </p>
+      )}
+
+      {!showFlow && (
+        <div
+          className="enroll-completed-card"
+          style={{
+            background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%)',
+            border: '1px solid rgba(34, 197, 94, 0.35)',
+            borderRadius: 12,
+            padding: '28px 24px',
+            textAlign: 'center',
+            marginTop: 8,
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>✅</div>
+          <h3 style={{ margin: '0 0 8px', color: '#4ade80', fontSize: '1.25rem', fontWeight: 700 }}>
+            {t('voiceProfile.profileCompletedTitle')}
+          </h3>
+          <p style={{ margin: '0 auto 20px', color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: 480, lineHeight: 1.5 }}>
+            {t('voiceProfile.profileCompletedDesc')}
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <button
+              className="action-btn"
+              onClick={p.onResetEnrollment}
+              title={t('voiceProfile.reEnrollHint')}
+              style={{
+                fontWeight: 600,
+                fontSize: '0.9rem',
+                padding: '10px 22px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: 8,
+                cursor: 'pointer',
+              }}
+            >
+              {t('voiceProfile.reEnrollBtn')}
+            </button>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', margin: '16px auto 0', maxWidth: 440 }}>
+            {t('voiceProfile.reEnrollHint')}
+          </p>
+        </div>
       )}
 
       <JobFeedbackBlock feedback={p.feedback} labels={p.labels} t={t} locale={p.locale} />
@@ -142,7 +189,9 @@ export function EnrollPanel(p: EnrollPanelProps) {
             ) : isProcessing ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: 'rgba(59, 130, 246, 0.15)', borderRadius: 8, color: '#93c5fd' }}>
                 <span style={{ fontSize: '1.1rem' }}>⏳</span>
-                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{t('voiceProfile.sendingSample')}</span>
+                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
+                  {isBuilding ? t('voiceProfile.buildingProfile') : t('voiceProfile.sendingSample')}
+                </span>
               </div>
             ) : currentTake ? (
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -162,8 +211,12 @@ export function EnrollPanel(p: EnrollPanelProps) {
             )}
 
             {isAllStepsCompleted && (
-              <button className="activate-profile-master-btn" disabled={isProcessing || isRecording} onClick={p.onBuildProfile}>
-                {t('voiceProfile.activateProfileBtn')}
+              <button
+                className="activate-profile-master-btn"
+                disabled={isProcessing || isRecording || isBuilding}
+                onClick={p.onBuildProfile}
+              >
+                {isBuilding ? `⏳ ${t('voiceProfile.buildingProfile')}` : t('voiceProfile.activateProfileBtn')}
               </button>
             )}
           </div>
