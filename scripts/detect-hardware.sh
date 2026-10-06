@@ -152,11 +152,18 @@ fi
 
 if [[ "${HAS_TRT_RUNTIME}" == "false" ]]; then
     for candidate in \
+        "${ROOT}"/opt/tensorrt/lib/libnvinfer.so* \
+        "${ROOT}"/opt/tensorrt*/lib/libnvinfer.so* \
+        "${ROOT}"/opt/TensorRT*/lib/libnvinfer.so* \
+        "${ROOT}"/usr/local/tensorrt/lib/libnvinfer.so* \
         "${ROOT}"/usr/lib64/libnvinfer.so* \
         "${ROOT}"/usr/lib/x86_64-linux-gnu/libnvinfer.so* \
         "${ROOT}"/usr/local/cuda/lib64/libnvinfer.so* \
         "${ROOT}"/opt/cuda/lib64/libnvinfer.so* \
-        "${ROOT}"/usr/local/tensorrt/lib/libnvinfer.so* \
+        "${ROOT}"/home/*/opt/TensorRT*/lib/libnvinfer.so* \
+        "${ROOT}"/home/*/opt/tensorrt*/lib/libnvinfer.so* \
+        "${ROOT}"/home/*/.local/share/tensorrt*/lib/libnvinfer.so* \
+        "${ROOT}"/home/*/tensorrt*/lib/libnvinfer.so* \
         "${ROOT}"/home/*/.local/lib/python*/site-packages/tensorrt_libs/libnvinfer.so* \
         "${ROOT}"/home/*/miniconda3/lib*/python*/site-packages/tensorrt_libs/libnvinfer.so* \
         "${ROOT}"/home/*/*/.venv/lib*/python*/site-packages/tensorrt_libs/libnvinfer.so* \

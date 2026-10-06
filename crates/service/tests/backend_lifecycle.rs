@@ -29,7 +29,16 @@ fn service_starts_with_auto_accelerator_and_reports_status() {
         .expect("active_backend");
     assert!(!active_backend.is_empty());
 
-    if realtime_noise_accelerators::OpenVINOBackend::is_available() {
+    if realtime_noise_accelerators::TensorRtBackend::is_available() {
+        assert!(
+            resp.payload["is_hardware_accelerated"]
+                .as_bool()
+                .unwrap_or(false)
+        );
+        assert_eq!(active_backend, "nvidia-tensorrt");
+        assert_eq!(resp.payload["backend_device"], "GPU");
+        assert_eq!(resp.payload["backend_runtime"], "tensorrt");
+    } else if realtime_noise_accelerators::OpenVINOBackend::is_available() {
         assert!(
             resp.payload["is_hardware_accelerated"]
                 .as_bool()
@@ -69,6 +78,30 @@ fn service_switches_backend_via_set_backend_ipc() {
         let status_after_npu = send(&mut daemon, IpcCommand::GetStatus);
         assert_eq!(status_after_npu.payload["active_backend"], "openvino-npu");
         assert_eq!(status_after_npu.payload["is_hardware_accelerated"], true);
+    }
+
+    // Switch to TensorRT
+    if realtime_noise_accelerators::TensorRtBackend::is_available() {
+        let switch_to_trt = send(&mut daemon, IpcCommand::set_backend("tensorrt"));
+        assert_eq!(switch_to_trt.status, IpcStatus::Ok);
+        assert_eq!(switch_to_trt.payload["success"], true);
+        assert_eq!(switch_to_trt.payload["active_backend"], "nvidia-tensorrt");
+        assert_eq!(switch_to_trt.payload["is_hardware_accelerated"], true);
+        assert!(
+            switch_to_trt.payload["device"]
+                .as_str()
+                .unwrap_or("")
+                .contains("GPU")
+                || switch_to_trt.payload["device"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("NVIDIA")
+        );
+
+        let status_after_trt = send(&mut daemon, IpcCommand::GetStatus);
+        assert_eq!(status_after_trt.payload["active_backend"], "nvidia-tensorrt");
+        assert_eq!(status_after_trt.payload["is_hardware_accelerated"], true);
+        assert_eq!(status_after_trt.payload["backend_device"], "GPU");
     }
 }
 

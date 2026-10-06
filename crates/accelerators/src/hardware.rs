@@ -214,12 +214,18 @@ impl HardwareScanner {
             let installed =
                 realtime_noise_runtime_tensorrt::locate_tensorrt_library().or_else(|| {
                     Self::check_library(&[
+                        "/opt/tensorrt/lib/libnvinfer.so.11",
+                        "/opt/tensorrt/lib/libnvinfer.so",
+                        "/usr/local/tensorrt/lib/libnvinfer.so.11",
+                        "/usr/local/tensorrt/lib/libnvinfer.so",
                         "/usr/lib64/libnvinfer.so",
                         "/usr/lib64/libnvinfer.so.10",
                         "/usr/lib64/libnvinfer.so.11",
                         "/usr/lib/x86_64-linux-gnu/libnvinfer.so",
+                        "/usr/lib/x86_64-linux-gnu/libnvinfer.so.11",
                         "/usr/local/cuda/lib64/libnvinfer.so",
                         "nvinfer.dll",
+                        "nvinfer_11.dll",
                     ])
                 });
             let status = if let Some(path) = installed {

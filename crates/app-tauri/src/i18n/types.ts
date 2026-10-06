@@ -182,6 +182,11 @@ export interface Translations {
     officialDocsTitle: string;
     officialDocsDesc: string;
     openDocLink: string;
+    officialDownloadTitle: string;
+    officialDownloadDesc: string;
+    openDownloadLink: string;
+    provenMethodTitle: string;
+    provenMethodDesc: string;
     llmPromptTitle: string;
     llmPromptDesc: string;
     copyLlmPromptBtn: string;

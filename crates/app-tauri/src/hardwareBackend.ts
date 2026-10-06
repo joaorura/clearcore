@@ -106,6 +106,9 @@ export interface DiagnosticStepItem {
 export const NVIDIA_TENSORRT_DOCS_URL =
   'https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html';
 
+export const NVIDIA_TENSORRT_DOWNLOAD_URL =
+  'https://developer.nvidia.com/tensorrt/download';
+
 export interface PromptContext {
   os?: string;
   deviceInfo?: string;
@@ -126,7 +129,7 @@ export function getBackendLlmPrompt(
 
   switch (backendId) {
     case 'nvidia_tensorrt':
-      return `Preciso instalar o runtime da biblioteca C/C++ da NVIDIA TensorRT (libnvinfer) no meu sistema operacional (${osStr}) para permitir inferência com aceleração por GPU em um aplicativo de áudio. ${hwStr} Por favor, me forneça o passo a passo oficial para instalar o TensorRT nativo com base na documentação oficial: ${NVIDIA_TENSORRT_DOCS_URL}`;
+      return `Preciso instalar o runtime da biblioteca C/C++ da NVIDIA TensorRT (libnvinfer) no meu sistema operacional (${osStr}) para permitir inferência com aceleração por GPU em um aplicativo de áudio. ${hwStr} O método comprovado que funcionou é baixar o pacote TAR localmente no portal oficial de download (${NVIDIA_TENSORRT_DOWNLOAD_URL}), extrair os binários e configurar o ldconfig (/etc/ld.so.conf.d/tensorrt.conf). Como referência, consulte a documentação oficial: ${NVIDIA_TENSORRT_DOCS_URL}. Por favor, me forneça o passo a passo exato desses comandos para o meu ambiente.`;
     case 'openvino_npu':
       return `Preciso instalar e configurar os drivers e o runtime da Intel OpenVINO NPU no meu sistema operacional (${osStr}). ${context?.deviceInfo ? `Meu hardware: ${context.deviceInfo}.` : 'Meu processador possui uma Intel NPU (AI Boost).'} Por favor, me forneça o passo a passo com base na documentação oficial: https://docs.openvino.ai/2025/get-started/configurations/configurations-intel-npu.html`;
     case 'openvino_gpu':
@@ -152,6 +155,11 @@ export interface BackendHelpDetails {
     title: string;
     url: string;
   };
+  officialDownload?: {
+    title: string;
+    url: string;
+  };
+  provenMethodNote?: string;
   llmPrompt?: string;
   nativeCommands: NativeCommandItem[];
   diagnosticGuide: DiagnosticStepItem[];
@@ -162,27 +170,33 @@ export function getBackendHelpDetails(backendId: string): BackendHelpDetails | n
     case 'nvidia_tensorrt':
       return {
         librarySearched: {
-          linux: 'libnvinfer.so.10 / libnvinfer.so',
-          windows: 'nvinfer.dll / nvinfer_10.dll',
-          description: 'Buscada em /usr/lib64, /usr/lib/x86_64-linux-gnu, LD_LIBRARY_PATH e módulos Python tensorrt_libs.',
+          linux: 'libnvinfer.so.11 / libnvinfer.so',
+          windows: 'nvinfer_11.dll / nvinfer.dll',
+          description: 'Buscada em /opt/tensorrt/lib, /usr/lib64, /usr/lib/x86_64-linux-gnu, LD_LIBRARY_PATH e módulos Python tensorrt_libs.',
         },
         officialDocs: {
-          title: 'NVIDIA TensorRT Installation Guide',
+          title: 'Guia Oficial de Instalação (Referência)',
           url: NVIDIA_TENSORRT_DOCS_URL,
         },
+        officialDownload: {
+          title: 'Portal Oficial de Download NVIDIA Developer',
+          url: NVIDIA_TENSORRT_DOWNLOAD_URL,
+        },
+        provenMethodNote:
+          'Método Comprovado / Recomendado: Baixar o pacote TAR (ex: CUDA 13.x) no portal oficial, extrair localmente (ex: em /opt/tensorrt) e registrar o caminho em /etc/ld.so.conf.d/tensorrt.conf executando sudo ldconfig.',
         llmPrompt: getBackendLlmPrompt('nvidia_tensorrt') ?? undefined,
         nativeCommands: [
           {
             id: 'ubuntu',
             label: 'Ubuntu / Debian (APT)',
-            command: 'sudo apt update && sudo apt install -y libnvinfer10 libnvonnxparsers10',
+            command: 'sudo apt update && sudo apt install -y libnvinfer11 libnvonnxparsers11',
             note: 'Instalação nativa via repositório oficial da NVIDIA ou consulte o guia oficial: https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html',
           },
           {
             id: 'fedora',
-            label: 'Fedora / RHEL (DNF)',
+            label: 'Fedora / RHEL (DNF & TAR Local)',
             command: 'sudo dnf install -y tensorrt || pip install tensorrt',
-            note: 'Consulte o guia oficial da NVIDIA para instruções de instalação nativa: https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html',
+            note: 'Método que funcionou comprovadamente: baixar pacote TAR no portal oficial da NVIDIA (https://developer.nvidia.com/tensorrt/download), extrair localmente (ex: /opt/tensorrt) e registrar no ldconfig. Documentação de referência: https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html',
           },
           {
             id: 'arch',

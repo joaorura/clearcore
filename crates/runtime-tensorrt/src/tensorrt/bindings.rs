@@ -6,6 +6,14 @@ use crate::error::TensorRtError;
 
 const TENSORRT_LIB_CANDIDATES: &[&str] = &[
     #[cfg(unix)]
+    "/opt/tensorrt/lib/libnvinfer.so.11",
+    #[cfg(unix)]
+    "/opt/tensorrt/lib/libnvinfer.so",
+    #[cfg(unix)]
+    "/usr/local/tensorrt/lib/libnvinfer.so.11",
+    #[cfg(unix)]
+    "/usr/local/tensorrt/lib/libnvinfer.so",
+    #[cfg(unix)]
     "/usr/lib64/libnvinfer.so.11",
     #[cfg(unix)]
     "/usr/lib64/libnvinfer.so.10",
@@ -118,7 +126,16 @@ impl TensorRtLibrary {
             }
         }
 
-        // 3. System dynamic linker search by name
+        // 3. Iterate through dynamically discovered candidates in $HOME/opt and /opt
+        for candidate in discover_dynamic_tensorrt_libs() {
+            if Path::new(&candidate).exists()
+                && let Ok((handle, path)) = Self::try_load_path(&candidate)
+            {
+                return Ok((handle, path));
+            }
+        }
+
+        // 4. System dynamic linker search by name
         #[cfg(unix)]
         {
             for name in &["libnvinfer.so.11", "libnvinfer.so"] {
@@ -280,6 +297,52 @@ pub fn locate_library() -> Option<String> {
                 })
                 .map(|candidate| (*candidate).to_owned())
         })
+        .or_else(|| {
+            discover_dynamic_tensorrt_libs()
+                .into_iter()
+                .find(|candidate| Path::new(candidate).is_absolute() && Path::new(candidate).exists())
+        })
+}
+
+/// Dynamically discovers TensorRT candidate paths under `$HOME/opt/TensorRT*`, `/opt/tensorrt*`, `/opt/TensorRT*`.
+fn discover_dynamic_tensorrt_libs() -> Vec<String> {
+    let mut candidates = Vec::new();
+
+    #[cfg(unix)]
+    {
+        let mut base_dirs = Vec::new();
+        if let Ok(home) = std::env::var("HOME") {
+            base_dirs.push(std::path::PathBuf::from(home).join("opt"));
+        }
+        base_dirs.push(std::path::PathBuf::from("/opt"));
+        base_dirs.push(std::path::PathBuf::from("/usr/local"));
+
+        for base in base_dirs {
+            if let Ok(entries) = std::fs::read_dir(&base) {
+                for entry in entries.flatten() {
+                    let file_name = entry.file_name();
+                    let name_str = file_name.to_string_lossy();
+                    if name_str.to_ascii_lowercase().starts_with("tensorrt") {
+                        let lib_dir = entry.path().join("lib");
+                        if lib_dir.is_dir() {
+                            for so_name in &[
+                                "libnvinfer.so.11",
+                                "libnvinfer.so",
+                                "libnvinfer.so.10",
+                            ] {
+                                let full_path = lib_dir.join(so_name);
+                                if full_path.exists() {
+                                    candidates.push(full_path.to_string_lossy().into_owned());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    candidates
 }
 
 /// Probes whether the TensorRT library is available on the system.

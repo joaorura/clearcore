@@ -647,6 +647,78 @@ export const HardwareAcceleratorCard: React.FC = () => {
                 </div>
               </div>
 
+              {/* Proven Method / Recommended Alert Card */}
+              {(helpDetails?.provenMethodNote || selectedHelpBackend.id === 'nvidia_tensorrt') && (
+                <div
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.14) 0%, rgba(34, 197, 94, 0.1) 100%)',
+                    border: '1px solid rgba(234, 179, 8, 0.5)',
+                    borderRadius: 8,
+                    padding: '14px 16px',
+                    marginBottom: 16,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ fontSize: '1.25rem', lineHeight: 1.2 }}>💡</div>
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ color: '#fef08a', fontSize: '0.92rem', display: 'block', marginBottom: 4 }}>
+                        {t('hardwareBackend.provenMethodTitle')}
+                      </strong>
+                      <div style={{ fontSize: '0.84rem', color: '#f1f5f9', lineHeight: 1.5 }}>
+                        {helpDetails?.provenMethodNote || t('hardwareBackend.provenMethodDesc')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Official Download Link */}
+              {helpDetails?.officialDownload && (
+                <div
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.14) 0%, rgba(6, 182, 212, 0.09) 100%)',
+                    border: '1px solid rgba(16, 185, 129, 0.5)',
+                    borderRadius: 8,
+                    padding: '14px 16px',
+                    marginBottom: 16,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                    <div style={{ flex: '1 1 300px' }}>
+                      <strong style={{ color: '#34d399', fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        📥 {t('hardwareBackend.officialDownloadTitle')}
+                      </strong>
+                      <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: 3 }}>
+                        {t('hardwareBackend.officialDownloadDesc')}
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: '0.78rem', color: '#6ee7b7', fontFamily: 'Consolas, Monaco, monospace', wordBreak: 'break-all' }}>
+                        {helpDetails.officialDownload.url}
+                      </div>
+                    </div>
+                    <a
+                      href={helpDetails.officialDownload.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        color: '#022c22',
+                        backgroundColor: '#34d399',
+                        textDecoration: 'none',
+                        fontWeight: 700,
+                        fontSize: '0.82rem',
+                        padding: '8px 16px',
+                        borderRadius: 6,
+                        boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+                      }}
+                    >
+                      {t('hardwareBackend.openDownloadLink')} ↗
+                    </a>
+                  </div>
+                </div>
+              )}
+
               {/* Official Documentation Link */}
               {helpDetails?.officialDocs && (
                 <div
@@ -661,7 +733,7 @@ export const HardwareAcceleratorCard: React.FC = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                     <div style={{ flex: '1 1 300px' }}>
                       <strong style={{ color: '#38bdf8', fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        🌐 {t('hardwareBackend.officialDocsTitle')}
+                        {t('hardwareBackend.officialDocsTitle')}
                       </strong>
                       <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: 3 }}>
                         {t('hardwareBackend.officialDocsDesc')}

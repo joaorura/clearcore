@@ -200,7 +200,8 @@ impl EngineSupervisor {
     pub fn is_hardware_accelerated(&self) -> bool {
         self.backend.as_ref().is_some_and(|b| {
             let desc = b.descriptor();
-            desc.backend == "openvino" && desc.runtime != "openvino-cpu"
+            (desc.backend == "openvino" && desc.runtime != "openvino-cpu")
+                || desc.backend == "tensorrt"
         })
     }
 
@@ -220,6 +221,8 @@ impl EngineSupervisor {
                     "openvino-cpu" => "CPU".to_string(),
                     _ => "Accelerator".to_string(),
                 }
+            } else if desc.backend == "tensorrt" {
+                "GPU".to_string()
             } else {
                 "CPU".to_string()
             }

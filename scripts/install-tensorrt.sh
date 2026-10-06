@@ -49,11 +49,15 @@ fi
 echo "[3/4] Verificando se libnvinfer.so (TensorRT) ja esta disponivel..."
 TRT_LIB=""
 for loc in \
+    "/opt/tensorrt/lib/libnvinfer.so" \
+    "/opt/tensorrt/lib/libnvinfer.so.11" \
+    "/usr/local/tensorrt/lib/libnvinfer.so" \
     "/usr/lib64/libnvinfer.so" \
-    "/usr/lib64/libnvinfer.so.10" \
     "/usr/lib64/libnvinfer.so.11" \
+    "/usr/lib64/libnvinfer.so.10" \
     "/usr/lib/x86_64-linux-gnu/libnvinfer.so" \
-    "/usr/local/cuda/lib64/libnvinfer.so"; do
+    "/usr/local/cuda/lib64/libnvinfer.so" \
+    "${HOME}/.local/share/tensorrt/lib/libnvinfer.so"; do
     if [[ -e "${loc}" ]]; then
         TRT_LIB="${loc}"
         break
@@ -61,7 +65,7 @@ for loc in \
 done
 
 if [[ -z "${TRT_LIB}" ]] && command -v ldconfig >/dev/null 2>&1; then
-    TRT_LIB=$(ldconfig -p 2>/dev/null | grep "libnvinfer\.so" | awk '{print $NF}' | head -n1 || true)
+    TRT_LIB=$(ldconfig -p 2>/dev/null | grep -i "libnvinfer\.so" | awk '{print $NF}' | head -n1 || true)
 fi
 
 if [[ -n "${TRT_LIB}" ]]; then
@@ -72,9 +76,39 @@ fi
 
 echo "  -> TensorRT NAO encontrado no sistema."
 
+# Verificar se ha pacote TAR local baixado em ~/Downloads
+LOCAL_TAR=$(find "${HOME}/Downloads" -maxdepth 1 -name "TensorRT-*.tar.*" 2>/dev/null | head -n1 || true)
+
 # 4. Instrucoes detalhadas por distribuicao
 echo "[4/4] Guia de instalacao para seu sistema operacional:"
 echo "----------------------------------------------------------"
+echo "  [PORTAL OFICIAL DE DOWNLOAD]"
+echo "  📥 https://developer.nvidia.com/tensorrt/download"
+echo ""
+echo "  [GUIA OFICIAL DE INSTALACAO (REFERENCIA)]"
+echo "  📖 https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html"
+echo "----------------------------------------------------------"
+
+if [[ -n "${LOCAL_TAR}" ]]; then
+    echo ""
+    echo "  🌟 [PACOTE LOCAL ENCONTRADO EM SEUS DOWNLOADS]:"
+    echo "     Arquivo: ${LOCAL_TAR}"
+    echo ""
+    echo "  💡 METODO RECOMENDADO / COMPROVADO (Instalacao direta no sistema):"
+    echo "     1. Crie a pasta de destino e extraia o pacote:"
+    if [[ "${LOCAL_TAR}" == *.zst ]]; then
+        echo "        sudo mkdir -p /opt/tensorrt"
+        echo "        sudo tar --zstd -xf '${LOCAL_TAR}' --strip-components=1 -C /opt/tensorrt"
+    else
+        echo "        sudo mkdir -p /opt/tensorrt"
+        echo "        sudo tar -xzf '${LOCAL_TAR}' --strip-components=1 -C /opt/tensorrt"
+    fi
+    echo "     2. Registre as bibliotecas no carregador dinamico do sistema (ldconfig):"
+    echo "        echo '/opt/tensorrt/lib' | sudo tee /etc/ld.so.conf.d/tensorrt.conf"
+    echo "        sudo ldconfig"
+    echo "     3. Pronto! O Clearcore detectara imediatamente o TensorRT."
+    echo ""
+fi
 
 OS_ID="linux"
 if [[ -f /etc/os-release ]]; then
@@ -87,31 +121,29 @@ case "${OS_ID}" in
     fedora|rhel|centos)
         echo "Instrucoes para Fedora / RHEL / CentOS:"
         echo ""
-        echo "Opcao A (Via Repositorio Oficial NVIDIA):"
-        echo "  1. Baixe o pacote de repositorio CUDA/TensorRT para Fedora:"
-        echo "     sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/fedora41/x86_64/cuda-fedora41.repo"
-        echo "  2. Instale as bibliotecas TensorRT:"
-        echo "     sudo dnf install -y tensorrt libnvinfer10 libnvinfer-plugin10"
-        echo "  3. Atualize o cache de bibliotecas:"
+        echo "Metodo 1 (Comprovado - Pacote TAR Local):"
+        echo "  1. Baixe o pacote TAR para sua versao do CUDA (ex: CUDA 13.x / Linux x86_64):"
+        echo "     https://developer.nvidia.com/tensorrt/download"
+        echo "  2. Extraia em /opt/tensorrt:"
+        echo "     sudo mkdir -p /opt/tensorrt"
+        echo "     sudo tar --zstd -xf ~/Downloads/TensorRT-*.tar.zst --strip-components=1 -C /opt/tensorrt"
+        echo "  3. Configure o ldconfig:"
+        echo "     echo '/opt/tensorrt/lib' | sudo tee /etc/ld.so.conf.d/tensorrt.conf"
         echo "     sudo ldconfig"
         echo ""
-        echo "Opcao B (Via Tarball Oficial NVIDIA - Recomendado para versao mais recente):"
-        echo "  1. Acesse: https://developer.nvidia.com/tensorrt"
-        echo "  2. Baixe o pacote tar.gz correspondente a sua versao do CUDA (ex: TensorRT 10.x para CUDA 12.x/13.x)"
-        echo "  3. Extraia e copie os arquivos .so para /usr/local/lib64 ou /usr/lib64:"
-        echo "     tar -xzf TensorRT-*.tar.gz"
-        echo "     sudo cp -P TensorRT-*/lib/libnvinfer* /usr/lib64/"
-        echo "     sudo ldconfig"
+        echo "Metodo 2 (Via DNF se repositorio NVIDIA estiver configurado):"
+        echo "  sudo dnf install -y tensorrt || pip install tensorrt"
         ;;
     ubuntu|debian|pop)
         echo "Instrucoes para Ubuntu / Debian / Pop!_OS:"
         echo ""
-        echo "  1. Adicione o repositorio NVIDIA CUDA/TensorRT se necessario:"
+        echo "  1. Baixe no portal oficial: https://developer.nvidia.com/tensorrt/download"
+        echo "  2. Ou adicione o repositorio NVIDIA oficial (referencia):"
         echo "     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb"
         echo "     sudo dpkg -i cuda-keyring_1.1-1_all.deb"
-        echo "  2. Instale o TensorRT:"
-        echo "     sudo apt-get update"
-        echo "     sudo apt-get install -y libnvinfer10 libnvinfer-plugin10 libnvonnxparsers10"
+        echo "     sudo apt-get update && sudo apt-get install -y libnvinfer11 libnvonnxparsers11"
+        echo "     sudo ldconfig"
+        ;;
         echo "  3. Atualize o cache de bibliotecas:"
         echo "     sudo ldconfig"
         ;;

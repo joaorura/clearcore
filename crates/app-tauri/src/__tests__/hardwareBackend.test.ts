@@ -11,6 +11,7 @@ import {
   getBackendHelpDetails,
   getBackendLlmPrompt,
   NVIDIA_TENSORRT_DOCS_URL,
+  NVIDIA_TENSORRT_DOWNLOAD_URL,
 } from '../hardwareBackend';
 import { ptBR } from '../i18n/locales/pt-BR';
 import { enUS } from '../i18n/locales/en-US';
@@ -141,12 +142,22 @@ describe('hardwareBackend: instruções de instalação, biblioteca procurada e 
     expect(trt!.officialDocs.url).toBe(
       'https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html'
     );
+    expect(trt!.officialDocs.title).toContain('Referência');
+    expect(trt!.officialDownload).toBeDefined();
+    expect(trt!.officialDownload!.url).toBe(NVIDIA_TENSORRT_DOWNLOAD_URL);
+    expect(trt!.officialDownload!.url).toBe('https://developer.nvidia.com/tensorrt/download');
+    expect(trt!.provenMethodNote).toBeDefined();
+    expect(trt!.provenMethodNote).toContain('ldconfig');
+    expect(trt!.provenMethodNote).toContain('TAR');
+
     expect(trt!.llmPrompt).toBeDefined();
     expect(trt!.llmPrompt).toContain(NVIDIA_TENSORRT_DOCS_URL);
+    expect(trt!.llmPrompt).toContain(NVIDIA_TENSORRT_DOWNLOAD_URL);
+    expect(trt!.llmPrompt).toContain('ldconfig');
     expect(trt!.llmPrompt).toContain('libnvinfer');
 
     const cmdMap = new Map(trt!.nativeCommands.map((c) => [c.id, c.command]));
-    expect(cmdMap.get('ubuntu')).toContain('apt install -y libnvinfer10');
+    expect(cmdMap.get('ubuntu')).toContain('apt install -y libnvinfer11');
     expect(cmdMap.get('fedora')).toContain('dnf install -y tensorrt');
     expect(cmdMap.get('arch')).toContain('pacman -S --needed tensorrt');
     expect(cmdMap.get('python')).toBe('pip install tensorrt');
@@ -157,11 +168,13 @@ describe('hardwareBackend: instruções de instalação, biblioteca procurada e 
     expect(diagCmds).toContain('ldconfig -p | grep libnvinfer');
   });
 
-  it('getBackendLlmPrompt gera prompt estruturado e customizável para LLMs', () => {
+  it('getBackendLlmPrompt gera prompt estruturado com download oficial e método comprovado', () => {
     const defaultPrompt = getBackendLlmPrompt('nvidia_tensorrt');
     expect(defaultPrompt).not.toBeNull();
     expect(defaultPrompt).toContain('libnvinfer');
     expect(defaultPrompt).toContain(NVIDIA_TENSORRT_DOCS_URL);
+    expect(defaultPrompt).toContain(NVIDIA_TENSORRT_DOWNLOAD_URL);
+    expect(defaultPrompt).toContain('ldconfig');
     expect(defaultPrompt).toContain('Linux/Windows');
     expect(defaultPrompt).toContain('Meu hardware possui uma GPU NVIDIA.');
 
@@ -172,6 +185,17 @@ describe('hardwareBackend: instruções de instalação, biblioteca procurada e 
     expect(customPrompt).toContain('Linux (Ubuntu 24.04)');
     expect(customPrompt).toContain('NVIDIA GeForce RTX 4080');
     expect(customPrompt).toContain(NVIDIA_TENSORRT_DOCS_URL);
+    expect(customPrompt).toContain(NVIDIA_TENSORRT_DOWNLOAD_URL);
+
+    // Valida internacionalização das novas chaves de download e método comprovado
+    expect(ptBR.hardwareBackend.officialDownloadTitle).toContain('Download NVIDIA');
+    expect(ptBR.hardwareBackend.openDownloadLink).toBeDefined();
+    expect(ptBR.hardwareBackend.provenMethodTitle).toContain('Método Recomendado');
+    expect(ptBR.hardwareBackend.provenMethodDesc).toContain('ldconfig');
+    expect(enUS.hardwareBackend.officialDownloadTitle).toContain('Download Portal');
+    expect(enUS.hardwareBackend.openDownloadLink).toBeDefined();
+    expect(enUS.hardwareBackend.provenMethodTitle).toContain('Recommended');
+    expect(enUS.hardwareBackend.provenMethodDesc).toContain('ldconfig');
 
     // Valida internacionalização das chaves do prompt de LLM
     expect(ptBR.hardwareBackend.llmPromptTitle).toContain('💡 Precisa de ajuda com a instalação?');

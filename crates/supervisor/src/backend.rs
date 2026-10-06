@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use realtime_noise_accelerators::{BackendSelection, OpenVINOBackend};
+use realtime_noise_accelerators::{BackendSelection, OpenVINOBackend, TensorRtBackend};
 use realtime_noise_model::{
     APPROVED_ASSET_SHA256, ApprovedAssetManifest, CpuProfile, InferenceBackend, TractBackend,
 };
@@ -109,9 +109,9 @@ enum OpenVinoTarget {
 fn parse_openvino_target(request: &str) -> Option<OpenVinoTarget> {
     let lower = request.to_ascii_lowercase().replace('_', "-");
     match lower.as_str() {
-        "auto" | "" | "default" | "openvino" => Some(OpenVinoTarget::Auto),
+        "openvino" => Some(OpenVinoTarget::Auto),
         "openvino-npu" | "npu" | "intel-npu" => Some(OpenVinoTarget::Device("NPU".to_string())),
-        "openvino-gpu" | "gpu" | "intel-gpu" | "arc" => {
+        "openvino-gpu" | "intel-gpu" | "arc" => {
             Some(OpenVinoTarget::Device("GPU".to_string()))
         }
         "openvino-cpu" | "intel-cpu" => Some(OpenVinoTarget::Device("CPU".to_string())),
@@ -121,9 +121,9 @@ fn parse_openvino_target(request: &str) -> Option<OpenVinoTarget> {
 
 /// Instantiates an inference backend based on `request`, falling back safely to Tract CPU.
 ///
-/// If `request` resolves to `OpenVINO` and stateful models (`models/stateful`) are present,
-/// compiles and instantiates `OpenVINOBackend`. If hardware or models are missing, or if Tract CPU
-/// is explicitly requested, instantiates `TractBackend` (or pure-Rust Tract baseline).
+/// If `request` resolves to `TensorRT` or `OpenVINO` and hardware/models are present,
+/// compiles and instantiates the respective hardware backend. If hardware or models are missing,
+/// or if Tract CPU is explicitly requested, instantiates `TractBackend` (or pure-Rust Tract baseline).
 #[must_use]
 pub fn instantiate_backend_with_fallback(
     request: &str,
@@ -136,15 +136,176 @@ pub fn instantiate_backend_with_fallback(
     let resolved_repo_root = repo_root.map(Path::to_path_buf).or_else(find_repo_root);
 
     let trimmed = request.trim();
+    let norm = trimmed.to_ascii_lowercase().replace('_', "-");
     let is_tract_request = matches!(
-        trimmed.to_ascii_lowercase().replace('_', "-").as_str(),
+        norm.as_str(),
         "tract" | "cpu-tract" | "tract-cpu" | "cpu"
     );
 
     let mut fallback_reason = None;
 
     if !is_tract_request {
-        if let Some(target) = parse_openvino_target(trimmed) {
+        if matches!(norm.as_str(), "auto" | "" | "default") {
+            // Auto initialization: if NVIDIA GPU and TensorRT are available, try TensorRT first!
+            if TensorRtBackend::is_available() {
+                match TensorRtBackend::try_new_hardware(
+                    "df-compatible-release-asset-v1",
+                    APPROVED_ASSET_SHA256,
+                    0,
+                ) {
+                    Ok(backend) => {
+                        let device = backend.device_name().to_string();
+                        let descriptor = backend.descriptor();
+                        let info = BackendResolutionInfo {
+                            name: "nvidia-tensorrt".to_string(),
+                            runtime: descriptor.runtime.to_string(),
+                            device,
+                            is_hardware_accelerated: true,
+                            is_fallback: false,
+                            fallback_reason: None,
+                        };
+                        return (Box::new(backend), info);
+                    }
+                    Err(err) => {
+                        fallback_reason =
+                            Some(format!("TensorRT auto initialization failed: {err}"));
+                    }
+                }
+            }
+
+            // Next in Auto: try OpenVINO if available and stateful models exist
+            if OpenVINOBackend::is_available() {
+                if let Some(ref dir) = resolved_model_dir {
+                    match OpenVINOBackend::load_stateful_auto(
+                        dir,
+                        "df-compatible-release-asset-v1",
+                        APPROVED_ASSET_SHA256,
+                    ) {
+                        Ok(backend) => {
+                            let device = backend.device().to_string();
+                            let descriptor = backend.descriptor();
+                            let is_accelerated = backend.is_hardware_accelerated();
+                            let name = format!("openvino-{}", device.to_lowercase());
+                            let info = BackendResolutionInfo {
+                                name,
+                                runtime: descriptor.runtime.to_string(),
+                                device,
+                                is_hardware_accelerated: is_accelerated,
+                                is_fallback: false,
+                                fallback_reason: None,
+                            };
+                            return (Box::new(backend), info);
+                        }
+                        Err(err) => {
+                            fallback_reason =
+                                Some(format!("OpenVINO auto initialization failed: {err}"));
+                        }
+                    }
+                } else if fallback_reason.is_none() {
+                    fallback_reason = Some(
+                        "models/stateful directory not found for OpenVINO stateful backend"
+                            .to_string(),
+                    );
+                }
+            } else if fallback_reason.is_none() {
+                fallback_reason = Some("No hardware accelerator runtime available".to_string());
+            }
+        } else if matches!(norm.as_str(), "tensorrt" | "nvidia-tensorrt" | "nvidia" | "cuda") {
+            // Explicit TensorRT request
+            if TensorRtBackend::is_available() {
+                match TensorRtBackend::try_new_hardware(
+                    "df-compatible-release-asset-v1",
+                    APPROVED_ASSET_SHA256,
+                    0,
+                ) {
+                    Ok(backend) => {
+                        let device = backend.device_name().to_string();
+                        let descriptor = backend.descriptor();
+                        let info = BackendResolutionInfo {
+                            name: "nvidia-tensorrt".to_string(),
+                            runtime: descriptor.runtime.to_string(),
+                            device,
+                            is_hardware_accelerated: true,
+                            is_fallback: false,
+                            fallback_reason: None,
+                        };
+                        return (Box::new(backend), info);
+                    }
+                    Err(err) => {
+                        fallback_reason =
+                            Some(format!("TensorRT initialization failed: {err}"));
+                    }
+                }
+            } else {
+                fallback_reason = Some(
+                    "TensorRT native runtime (libnvinfer) is not available on this host".to_string(),
+                );
+            }
+        } else if norm == "gpu" {
+            // Generic GPU request: try TensorRT first, then OpenVINO GPU
+            if TensorRtBackend::is_available() {
+                match TensorRtBackend::try_new_hardware(
+                    "df-compatible-release-asset-v1",
+                    APPROVED_ASSET_SHA256,
+                    0,
+                ) {
+                    Ok(backend) => {
+                        let device = backend.device_name().to_string();
+                        let descriptor = backend.descriptor();
+                        let info = BackendResolutionInfo {
+                            name: "nvidia-tensorrt".to_string(),
+                            runtime: descriptor.runtime.to_string(),
+                            device,
+                            is_hardware_accelerated: true,
+                            is_fallback: false,
+                            fallback_reason: None,
+                        };
+                        return (Box::new(backend), info);
+                    }
+                    Err(err) => {
+                        fallback_reason =
+                            Some(format!("TensorRT GPU initialization failed: {err}"));
+                    }
+                }
+            }
+
+            if OpenVINOBackend::is_available() {
+                if let Some(ref dir) = resolved_model_dir {
+                    match OpenVINOBackend::load_stateful(
+                        dir,
+                        "GPU",
+                        "df-compatible-release-asset-v1",
+                        APPROVED_ASSET_SHA256,
+                    ) {
+                        Ok(backend) => {
+                            let device = backend.device().to_string();
+                            let descriptor = backend.descriptor();
+                            let is_accelerated = backend.is_hardware_accelerated();
+                            let name = format!("openvino-{}", device.to_lowercase());
+                            let info = BackendResolutionInfo {
+                                name,
+                                runtime: descriptor.runtime.to_string(),
+                                device,
+                                is_hardware_accelerated: is_accelerated,
+                                is_fallback: false,
+                                fallback_reason: None,
+                            };
+                            return (Box::new(backend), info);
+                        }
+                        Err(err) => {
+                            fallback_reason =
+                                Some(format!("OpenVINO GPU initialization failed: {err}"));
+                        }
+                    }
+                } else if fallback_reason.is_none() {
+                    fallback_reason = Some(
+                        "models/stateful directory not found for OpenVINO GPU backend".to_string(),
+                    );
+                }
+            } else if fallback_reason.is_none() {
+                fallback_reason = Some("No GPU acceleration runtime available".to_string());
+            }
+        } else if let Some(target) = parse_openvino_target(trimmed) {
             if OpenVINOBackend::is_available() {
                 if let Some(ref dir) = resolved_model_dir {
                     let load_res = match target {

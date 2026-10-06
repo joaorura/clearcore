@@ -14,7 +14,16 @@ fn supervisor_auto_selects_accelerator_when_stateful_model_present() {
     let mut supervisor = EngineSupervisor::default();
     let info = supervisor.select_backend("auto", stateful_dir.as_deref(), root.as_deref());
 
-    if stateful_dir.is_some() && realtime_noise_accelerators::OpenVINOBackend::is_available() {
+    if realtime_noise_accelerators::TensorRtBackend::is_available() {
+        assert!(info.is_hardware_accelerated);
+        assert_eq!(info.name, "nvidia-tensorrt");
+        assert!(supervisor.is_hardware_accelerated());
+        assert_eq!(supervisor.active_backend_name(), info.name);
+        assert_eq!(
+            supervisor.status().active_backend.as_deref(),
+            Some(info.name.as_str())
+        );
+    } else if stateful_dir.is_some() && realtime_noise_accelerators::OpenVINOBackend::is_available() {
         assert!(info.is_hardware_accelerated);
         assert!(info.name.starts_with("openvino"));
         assert!(supervisor.is_hardware_accelerated());
@@ -24,6 +33,24 @@ fn supervisor_auto_selects_accelerator_when_stateful_model_present() {
             Some(info.name.as_str())
         );
     } else {
+        assert!(!info.is_hardware_accelerated);
+        assert!(info.name.starts_with("tract"));
+    }
+}
+
+#[test]
+fn supervisor_selects_tensorrt_backend_explicitly() {
+    let root = find_repo_root();
+    let mut supervisor = EngineSupervisor::default();
+
+    let info = supervisor.select_backend("tensorrt", None, root.as_deref());
+    if realtime_noise_accelerators::TensorRtBackend::is_available() {
+        assert!(info.is_hardware_accelerated);
+        assert_eq!(info.name, "nvidia-tensorrt");
+        assert_eq!(supervisor.active_backend_name(), "nvidia-tensorrt");
+        assert!(supervisor.is_hardware_accelerated());
+    } else {
+        assert!(info.is_fallback);
         assert!(!info.is_hardware_accelerated);
         assert!(info.name.starts_with("tract"));
     }

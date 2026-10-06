@@ -1419,10 +1419,75 @@ function queryHardwareBackends() {
     }
   } catch {}
 
+  // Probe for TensorRT runtime on host in fallback
+  let hasTensorRtRuntime = false;
+  try {
+    if (isLinux) {
+      const ldOut = require('child_process').execSync('ldconfig -p 2>/dev/null | grep -i libnvinfer || true', { encoding: 'utf8' });
+      if (ldOut.includes('libnvinfer')) hasTensorRtRuntime = true;
+
+      const directCandidates = [
+        '/home/joaorura/opt/TensorRT-11.3.0.99/lib/libnvinfer.so',
+        '/home/joaorura/opt/TensorRT-11.3.0.99/lib/libnvinfer.so.11',
+        '/opt/tensorrt/lib/libnvinfer.so',
+        '/opt/tensorrt/lib/libnvinfer.so.11',
+        '/usr/lib64/libnvinfer.so',
+        '/usr/lib64/libnvinfer.so.11',
+        '/usr/lib/x86_64-linux-gnu/libnvinfer.so',
+        '/usr/local/cuda/lib64/libnvinfer.so',
+        '/usr/local/tensorrt/lib/libnvinfer.so',
+      ];
+      for (const cand of directCandidates) {
+        if (!hasTensorRtRuntime && fs.existsSync(cand)) {
+          hasTensorRtRuntime = true;
+          break;
+        }
+      }
+
+      const homeDir = os.homedir();
+      const searchBases = [
+        path.join(homeDir, 'opt'),
+        '/opt',
+        '/usr/local',
+      ];
+      for (const base of searchBases) {
+        if (hasTensorRtRuntime) break;
+        if (fs.existsSync(base)) {
+          try {
+            const entries = fs.readdirSync(base);
+            for (const entry of entries) {
+              if (/^tensorrt/i.test(entry)) {
+                const libDir = path.join(base, entry, 'lib');
+                if (fs.existsSync(libDir)) {
+                  if (
+                    fs.existsSync(path.join(libDir, 'libnvinfer.so')) ||
+                    fs.existsSync(path.join(libDir, 'libnvinfer.so.11')) ||
+                    fs.existsSync(path.join(libDir, 'libnvinfer.so.10'))
+                  ) {
+                    hasTensorRtRuntime = true;
+                    break;
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+    } else if (isWin) {
+      if (fs.existsSync('C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.0\\bin\\nvinfer_11.dll') ||
+          fs.existsSync('C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0\\bin\\nvinfer_10.dll') ||
+          fs.existsSync('C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.0\\bin\\nvinfer.dll')) {
+        hasTensorRtRuntime = true;
+      }
+    }
+  } catch {}
+
   // Resolve Auto backend
   let fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
   if (isMac && process.arch === 'arm64') {
     fallbackAutoResolved = { id: 'apple_coreml', name: 'Apple Silicon (CoreML)' };
+  } else if (hasNvidiaGpu && hasTensorRtRuntime) {
+    fallbackAutoResolved = { id: 'nvidia_tensorrt', name: 'NVIDIA GPU (TensorRT / CUDA)' };
   } else if (hasNvidiaGpu) {
     fallbackAutoResolved = { id: 'nvidia_tensorrt', name: 'NVIDIA GPU (TensorRT / CUDA)' };
   } else if (isAmd) {
@@ -1484,12 +1549,12 @@ function queryHardwareBackends() {
         name: 'NVIDIA GPU (TensorRT / CUDA)',
         tier: 'DedicatedGpu',
         hardware_detected: hasNvidiaGpu,
-        runtime_installed: false,
+        runtime_installed: hasTensorRtRuntime,
         device_info: hasNvidiaGpu ? 'GPU Dedicada NVIDIA Detectada' : 'Nenhuma GPU dedicada NVIDIA detectada neste sistema.',
         runtime_name: isWin ? 'TensorRT (nvinfer.dll)' : 'TensorRT (libnvinfer.so)',
         install_script: '',
         install_command: isWin ? 'pip install tensorrt' : linuxPkgTrt,
-        install_instruction: 'GPU NVIDIA detectada. Instale o NVIDIA TensorRT (libnvinfer) pelo gerenciador de pacotes da sua distro ou Python (pip install tensorrt). Guia oficial: https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html',
+        install_instruction: 'GPU NVIDIA detectada. Baixe o pacote TAR no portal oficial (https://developer.nvidia.com/tensorrt/download), extraia e configure no ldconfig. Documentação de referência: https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html',
       },
       {
         id: 'openvino_npu',
