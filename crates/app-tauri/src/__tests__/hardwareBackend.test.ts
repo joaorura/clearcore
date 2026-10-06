@@ -9,6 +9,8 @@ import {
   isRuntimePending,
   isPreviewBackend,
   getBackendHelpDetails,
+  getBackendLlmPrompt,
+  NVIDIA_TENSORRT_DOCS_URL,
 } from '../hardwareBackend';
 import { ptBR } from '../i18n/locales/pt-BR';
 import { enUS } from '../i18n/locales/en-US';
@@ -135,7 +137,13 @@ describe('hardwareBackend: instruções de instalação, biblioteca procurada e 
     expect(trt).not.toBeNull();
     expect(trt!.librarySearched.linux).toContain('libnvinfer.so');
     expect(trt!.librarySearched.windows).toContain('nvinfer.dll');
-    expect(trt!.officialDocs.url).toBe('https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html');
+    expect(trt!.officialDocs.url).toBe(NVIDIA_TENSORRT_DOCS_URL);
+    expect(trt!.officialDocs.url).toBe(
+      'https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html'
+    );
+    expect(trt!.llmPrompt).toBeDefined();
+    expect(trt!.llmPrompt).toContain(NVIDIA_TENSORRT_DOCS_URL);
+    expect(trt!.llmPrompt).toContain('libnvinfer');
 
     const cmdMap = new Map(trt!.nativeCommands.map((c) => [c.id, c.command]));
     expect(cmdMap.get('ubuntu')).toContain('apt install -y libnvinfer10');
@@ -147,6 +155,31 @@ describe('hardwareBackend: instruções de instalação, biblioteca procurada e 
     const diagCmds = trt!.diagnosticGuide.map((d) => d.command);
     expect(diagCmds).toContain('nvidia-smi');
     expect(diagCmds).toContain('ldconfig -p | grep libnvinfer');
+  });
+
+  it('getBackendLlmPrompt gera prompt estruturado e customizável para LLMs', () => {
+    const defaultPrompt = getBackendLlmPrompt('nvidia_tensorrt');
+    expect(defaultPrompt).not.toBeNull();
+    expect(defaultPrompt).toContain('libnvinfer');
+    expect(defaultPrompt).toContain(NVIDIA_TENSORRT_DOCS_URL);
+    expect(defaultPrompt).toContain('Linux/Windows');
+    expect(defaultPrompt).toContain('Meu hardware possui uma GPU NVIDIA.');
+
+    const customPrompt = getBackendLlmPrompt('nvidia_tensorrt', {
+      os: 'Linux (Ubuntu 24.04)',
+      deviceInfo: 'NVIDIA GeForce RTX 4080',
+    });
+    expect(customPrompt).toContain('Linux (Ubuntu 24.04)');
+    expect(customPrompt).toContain('NVIDIA GeForce RTX 4080');
+    expect(customPrompt).toContain(NVIDIA_TENSORRT_DOCS_URL);
+
+    // Valida internacionalização das chaves do prompt de LLM
+    expect(ptBR.hardwareBackend.llmPromptTitle).toContain('💡 Precisa de ajuda com a instalação?');
+    expect(ptBR.hardwareBackend.copyLlmPromptBtn).toBe('📋 Copiar Prompt para LLM');
+    expect(ptBR.hardwareBackend.llmPromptCopiedBtn).toBe('✓ Copiado!');
+    expect(enUS.hardwareBackend.llmPromptTitle).toContain('💡 Need help');
+    expect(enUS.hardwareBackend.copyLlmPromptBtn).toBe('📋 Copy Prompt for LLM');
+    expect(enUS.hardwareBackend.llmPromptCopiedBtn).toBe('✓ Copied!');
   });
 
   it('Intel OpenVINO NPU provê biblioteca, comandos nativos, verificação intel-npu-driver e docs', () => {

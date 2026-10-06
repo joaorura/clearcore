@@ -6,6 +6,7 @@ import {
   isBackendSelectable,
   isPreviewBackend,
   getBackendHelpDetails,
+  getBackendLlmPrompt,
 } from './hardwareBackend';
 
 export const HardwareAcceleratorCard: React.FC = () => {
@@ -531,6 +532,23 @@ export const HardwareAcceleratorCard: React.FC = () => {
       {selectedHelpBackend && (() => {
         const helpDetails = getBackendHelpDetails(selectedHelpBackend.id);
         const activeCmd = helpDetails?.nativeCommands.find((c) => c.id === selectedOsTab) || helpDetails?.nativeCommands[0];
+        const userOsLabel =
+          selectedOsTab === 'windows'
+            ? 'Windows'
+            : selectedOsTab === 'ubuntu'
+              ? 'Linux (Ubuntu/Debian)'
+              : selectedOsTab === 'fedora'
+                ? 'Linux (Fedora/RHEL)'
+                : selectedOsTab === 'arch'
+                  ? 'Linux (Arch Linux)'
+                  : typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent)
+                    ? 'Windows'
+                    : 'Linux';
+        const llmPrompt =
+          getBackendLlmPrompt(selectedHelpBackend.id, {
+            os: userOsLabel,
+            deviceInfo: selectedHelpBackend.device_info,
+          }) || helpDetails?.llmPrompt;
 
         return (
           <div
@@ -641,20 +659,23 @@ export const HardwareAcceleratorCard: React.FC = () => {
               {helpDetails?.officialDocs && (
                 <div
                   style={{
-                    background: 'rgba(56, 189, 248, 0.08)',
-                    border: '1px solid rgba(56, 189, 248, 0.25)',
-                    borderRadius: 6,
-                    padding: '12px 16px',
+                    background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(34, 197, 94, 0.08) 100%)',
+                    border: '1px solid rgba(56, 189, 248, 0.45)',
+                    borderRadius: 8,
+                    padding: '14px 16px',
                     marginBottom: 16,
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                    <div>
-                      <strong style={{ color: '#7dd3fc', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                    <div style={{ flex: '1 1 300px' }}>
+                      <strong style={{ color: '#38bdf8', fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: 6 }}>
                         🌐 {t('hardwareBackend.officialDocsTitle')}
                       </strong>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginTop: 3 }}>
                         {t('hardwareBackend.officialDocsDesc')}
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: '0.78rem', color: '#7dd3fc', fontFamily: 'Consolas, Monaco, monospace', wordBreak: 'break-all' }}>
+                        {helpDetails.officialDocs.url}
                       </div>
                     </div>
                     <a
@@ -668,15 +689,99 @@ export const HardwareAcceleratorCard: React.FC = () => {
                         color: '#0f172a',
                         backgroundColor: '#38bdf8',
                         textDecoration: 'none',
-                        fontWeight: 600,
-                        fontSize: '0.8rem',
-                        padding: '6px 12px',
-                        borderRadius: 4,
+                        fontWeight: 700,
+                        fontSize: '0.82rem',
+                        padding: '8px 16px',
+                        borderRadius: 6,
+                        boxShadow: '0 2px 8px rgba(56, 189, 248, 0.3)',
                       }}
                     >
                       {t('hardwareBackend.openDocLink')} ↗
                     </a>
                   </div>
+                </div>
+              )}
+
+              {/* LLM Assistance Prompt */}
+              {llmPrompt && (
+                <div
+                  style={{
+                    background: 'rgba(99, 102, 241, 0.08)',
+                    border: '1px solid rgba(129, 140, 248, 0.35)',
+                    borderRadius: 8,
+                    padding: '14px 16px',
+                    marginBottom: 16,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      marginBottom: 10,
+                      gap: 12,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div>
+                      <strong
+                        style={{
+                          color: '#e0e7ff',
+                          fontSize: '0.88rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {t('hardwareBackend.llmPromptTitle')}
+                      </strong>
+                      <div style={{ fontSize: '0.78rem', color: '#a5b4fc', marginTop: 3 }}>
+                        {t('hardwareBackend.llmPromptDesc')}
+                      </div>
+                    </div>
+                    <button
+                      className="action-btn"
+                      onClick={() => handleCopyCommand(llmPrompt, 'llm-prompt')}
+                      style={{
+                        fontSize: '0.78rem',
+                        padding: '6px 14px',
+                        backgroundColor: copiedKey === 'llm-prompt' ? '#15803d' : '#4f46e5',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        transition: 'background-color 0.2s',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {copiedKey === 'llm-prompt'
+                        ? t('hardwareBackend.llmPromptCopiedBtn')
+                        : t('hardwareBackend.copyLlmPromptBtn')}
+                    </button>
+                  </div>
+                  <pre
+                    style={{
+                      backgroundColor: '#0f172a',
+                      border: '1px solid #334155',
+                      borderRadius: 6,
+                      padding: '10px 14px',
+                      fontSize: '0.8rem',
+                      color: '#cbd5e1',
+                      overflowX: 'auto',
+                      fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                      margin: 0,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {llmPrompt}
+                  </pre>
                 </div>
               )}
 

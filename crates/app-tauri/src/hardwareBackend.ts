@@ -103,6 +103,45 @@ export interface DiagnosticStepItem {
   tip?: string;
 }
 
+export const NVIDIA_TENSORRT_DOCS_URL =
+  'https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html';
+
+export interface PromptContext {
+  os?: string;
+  deviceInfo?: string;
+}
+
+/**
+ * Gera um prompt pronto para LLM solicitando passo a passo de instalação da runtime.
+ */
+export function getBackendLlmPrompt(
+  backendId: string,
+  context?: PromptContext
+): string | null {
+  const osStr = context?.os?.trim() || 'Linux/Windows';
+  const hwStr =
+    context?.deviceInfo && context.deviceInfo.trim().length > 0
+      ? `Meu hardware possui: ${context.deviceInfo.trim()}.`
+      : 'Meu hardware possui uma GPU NVIDIA.';
+
+  switch (backendId) {
+    case 'nvidia_tensorrt':
+      return `Preciso instalar o runtime da biblioteca C/C++ da NVIDIA TensorRT (libnvinfer) no meu sistema operacional (${osStr}) para permitir inferência com aceleração por GPU em um aplicativo de áudio. ${hwStr} Por favor, me forneça o passo a passo oficial para instalar o TensorRT nativo com base na documentação oficial: ${NVIDIA_TENSORRT_DOCS_URL}`;
+    case 'openvino_npu':
+      return `Preciso instalar e configurar os drivers e o runtime da Intel OpenVINO NPU no meu sistema operacional (${osStr}). ${context?.deviceInfo ? `Meu hardware: ${context.deviceInfo}.` : 'Meu processador possui uma Intel NPU (AI Boost).'} Por favor, me forneça o passo a passo com base na documentação oficial: https://docs.openvino.ai/2025/get-started/configurations/configurations-intel-npu.html`;
+    case 'openvino_gpu':
+      return `Preciso instalar e configurar os drivers de computação da Intel GPU (OpenCL / compute-runtime) e OpenVINO no meu sistema operacional (${osStr}). ${context?.deviceInfo ? `Meu hardware: ${context.deviceInfo}.` : 'Possuo GPU Intel Arc / Iris Xe.'} Por favor, me forneça o passo a passo com base na documentação oficial: https://docs.openvino.ai/2025/get-started/configurations/configurations-intel-gpu.html`;
+    case 'openvino_cpu':
+      return `Preciso configurar as extensões de aceleração OpenVINO CPU no meu sistema operacional (${osStr}). ${context?.deviceInfo ? `Meu hardware: ${context.deviceInfo}.` : ''} Documentação oficial: https://docs.openvino.ai/`;
+    case 'amd_ryzenai_npu':
+      return `Preciso instalar os drivers AMD XDNA e o runtime AMD Ryzen AI Software / XRT no meu sistema operacional (${osStr}). ${context?.deviceInfo ? `Meu hardware: ${context.deviceInfo}.` : 'Possuo uma NPU AMD Ryzen AI.'} Documentação oficial: https://ryzenai.docs.amd.com/`;
+    case 'amd_ryzenai_gpu':
+      return `Preciso configurar a aceleração por GPU AMD Radeon (Vulkan / ROCm / DirectML) no meu sistema operacional (${osStr}). ${context?.deviceInfo ? `Meu hardware: ${context.deviceInfo}.` : 'Possuo GPU AMD Radeon.'} Documentação oficial: https://rocm.docs.amd.com/`;
+    default:
+      return null;
+  }
+}
+
 export interface BackendHelpDetails {
   librarySearched: {
     linux: string;
@@ -113,6 +152,7 @@ export interface BackendHelpDetails {
     title: string;
     url: string;
   };
+  llmPrompt?: string;
   nativeCommands: NativeCommandItem[];
   diagnosticGuide: DiagnosticStepItem[];
 }
@@ -128,26 +168,27 @@ export function getBackendHelpDetails(backendId: string): BackendHelpDetails | n
         },
         officialDocs: {
           title: 'NVIDIA TensorRT Installation Guide',
-          url: 'https://docs.nvidia.com/deeplearning/tensorrt/install-guide/index.html',
+          url: NVIDIA_TENSORRT_DOCS_URL,
         },
+        llmPrompt: getBackendLlmPrompt('nvidia_tensorrt') ?? undefined,
         nativeCommands: [
           {
             id: 'ubuntu',
             label: 'Ubuntu / Debian (APT)',
             command: 'sudo apt update && sudo apt install -y libnvinfer10 libnvonnxparsers10',
-            note: 'Disponível via repositório NVIDIA CUDA ou Ubuntu/Debian multiverse.',
+            note: 'Instalação nativa via repositório oficial da NVIDIA ou consulte o guia oficial: https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html',
           },
           {
             id: 'fedora',
             label: 'Fedora / RHEL (DNF)',
             command: 'sudo dnf install -y tensorrt || pip install tensorrt',
-            note: 'Disponível no repositório NVIDIA CUDA ou via módulo Python tensorrt.',
+            note: 'Consulte o guia oficial da NVIDIA para instruções de instalação nativa: https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html',
           },
           {
             id: 'arch',
             label: 'Arch Linux (Pacman)',
             command: 'sudo pacman -S --needed tensorrt',
-            note: 'Disponível no repositório extra do Arch Linux.',
+            note: 'Disponível no repositório extra ou consulte o guia oficial da NVIDIA: https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html',
           },
           {
             id: 'python',
@@ -159,7 +200,7 @@ export function getBackendHelpDetails(backendId: string): BackendHelpDetails | n
             id: 'windows',
             label: 'Windows',
             command: 'pip install tensorrt',
-            note: 'Também disponível pelo instalador oficial NVIDIA Developer (CUDA + TensorRT).',
+            note: 'Baixe o zip/instalador oficial no NVIDIA Developer ou consulte: https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/installing.html',
           },
         ],
         diagnosticGuide: [

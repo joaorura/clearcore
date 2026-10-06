@@ -182,6 +182,10 @@ export interface Translations {
     officialDocsTitle: string;
     officialDocsDesc: string;
     openDocLink: string;
+    llmPromptTitle: string;
+    llmPromptDesc: string;
+    copyLlmPromptBtn: string;
+    llmPromptCopiedBtn: string;
     diagnosticGuideTitle: string;
     diagnosticGuideDesc: string;
     nativeCommandsTitle: string;

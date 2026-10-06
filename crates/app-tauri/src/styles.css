@@ -1094,6 +1094,12 @@ body {
   font-size: 0.72rem;
   color: var(--text-muted);
   margin-bottom: 8px;
+  gap: 8px;
+}
+
+.spectrum-label-row span {
+  flex: 1;
+  text-align: center;
 }
 
 .spectrum-bars-row {
@@ -1119,13 +1125,33 @@ body {
   max-width: 36px;
   background: linear-gradient(180deg, #38bdf8, #2563eb);
   border-radius: 3px 3px 0 0;
-  transition: height 0.3s ease;
+  transition: height 0.3s ease, background 0.3s ease, opacity 0.3s ease;
+}
+
+.spectrum-bar.bar-neutral {
+  background: #334155;
+  opacity: 0.45;
+}
+
+.spectrum-bar.bar-calibrated {
+  background: linear-gradient(180deg, #38bdf8, #2563eb);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
 }
 
 .band-val {
   font-size: 0.7rem;
   font-weight: 600;
   color: #93c5fd;
+}
+
+.band-val.val-neutral {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.band-val.val-calibrated {
+  color: #93c5fd;
+  font-weight: 600;
 }
 
 

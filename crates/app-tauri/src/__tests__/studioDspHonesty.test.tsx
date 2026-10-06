@@ -42,4 +42,17 @@ describe('Studio DSP honesty (spec §9)', () => {
       expect(locale.studioDsp.neuralEqCardActiveDesc).not.toMatch(DISHONEST);
     }
   });
+
+  it('renders neutral spectrum visual with all 5 frequency bands when not calibrated', () => {
+    const html = renderToStaticMarkup(<I18nProvider><StudioDspCard /></I18nProvider>);
+    expect(html).toContain('neural-eq-spectrum-visual');
+    expect(html).toContain('80 Hz (Rumble / Corte de Subgraves)');
+    expect(html).toContain('250 Hz (Corpo Vocal)');
+    expect(html).toContain('1 kHz (Presença)');
+    expect(html).toContain('3.5 kHz (Clareza)');
+    expect(html).toContain('10 kHz (Ar / Brilho)');
+    expect(html).toContain('0.0 dB');
+    expect(html).toContain('bar-neutral');
+    expect(html).not.toMatch(DISHONEST);
+  });
 });

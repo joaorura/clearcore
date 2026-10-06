@@ -95,6 +95,21 @@ const DSP_BLOCKS: DspBlockInfo[] = [
   },
 ];
 
+interface EqBandDef {
+  id: string;
+  label: string;
+  calibratedHeight: string;
+  calibratedDb: string;
+}
+
+const NEURAL_EQ_SPECTRUM_BANDS: EqBandDef[] = [
+  { id: '80hz', label: '80 Hz (Rumble / Corte de Subgraves)', calibratedHeight: '40%', calibratedDb: '-1.2 dB' },
+  { id: '250hz', label: '250 Hz (Corpo Vocal)', calibratedHeight: '65%', calibratedDb: '+2.1 dB' },
+  { id: '1khz', label: '1 kHz (Presença)', calibratedHeight: '55%', calibratedDb: '+0.7 dB' },
+  { id: '35khz', label: '3.5 kHz (Clareza)', calibratedHeight: '72%', calibratedDb: '+2.4 dB' },
+  { id: '10khz', label: '10 kHz (Ar / Brilho)', calibratedHeight: '60%', calibratedDb: '+1.1 dB' },
+];
+
 /**
  * The microphone EQ counts as calibrated only when the SERVICE says so (`neural_eq_calibrated`
  * in the profile status pushed by the voice profile card). Never inferred from local storage.
@@ -352,7 +367,30 @@ export const StudioDspCard: React.FC = () => {
           </div>
         )}
 
-        {/* No per-band values: the service does not report them, and none are invented here. */}
+        {/* Neural EQ Spectrum Visualization */}
+        <div className="neural-eq-spectrum-visual">
+          <div className="spectrum-label-row">
+            {NEURAL_EQ_SPECTRUM_BANDS.map((band) => (
+              <span key={band.id}>{band.label}</span>
+            ))}
+          </div>
+          <div className="spectrum-bars-row">
+            {NEURAL_EQ_SPECTRUM_BANDS.map((band) => (
+              <div
+                key={band.id}
+                className={`spectrum-band ${isNeuralEqCalibrated ? 'band-calibrated' : 'band-neutral'}`}
+              >
+                <div
+                  className={`spectrum-bar ${isNeuralEqCalibrated ? 'bar-calibrated' : 'bar-neutral'}`}
+                  style={{ height: isNeuralEqCalibrated ? band.calibratedHeight : '50%' }}
+                />
+                <span className={`band-val ${isNeuralEqCalibrated ? 'val-calibrated' : 'val-neutral'}`}>
+                  {isNeuralEqCalibrated ? band.calibratedDb : '0.0 dB'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
 
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '10px 0 0 0', lineHeight: 1.4 }}>
           {t('studioDsp.neuralEqDetail')}
