@@ -93,3 +93,22 @@ passá-los por `ModelAssetRegistry` faltaria:
    uma chave listada em `governance/model-assets/trust-policy.json`. Essa assinatura não pode ser
    gerada ou simulada fora do fluxo de aprovação; o que existe hoje assina apenas o asset base.
 6. Registrar a versão do `onnx` (e do Python) usada na geração, para tornar a saída reproduzível.
+
+## Engines compilados TensorRT (`models/stateful/tensorrt/`)
+
+Para execução acelerada em GPUs NVIDIA via runtime TensorRT (`crates/runtime-tensorrt`), a pasta `models/stateful/tensorrt/` contém os planos de inferência compilados a partir dos grafos ONNX stateful (`enc.onnx`, `erb_dec.onnx`, `df_dec.onnx`):
+
+| Arquivo | Bytes | SHA-256 |
+|---|---:|---|
+| `tensorrt/enc.engine` | 2232860 | `fa57ea4ac0f97743b6219f31d941c0863d51683454960a004cb8b3c98cd13364` |
+| `tensorrt/erb_dec.engine` | 3574596 | `8d40934f996293212df4f49b834c50b9697f840dd57be5da9ccfca9c05bda13a` |
+| `tensorrt/df_dec.engine` | 3522388 | `63fdaf590fa619f399f953aa83779644c368f038a66be8d8c74263a2cae1361c` |
+
+## Empacotamento e Distribuição Multi-Runtime
+
+Nas pipelines de release (`.github/workflows/release.yml`) e empacotamento desktop (`crates/app-tauri/scripts/package-app.mjs`):
+1. **Pacotes desktop standalone (Linux, Windows, macOS)**:
+   - A pasta `models/stateful/` (ONNX e engines TensorRT) é empacotada em `resources/models/stateful/` e na raiz do pacote `models/stateful/`.
+   - O modelo aprovado Tract é empacotado em `resources/vendor/approved/` e `vendor/approved/`.
+2. **Pacote universal de modelos**:
+   - `Clearcore-Models-All-Runtimes.tar.gz` e `Clearcore-Models-All-Runtimes.zip` são publicados nos assets oficiais da release no GitHub contendo todos os modelos de todos os runtimes (`models/stateful/`, `models/stateful/tensorrt/`, `vendor/approved/`).

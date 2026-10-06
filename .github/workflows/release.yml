@@ -71,7 +71,12 @@ jobs:
           tar -tzf "${TARBALL}" > "${RUNNER_TEMP}/linux-package-listing.txt"
           for entry in \
             "Clearcore-linux-x64/resources/bin/pipewire_helper" \
-            "Clearcore-linux-x64/resources/scripts/check-virtual-mic.sh"; do
+            "Clearcore-linux-x64/resources/scripts/check-virtual-mic.sh" \
+            "Clearcore-linux-x64/resources/models/stateful/enc.onnx" \
+            "Clearcore-linux-x64/resources/models/stateful/tensorrt/enc.engine" \
+            "Clearcore-linux-x64/models/stateful/enc.onnx" \
+            "Clearcore-linux-x64/models/stateful/tensorrt/enc.engine" \
+            "Clearcore-linux-x64/vendor/approved/df-compatible-release-asset-v1.bin"; do
             if ! grep -qx "./${entry}\|${entry}" "${RUNNER_TEMP}/linux-package-listing.txt"; then
               echo "::error::${entry} ausente em ${TARBALL}"
               exit 1
@@ -84,7 +89,7 @@ jobs:
             ls -l "${EXTRACT_DIR}/Clearcore-linux-x64/resources/bin/" || true
             exit 1
           fi
-          echo "Pacote Linux OK: pipewire_helper e check-virtual-mic.sh presentes"
+          echo "Pacote Linux OK: pipewire_helper, check-virtual-mic.sh e modelos de todos os runtimes presentes"
 
       - name: Build Linux AppImage Package
         run: |

@@ -107,6 +107,10 @@ def make_modular_debs(src_dir, out_dir, version="0.1.0-beta.1", arch="amd64"):
         shutil.copy2(filter_so, os.path.join(daemon_root, "usr/lib/clearcore/libclearcore_filter.so"))
         os.chmod(os.path.join(daemon_root, "usr/lib/clearcore/libclearcore_filter.so"), 0o755)
 
+    if os.path.exists(os.path.join(src_dir, "models")):
+        shutil.copytree(os.path.join(src_dir, "models"), os.path.join(daemon_root, "usr/share/clearcore/models"))
+    elif os.path.exists(os.path.join(src_dir, "resources/models")):
+        shutil.copytree(os.path.join(src_dir, "resources/models"), os.path.join(daemon_root, "usr/share/clearcore/models"))
     if os.path.exists(os.path.join(src_dir, "vendor")):
         shutil.copytree(os.path.join(src_dir, "vendor"), os.path.join(daemon_root, "usr/share/clearcore/vendor"))
     if os.path.exists(os.path.join(src_dir, "governance")):

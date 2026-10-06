@@ -171,20 +171,60 @@ if (platform === 'linux') {
     }
   }
 
-  // Bundle approved model assets and governance metadata
-  const vendorApproved = path.join(repoRoot, 'vendor', 'approved');
-  if (fs.existsSync(vendorApproved)) {
-    fs.cpSync(vendorApproved, path.join(bundleDir, 'vendor', 'approved'), { recursive: true });
-    console.log('✓ Bundled vendor/approved DeepFilterNet3 neural model');
-  }
-  const governanceDir = path.join(repoRoot, 'governance', 'model-assets');
-  if (fs.existsSync(governanceDir)) {
-    fs.cpSync(governanceDir, path.join(bundleDir, 'governance', 'model-assets'), { recursive: true });
-    console.log('✓ Bundled governance model trust policy and manifests');
-  }
 }
 
-// 8. Bundle Cross-Platform Virtual Mic Scripts into resources/scripts
+// 8. Bundle Neural Models & Multi-Runtime Assets (All Platforms)
+// Bundles:
+// - models/stateful/ (ONNX for OpenVINO/DirectML/Vulkan, plus tensorrt/ compiled engines for NVIDIA GPU)
+//   into both resources/models/stateful/ and bundle root models/stateful/
+// - vendor/approved/ (Tract approved neural models) into both resources/vendor/approved/ and bundle root vendor/approved/
+// - governance/model-assets/ (model trust policy and cryptographic manifests) into bundle root and resources
+console.log('🧠 Bundling neural models and multi-runtime assets for all platforms...');
+
+const modelsStatefulSrc = path.join(repoRoot, 'models', 'stateful');
+if (fs.existsSync(modelsStatefulSrc)) {
+  const destResourcesStateful = path.join(resourcesDir, 'models', 'stateful');
+  const destBundleStateful = path.join(bundleDir, 'models', 'stateful');
+
+  fs.mkdirSync(destResourcesStateful, { recursive: true });
+  fs.mkdirSync(destBundleStateful, { recursive: true });
+
+  fs.cpSync(modelsStatefulSrc, destResourcesStateful, { recursive: true });
+  fs.cpSync(modelsStatefulSrc, destBundleStateful, { recursive: true });
+  console.log('✓ Bundled models/stateful (ONNX stateful & TensorRT engines) into resources/models/stateful and bundle root');
+} else {
+  console.warn(`⚠️ models/stateful directory not found at ${modelsStatefulSrc}`);
+}
+
+const vendorApproved = path.join(repoRoot, 'vendor', 'approved');
+if (fs.existsSync(vendorApproved)) {
+  const destBundleVendor = path.join(bundleDir, 'vendor', 'approved');
+  const destResourcesVendor = path.join(resourcesDir, 'vendor', 'approved');
+
+  fs.mkdirSync(destBundleVendor, { recursive: true });
+  fs.mkdirSync(destResourcesVendor, { recursive: true });
+
+  fs.cpSync(vendorApproved, destBundleVendor, { recursive: true });
+  fs.cpSync(vendorApproved, destResourcesVendor, { recursive: true });
+  console.log('✓ Bundled vendor/approved DeepFilterNet3 neural model (bundle root & resources)');
+} else {
+  console.warn(`⚠️ vendor/approved directory not found at ${vendorApproved}`);
+}
+
+const governanceDir = path.join(repoRoot, 'governance', 'model-assets');
+if (fs.existsSync(governanceDir)) {
+  const destBundleGov = path.join(bundleDir, 'governance', 'model-assets');
+  const destResourcesGov = path.join(resourcesDir, 'governance', 'model-assets');
+
+  fs.mkdirSync(destBundleGov, { recursive: true });
+  fs.mkdirSync(destResourcesGov, { recursive: true });
+
+  fs.cpSync(governanceDir, destBundleGov, { recursive: true });
+  fs.cpSync(governanceDir, destResourcesGov, { recursive: true });
+  console.log('✓ Bundled governance model trust policy and manifests');
+}
+
+// 9. Bundle Cross-Platform Virtual Mic Scripts into resources/scripts
 const scriptsTargetDir = path.join(resourcesDir, 'scripts');
 fs.mkdirSync(scriptsTargetDir, { recursive: true });
 
@@ -220,7 +260,7 @@ for (const sf of scriptFiles) {
   }
 }
 
-// 9. Bundle Platform Driver Assets
+// 10. Bundle Platform Driver Assets
 const driverTargetDir = path.join(resourcesDir, 'driver');
 fs.mkdirSync(driverTargetDir, { recursive: true });
 
@@ -290,7 +330,7 @@ To install and use this virtual microphone driver on Windows:
   }
 }
 
-// 10. Platform-specific standalone integration files
+// 11. Platform-specific standalone integration files
 if (platform === 'linux') {
   console.log('🐧 Creating Linux desktop integration and one-click installer...');
   
