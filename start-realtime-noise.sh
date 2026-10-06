@@ -15,6 +15,12 @@ if [[ ! -x "${HELPER_PATH}" ]]; then
     exit 1
 fi
 
+# Auto-detecta modelos treinados no M3 se disponíveis localmente
+if [[ -f "${SCRIPT_DIR}/scripts/detect-dev-models.sh" ]]; then
+    # shellcheck source=scripts/detect-dev-models.sh
+    source "${SCRIPT_DIR}/scripts/detect-dev-models.sh"
+fi
+
 echo "=========================================================="
 echo "Starting Clearcore Realtime Noise Daemon"
 echo "=========================================================="

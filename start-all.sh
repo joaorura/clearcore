@@ -4,6 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PATH="${HOME}/.cargo/bin:${HOME}/.local/bin:${PATH}"
 
+# Auto-detecta modelos treinados no M3 se disponíveis localmente
+if [[ -f "${SCRIPT_DIR}/scripts/detect-dev-models.sh" ]]; then
+    # shellcheck source=scripts/detect-dev-models.sh
+    source "${SCRIPT_DIR}/scripts/detect-dev-models.sh"
+fi
+
 BIN_HELPER="${SCRIPT_DIR}/platform/linux/helper/build/pipewire_helper"
 BIN_CLI="${SCRIPT_DIR}/target/release/realtime-noise-app-tauri"
 

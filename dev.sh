@@ -21,6 +21,12 @@ fi
 export CLEARCORE_DAEMON_BIN="${SCRIPT_DIR}/target/release/realtime-noise-service"
 export CLEARCORE_DEV_OWN_DAEMON=1
 
+# Auto-detecta modelos treinados no M3 se disponíveis localmente
+if [[ -f "${SCRIPT_DIR}/scripts/detect-dev-models.sh" ]]; then
+    # shellcheck source=scripts/detect-dev-models.sh
+    source "${SCRIPT_DIR}/scripts/detect-dev-models.sh"
+fi
+
 # Modelo de cadastro de voz (só desenvolvimento). O daemon é iniciado pelo Electron e
 # herda estas variáveis do ambiente deste script; sem elas, "Gerar perfil" termina em
 # ENROLL_MODEL_NOT_CONFIGURED (as amostras continuam sendo gravadas e denoisadas).

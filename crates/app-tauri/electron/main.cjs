@@ -164,6 +164,52 @@ async function isDaemonResponsive() {
   }
 }
 
+// Auto-detect trained M3 models for voice enrollment & pDFNet3 speaker isolation
+function detectDevModels() {
+  if (process.env.CLEARCORE_DEV_ENROLLMENT_ASSET && process.env.CLEARCORE_DEV_PDFNET3_ASSET) {
+    return;
+  }
+  const crypto = require('crypto');
+  const candidateDirs = [
+    process.env.CLEARCORE_TRAIN_M3_DIR,
+    path.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'projects', 'clearcore-train', 'runs', 'm3'),
+    path.join(os.homedir(), 'orca', 'projects', 'clearcore-train', 'runs', 'm3'),
+  ].filter(Boolean);
+
+  let m3Dir = null;
+  for (const d of candidateDirs) {
+    if (fs.existsSync(d)) {
+      m3Dir = d;
+      break;
+    }
+  }
+  if (!m3Dir) return;
+
+  const enrollFile = path.join(m3Dir, 'voice-enrollment-asset-v1.tar.gz');
+  if (!process.env.CLEARCORE_DEV_ENROLLMENT_ASSET && fs.existsSync(enrollFile)) {
+    try {
+      const hash = crypto.createHash('sha256').update(fs.readFileSync(enrollFile)).digest('hex');
+      process.env.CLEARCORE_DEV_ENROLLMENT_ASSET = enrollFile;
+      process.env.CLEARCORE_DEV_ENROLLMENT_SHA256 = hash;
+      console.log(`[Clearcore Daemon] Auto-detected M3 enrollment asset: ${enrollFile}`);
+    } catch (e) {
+      console.warn('[Clearcore Daemon] Could not hash enrollment asset:', e.message);
+    }
+  }
+
+  const pdfnet3File = path.join(m3Dir, 'pdfnet3-release-asset-v1.tar.gz');
+  if (!process.env.CLEARCORE_DEV_PDFNET3_ASSET && fs.existsSync(pdfnet3File)) {
+    try {
+      const hash = crypto.createHash('sha256').update(fs.readFileSync(pdfnet3File)).digest('hex');
+      process.env.CLEARCORE_DEV_PDFNET3_ASSET = pdfnet3File;
+      process.env.CLEARCORE_DEV_PDFNET3_SHA256 = hash;
+      console.log(`[Clearcore Daemon] Auto-detected M3 pDFNet3 asset: ${pdfnet3File}`);
+    } catch (e) {
+      console.warn('[Clearcore Daemon] Could not hash pDFNet3 asset:', e.message);
+    }
+  }
+}
+
 async function ensureDaemonRunning() {
   // If already running (e.g. system service or previous run), adopt it
   const alreadyResponsive = await isDaemonResponsive();
@@ -199,6 +245,7 @@ async function ensureDaemonRunning() {
     return true;
   }
 
+  detectDevModels();
   const daemonBin = findDaemonBinaryPath();
   if (!daemonBin) {
     console.warn('[Clearcore Daemon] Binário realtime-noise-service não encontrado.');
