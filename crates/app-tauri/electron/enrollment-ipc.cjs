@@ -283,6 +283,16 @@ function registerEnrollmentHandlers(ipcMain, { sendIpcRequest }) {
     });
     return res;
   });
+  wrap('list_voice_samples', async () => {
+    const rawRes = await sendIpcRequest('ListVoiceSamples', {}, 5000);
+    const res = mapSampleList(rawRes);
+    appendDebugLog('ELECTRON_IPC', 'list_voice_samples result:', {
+      samplesCount: res?.samples?.length,
+      selectedGroup: res?.selectedDeviceIdHash,
+      selectedLabel: res?.selectedDeviceLabel,
+    });
+    return res;
+  });
   wrap('enrollment_delete_sample', async (a) => {
     if (typeof a.id !== 'string' || a.id.length === 0) throw new Error('invalid sample id');
     appendDebugLog('ELECTRON_IPC', 'DeleteVoiceSample invoked for id:', a.id);

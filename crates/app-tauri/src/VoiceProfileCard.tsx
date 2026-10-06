@@ -133,10 +133,11 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       const list = await refreshSamples();
       await refreshCallTakes();
       const initialProfile = await profile.loadInitialStatus(list?.samples.length ?? 0);
+      if (list?.samples && list.samples.length > 0) {
+        steps.syncFromSamples(list.samples, !hasServiceVoiceProfile(initialProfile));
+      }
       if (hasServiceVoiceProfile(initialProfile)) {
         setCurrentStep(5);
-      } else if (list?.samples && list.samples.length > 0) {
-        steps.syncFromSamples(list.samples, true);
       }
     };
     void initVoiceData();

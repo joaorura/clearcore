@@ -44,7 +44,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
   const isAllStepsCompleted = completedCount >= GUIDED_STEP_COUNT;
   const currentQ = STEP_QUESTIONS[currentStep - 1] ?? STEP_QUESTIONS[0];
   const currentTake = completedSteps[currentStep];
-  const showFlow = !p.isEnrolled || completedCount < GUIDED_STEP_COUNT;
+  const showFlow = !p.isEnrolled;
 
   return (
     <div>

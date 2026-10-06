@@ -12,6 +12,7 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'voice_profile_supported',
   // GetStatus: the APPLIED profile carries a microphone EQ (never read from the local file).
   'neural_eq_calibrated',
+  'voice_samples_count',
   // GetStatus, development only: 'pdfnet3-dev' | 'base' (anything else is dropped).
   'dev_base_model',
   // GetStatus: fixed DEV_MODEL_* code or null (free text, e.g. a path, is dropped).
@@ -49,17 +50,25 @@ function pickServiceVoiceProfileFields(serviceStatus) {
 // is_enrolled:true left by the old flow must not claim a profile the service does not hold.
 function serviceHasVoiceProfile(serviceStatus) {
   if (!isObject(serviceStatus)) return false;
-  const id = serviceStatus.stored_voice_profile_id;
-  return (typeof id === 'string' && id.length > 0) || serviceStatus.has_voice_profile === true;
+  const storedId = serviceStatus.stored_voice_profile_id;
+  const activeId = serviceStatus.active_voice_profile_id;
+  return (typeof storedId === 'string' && storedId.length > 0)
+    || (typeof activeId === 'string' && activeId.length > 0)
+    || serviceStatus.has_voice_profile === true
+    || serviceStatus.is_voice_profile_active === true;
 }
 
 function mergeLocalAndServiceProfile(localProfile, serviceStatus) {
-  return {
+  const merged = {
     // Service-owned fields left in the local file (e.g. an old neural_eq_calibrated) never count.
     ...stripServiceVoiceProfileFields(localProfile),
     ...pickServiceVoiceProfileFields(serviceStatus),
     is_enrolled: serviceHasVoiceProfile(serviceStatus),
   };
+  if (isObject(serviceStatus) && typeof serviceStatus.voice_samples_count === 'number') {
+    merged.active_samples_count = serviceStatus.voice_samples_count;
+  }
+  return merged;
 }
 
 function stripServiceVoiceProfileFields(profile) {

@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
   getVoiceProfileStatus: () => ipcRenderer.invoke('get_voice_profile_status'),
   setVoiceProfile: (profile) => ipcRenderer.invoke('set_voice_profile', { profile }),
   getCallTakes: () => ipcRenderer.invoke('get_call_takes'),
+  listVoiceSamples: () => ipcRenderer.invoke('enrollment_list_samples'),
+  listSamples: () => ipcRenderer.invoke('enrollment_list_samples'),
   approveCallTake: (id, name, take) => ipcRenderer.invoke('approve_call_take', { id, name, take }),
   dismissCallTake: (id) => ipcRenderer.invoke('dismiss_call_take', { id }),
   exportDiagnostics: () => ipcRenderer.invoke('export_diagnostics'),
