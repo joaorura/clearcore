@@ -295,7 +295,14 @@ impl EngineSupervisor {
         repo_root: Option<&Path>,
     ) -> BackendResolutionInfo {
         self.requested_backend_name = request.to_string();
-        if let Some(archive) = &self.dev_base_model {
+        let trimmed = request.trim();
+        let is_tract_or_cpu = matches!(
+            trimmed.to_ascii_lowercase().replace('_', "-").as_str(),
+            "tract" | "cpu-tract" | "tract-cpu" | "cpu"
+        );
+
+        // Se o usuário solicitou especificamente CPU ou se não há acelerador requisitado
+        if is_tract_or_cpu && let Some(archive) = &self.dev_base_model {
             match archive.instantiate(CpuProfile::Avx2Minimum) {
                 Ok(backend) => {
                     self.dev_base_model_error = None;
