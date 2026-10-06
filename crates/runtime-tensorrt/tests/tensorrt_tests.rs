@@ -273,3 +273,43 @@ fn test_new_auto_follows_policy_or_fails_gracefully() {
         }
     }
 }
+
+#[test]
+fn test_tensorrt_dfn3_session_real_inference() {
+    use realtime_noise_runtime_tensorrt::{Dfn3Output, TensorRtDfn3Session};
+    use std::path::PathBuf;
+
+    let model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../models/stateful");
+    if !model_dir.join("tensorrt/enc.engine").exists() {
+        eprintln!("TensorRT engines not present; skipping hardware inference test");
+        return;
+    }
+
+    match TensorRtDfn3Session::load(&model_dir, 0) {
+        Ok(mut session) => {
+            assert_eq!(session.device_ordinal(), 0);
+            assert_eq!(session.frames_processed(), 0);
+
+            let feat_erb = [0.1f32; 32];
+            let feat_spec = [[0.05f32; 96], [0.02f32; 96]];
+            let mut out = Dfn3Output::new();
+
+            // Run 3 streaming hops
+            for hop in 0..3 {
+                session.run_frame(&feat_erb, &feat_spec, &mut out).expect("run_frame");
+                assert!(out.lsnr.is_finite());
+                assert!(out.erb_mask.iter().all(|v| v.is_finite()));
+                assert!(out.df_coefs.iter().all(|v| v.is_finite()));
+                assert_eq!(session.frames_processed(), hop + 1);
+            }
+
+            // Test reset
+            session.reset().expect("reset");
+            assert_eq!(session.frames_processed(), 0);
+        }
+        Err(err) => {
+            eprintln!("TensorRtDfn3Session::load skipped or failed gracefully: {err}");
+        }
+    }
+}
+

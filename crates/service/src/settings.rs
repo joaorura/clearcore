@@ -22,11 +22,12 @@ const SETTINGS_DIR_NAME: &str = "clearcore";
 const FALLBACK_FILE_NAME: &str = "clearcore-settings.json";
 const TEMP_SUFFIX: &str = ".tmp";
 
-/// Configuração persistida. Contém o preset de acabamento de estúdio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Configuração persistida. Contém o preset de acabamento de estúdio e o backend selecionado.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub version: u32,
     pub preset: Preset,
+    pub backend: Option<String>,
 }
 
 impl Default for Settings {
@@ -34,6 +35,7 @@ impl Default for Settings {
         Self {
             version: SETTINGS_VERSION,
             preset: Preset::Off,
+            backend: None,
         }
     }
 }
@@ -44,6 +46,8 @@ struct SettingsFile {
     version: u32,
     #[serde(default)]
     preset: StudioPreset,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    backend: Option<String>,
 }
 
 impl Settings {
@@ -54,6 +58,7 @@ impl Settings {
             Ok(file) if (1..=SETTINGS_VERSION).contains(&file.version) => Self {
                 version: SETTINGS_VERSION,
                 preset: convert_ipc_preset_to_dsp(file.preset),
+                backend: file.backend,
             },
             _ => Self::default(),
         }
@@ -76,15 +81,16 @@ impl Settings {
         }
     }
 
-    pub fn to_json(self) -> Result<String, serde_json::Error> {
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(&SettingsFile {
             version: SETTINGS_VERSION,
             preset: convert_dsp_preset_to_ipc(self.preset),
+            backend: self.backend.clone(),
         })
     }
 
     /// Escrita atômica: temporário no mesmo diretório + `rename`.
-    pub fn save(self, path: &Path) -> io::Result<()> {
+    pub fn save(&self, path: &Path) -> io::Result<()> {
         let json = self
             .to_json()
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;

@@ -89,14 +89,21 @@ impl ServiceBootstrap {
     #[must_use]
     pub fn new(config: ServiceConfig) -> Self {
         let settings = crate::settings::Settings::load(&config.settings_path);
-        let mut daemon = ServiceDaemon::with_settings(settings, Some(config.settings_path.clone()));
+        let mut daemon = ServiceDaemon::with_settings(settings.clone(), Some(config.settings_path.clone()));
         if let Some(ref model_dir) = config.model_dir {
             daemon.set_model_dir(model_dir.clone());
         }
         if let Some(ref repo_root) = config.repo_root {
             daemon.set_repo_root(repo_root.clone());
         }
-        if let Some(ref backend) = config.initial_backend {
+        if let Some(dir) = realtime_noise_model::ProfileStore::default_dir() {
+            daemon.attach_profile_store(realtime_noise_model::ProfileStore::new(dir));
+        }
+        let backend_to_select = config
+            .initial_backend
+            .as_deref()
+            .or(settings.backend.as_deref());
+        if let Some(backend) = backend_to_select {
             let _ = daemon.select_backend(backend);
         }
         Self { config, daemon }

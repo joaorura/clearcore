@@ -31,6 +31,7 @@ fn defaults_are_version_one_with_preset_off() {
     assert_eq!(settings.version, SETTINGS_VERSION);
     assert_eq!(SETTINGS_VERSION, 1);
     assert_eq!(settings.preset, Preset::Off);
+    assert_eq!(settings.backend, None);
 }
 
 #[test]
@@ -84,6 +85,7 @@ fn save_then_load_round_trips_every_preset() {
         let settings = Settings {
             version: SETTINGS_VERSION,
             preset,
+            backend: None,
         };
         settings.save(&path).unwrap();
         assert_eq!(Settings::load(&path), settings);
@@ -101,6 +103,7 @@ fn save_writes_versioned_json_creates_parents_and_leaves_no_temporary_file() {
     Settings {
         version: SETTINGS_VERSION,
         preset: Preset::Podcast,
+        backend: None,
     }
     .save(&path)
     .unwrap();
@@ -137,6 +140,7 @@ fn save_replaces_a_stale_temporary_file() {
     Settings {
         version: SETTINGS_VERSION,
         preset: Preset::Natural,
+        backend: None,
     }
     .save(&path)
     .unwrap();
@@ -152,6 +156,7 @@ fn failed_save_keeps_the_previous_file_intact() {
     Settings {
         version: SETTINGS_VERSION,
         preset: Preset::Natural,
+        backend: None,
     }
     .save(&path)
     .unwrap();
@@ -160,6 +165,7 @@ fn failed_save_keeps_the_previous_file_intact() {
     let result = Settings {
         version: SETTINGS_VERSION,
         preset: Preset::Broadcast,
+        backend: None,
     }
     .save(&path);
 
@@ -173,13 +179,14 @@ fn persist_settings_reports_success_failure_and_absence_of_a_path() {
     let settings = Settings {
         version: SETTINGS_VERSION,
         preset: Preset::Podcast,
+        backend: None,
     };
 
     assert!(persist_settings(
-        settings,
+        settings.clone(),
         Some(&dir.path().join("settings.json"))
     ));
-    assert!(!persist_settings(settings, None));
+    assert!(!persist_settings(settings.clone(), None));
 
     let blocker = dir.path().join("blocker");
     std::fs::write(&blocker, "a file, not a directory").unwrap();
@@ -187,6 +194,34 @@ fn persist_settings_reports_success_failure_and_absence_of_a_path() {
         settings,
         Some(&blocker.join("settings.json"))
     ));
+}
+
+#[test]
+fn settings_round_trips_backend_field() {
+    let dir = TempDir::new("settings-backend-roundtrip");
+    let path = dir.path().join("settings.json");
+    let settings = Settings {
+        version: SETTINGS_VERSION,
+        preset: Preset::Broadcast,
+        backend: Some("nvidia-tensorrt".to_string()),
+    };
+    settings.save(&path).unwrap();
+    assert_eq!(Settings::load(&path), settings);
+
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("\"backend\": \"nvidia-tensorrt\""));
+}
+
+#[test]
+fn settings_loads_backend_from_valid_json() {
+    let dir = TempDir::new("settings-backend-load");
+    let path = write_settings(
+        &dir,
+        "{\"version\":1,\"preset\":\"Natural\",\"backend\":\"openvino-gpu\"}",
+    );
+    let loaded = Settings::load(&path);
+    assert_eq!(loaded.preset, Preset::Natural);
+    assert_eq!(loaded.backend, Some("openvino-gpu".to_string()));
 }
 
 #[test]

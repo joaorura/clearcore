@@ -1,11 +1,14 @@
 pub mod bindings;
 pub mod context;
+pub mod dfn3;
 pub mod runtime;
+pub mod shim;
 
 use crate::precision::PrecisionTarget;
 
 pub use bindings::{TensorRtLibrary, is_tensorrt_available, locate_library};
 pub use context::{DFN3_GRU_STATE_DIM, TensorRtInferenceContext};
+pub use dfn3::{Dfn3Engines, Dfn3Output, TensorRtDfn3Session};
 pub use runtime::TensorRtRuntime;
 
 /// Primary alias for [`TensorRtInferenceContext`].

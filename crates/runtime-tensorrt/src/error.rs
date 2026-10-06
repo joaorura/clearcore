@@ -81,6 +81,8 @@ pub enum TensorRtError {
         device_name: String,
         sm_version: String,
     },
+    /// Loading or deserializing the TensorRT model plan failed.
+    ModelLoadFailed(String),
     /// Underlying CUDA driver error.
     Cuda(CudaError),
 }
@@ -117,6 +119,7 @@ impl fmt::Display for TensorRtError {
                 f,
                 "{device_name} ({sm_version}) supports none of FP8/FP16/INT8; falling back to another backend"
             ),
+            Self::ModelLoadFailed(msg) => write!(f, "TensorRT model load failed: {msg}"),
             Self::Cuda(err) => write!(f, "CUDA error: {err}"),
         }
     }

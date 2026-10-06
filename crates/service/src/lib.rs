@@ -126,6 +126,7 @@ impl ServiceDaemon {
         let settings = settings::Settings {
             version: settings::SETTINGS_VERSION,
             preset: supervisor.dsp_preset(),
+            backend: None,
         };
         Self {
             supervisor,
@@ -149,6 +150,9 @@ impl ServiceDaemon {
     pub fn with_settings(settings: settings::Settings, settings_path: Option<PathBuf>) -> Self {
         let mut daemon = Self::new();
         daemon.supervisor.set_dsp_preset(settings.preset);
+        if let Some(ref backend) = settings.backend {
+            let _ = daemon.select_backend(backend);
+        }
         daemon.settings = settings;
         daemon.settings_path = settings_path;
         daemon
@@ -160,8 +164,8 @@ impl ServiceDaemon {
     }
 
     #[must_use]
-    pub const fn settings(&self) -> settings::Settings {
-        self.settings
+    pub fn settings(&self) -> settings::Settings {
+        self.settings.clone()
     }
 
     /// Builds a daemon backed by `store` and activates the stored profile, if any.
@@ -457,6 +461,9 @@ impl ServiceDaemon {
                     &mut self.stored_voice_profile_id,
                     &mut self.voice_profile_error,
                 );
+                self.settings.backend = Some(req_name.to_string());
+                let persisted =
+                    settings::persist_settings(self.settings.clone(), self.settings_path.as_deref());
                 IpcResponse::success(
                     "set-backend-resp",
                     json!({
@@ -468,6 +475,7 @@ impl ServiceDaemon {
                         "runtime": info.runtime,
                         "fallback": info.is_fallback,
                         "fallback_reason": info.fallback_reason,
+                        "persisted": persisted,
                     }),
                 )
             }
@@ -489,7 +497,7 @@ impl ServiceDaemon {
                 self.supervisor.set_dsp_preset(dsp_preset);
                 self.settings.preset = dsp_preset;
                 let persisted =
-                    settings::persist_settings(self.settings, self.settings_path.as_deref());
+                    settings::persist_settings(self.settings.clone(), self.settings_path.as_deref());
                 IpcResponse::success(
                     "set-preset-resp",
                     json!({
@@ -850,24 +858,29 @@ fn reapply_stored_profile(
     stored_slot: &mut Option<String>,
     error: &mut Option<String>,
 ) {
-    let (Some(store), Some(id)) = (store, stored_slot.clone()) else {
+    let Some(store) = store else {
         return;
     };
-    if supervisor.active_voice_profile_id() == Some(id.as_str()) {
-        *error = None;
-        return;
+    if let (Some(id), Some(active_id)) = (stored_slot.as_deref(), supervisor.active_voice_profile_id()) {
+        if id == active_id {
+            *error = None;
+            return;
+        }
     }
     match store.load_active() {
         Ok(Some(profile)) => {
+            *stored_slot = Some(profile.id.clone());
             *error = supervisor
                 .set_voice_profile(Some(&profile))
                 .err()
                 .map(|_| NOT_APPLIED_MESSAGE.to_owned());
         }
         Ok(None) => {
-            // The file vanished behind our back: the id no longer names anything on disk.
-            *stored_slot = None;
-            *error = Some(MISSING_MESSAGE.to_owned());
+            if stored_slot.is_some() {
+                // The file vanished behind our back: the id no longer names anything on disk.
+                *stored_slot = None;
+                *error = Some(MISSING_MESSAGE.to_owned());
+            }
         }
         Err(_) => *error = Some(LOAD_FAILED_MESSAGE.to_owned()),
     }

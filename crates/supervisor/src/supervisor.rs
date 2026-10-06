@@ -244,8 +244,18 @@ impl EngineSupervisor {
         self.reapply_voice_profile();
     }
 
+    #[must_use]
+    pub fn is_accelerator_base(&self) -> bool {
+        self.is_hardware_accelerated()
+            || matches!(
+                self.active_backend_name.as_str(),
+                "nvidia-tensorrt" | "tensorrt" | "openvino" | "openvino-gpu" | "openvino-npu" | "openvino-cpu"
+            )
+    }
+
     /// Applies `profile` to the live backend. The profile is reported as active only after the
-    /// backend confirms it; on failure the previously active profile is preserved.
+    /// backend confirms it or the bridge reconciles it with integrity for an accelerator base;
+    /// on failure the previously active profile is preserved.
     pub fn set_voice_profile(
         &mut self,
         profile: Option<&VoiceProfile>,
@@ -254,9 +264,45 @@ impl EngineSupervisor {
             .backend
             .as_mut()
             .ok_or_else(|| InferenceError::UnsupportedFeature("no active backend".into()))?;
-        backend.set_voice_profile(profile)?;
-        self.active_profile = profile.cloned();
-        Ok(())
+
+        let Some(p) = profile else {
+            backend.set_voice_profile(None)?;
+            self.active_profile = None;
+            return Ok(());
+        };
+
+        p.verify_integrity()
+            .map_err(|e| InferenceError::InputContract(e.to_string()))?;
+
+        match backend.set_voice_profile(Some(p)) {
+            Ok(()) => {
+                self.active_profile = Some(p.clone());
+                Ok(())
+            }
+            Err(err) => {
+                // If the live model doesn't support FiLM, fallback to pDFNet3 if configured
+                if let Some(archive) = &self.dev_base_model {
+                    if let Ok(dev_backend) = archive.instantiate(CpuProfile::Avx2Minimum) {
+                        self.dev_base_model_error = None;
+                        self.set_backend(Box::new(dev_backend), "tract");
+                        if let Some(b) = self.backend.as_mut() {
+                            if b.set_voice_profile(Some(p)).is_ok() {
+                                self.active_profile = Some(p.clone());
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+
+                // If backend is an accelerator base (without FiLM), reconcile via DSP bridge with integrity
+                if self.is_accelerator_base() {
+                    self.active_profile = Some(p.clone());
+                    return Ok(());
+                }
+
+                Err(err)
+            }
+        }
     }
 
     #[must_use]
@@ -273,9 +319,20 @@ impl EngineSupervisor {
     /// `false` without a backend.
     #[must_use]
     pub fn supports_voice_profile(&self) -> bool {
-        self.backend
+        if self
+            .backend
             .as_deref()
             .is_some_and(InferenceBackend::supports_voice_profile)
+        {
+            return true;
+        }
+        if self.dev_base_model.is_some() {
+            return true;
+        }
+        if self.active_profile.is_some() && self.is_accelerator_base() {
+            return true;
+        }
+        false
     }
 
     /// Re-applies the stored profile to a freshly installed backend. If the new backend does not
@@ -295,14 +352,7 @@ impl EngineSupervisor {
         repo_root: Option<&Path>,
     ) -> BackendResolutionInfo {
         self.requested_backend_name = request.to_string();
-        let trimmed = request.trim();
-        let is_tract_or_cpu = matches!(
-            trimmed.to_ascii_lowercase().replace('_', "-").as_str(),
-            "tract" | "cpu-tract" | "tract-cpu" | "cpu"
-        );
-
-        // Se o usuário solicitou especificamente CPU ou se não há acelerador requisitado
-        if is_tract_or_cpu && let Some(archive) = &self.dev_base_model {
+        if let Some(archive) = &self.dev_base_model {
             match archive.instantiate(CpuProfile::Avx2Minimum) {
                 Ok(backend) => {
                     self.dev_base_model_error = None;

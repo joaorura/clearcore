@@ -60,6 +60,18 @@ pub struct CudaDriverFunctions {
         byte_count: usize,
         stream: CUstream,
     ) -> CUresult,
+    pub cu_memcpy_dtod_async: unsafe extern "C" fn(
+        dst_device: CUdeviceptr,
+        src_device: CUdeviceptr,
+        byte_count: usize,
+        stream: CUstream,
+    ) -> CUresult,
+    pub cu_memset_d8_async: unsafe extern "C" fn(
+        dst_device: CUdeviceptr,
+        value: std::ffi::c_uchar,
+        byte_count: usize,
+        stream: CUstream,
+    ) -> CUresult,
     pub cu_stream_create: unsafe extern "C" fn(stream: *mut CUstream, flags: c_uint) -> CUresult,
     pub cu_stream_destroy: unsafe extern "C" fn(stream: CUstream) -> CUresult,
     pub cu_stream_synchronize: unsafe extern "C" fn(stream: CUstream) -> CUresult,
@@ -224,6 +236,10 @@ impl CudaDriver {
             .or_else(|_| Self::load_symbol(handle, "cuMemcpyHtoDAsync"))?;
         let cu_memcpy_dtoh_async = Self::load_symbol(handle, "cuMemcpyDtoHAsync_v2")
             .or_else(|_| Self::load_symbol(handle, "cuMemcpyDtoHAsync"))?;
+        let cu_memcpy_dtod_async = Self::load_symbol(handle, "cuMemcpyDtoDAsync_v2")
+            .or_else(|_| Self::load_symbol(handle, "cuMemcpyDtoDAsync"))?;
+        let cu_memset_d8_async = Self::load_symbol(handle, "cuMemsetD8Async")
+            .or_else(|_| Self::load_symbol(handle, "cuMemsetD8Async_v2"))?;
 
         let cu_stream_create = Self::load_symbol(handle, "cuStreamCreate")?;
         let cu_stream_destroy = Self::load_symbol(handle, "cuStreamDestroy_v2")
@@ -244,6 +260,8 @@ impl CudaDriver {
             cu_mem_free,
             cu_memcpy_htod_async,
             cu_memcpy_dtoh_async,
+            cu_memcpy_dtod_async,
+            cu_memset_d8_async,
             cu_stream_create,
             cu_stream_destroy,
             cu_stream_synchronize,

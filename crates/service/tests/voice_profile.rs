@@ -713,3 +713,24 @@ fn public_select_backend_reapplies_the_stored_profile() {
         "incoherent status after select_backend: active={active} error={error}"
     );
 }
+
+#[test]
+fn accelerator_base_applies_stored_voice_profile_via_bridge() {
+    use realtime_noise_accelerators::BackendSelection;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _) = daemon_with(&dir, true);
+    set_profile(&mut daemon, &profile_json("prof-1"));
+
+    daemon.install_backend(
+        BackendSelection::TensorRt.instantiate_mock_backend(),
+        "nvidia-tensorrt",
+    );
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["stored_voice_profile_id"], "prof-1");
+    assert_eq!(status.payload["active_voice_profile_id"], "prof-1");
+    assert_eq!(status.payload["is_voice_profile_active"], true);
+    assert_eq!(status.payload["voice_profile_supported"], true);
+    assert_eq!(status.payload["voice_profile_error"], json!(null));
+}

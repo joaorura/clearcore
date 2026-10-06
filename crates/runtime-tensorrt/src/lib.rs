@@ -11,7 +11,7 @@ pub use cuda::{
 pub use error::{CudaError, TensorRtError};
 pub use precision::PrecisionTarget;
 pub use tensorrt::{
-    TensorRtContext, TensorRtEngine, TensorRtExecutionContext, TensorRtInferenceContext,
-    TensorRtLibrary, TensorRtRuntime, is_tensorrt_available,
-    locate_library as locate_tensorrt_library,
+    Dfn3Engines, Dfn3Output, TensorRtContext, TensorRtDfn3Session, TensorRtEngine,
+    TensorRtExecutionContext, TensorRtInferenceContext, TensorRtLibrary, TensorRtRuntime,
+    is_tensorrt_available, locate_library as locate_tensorrt_library,
 };

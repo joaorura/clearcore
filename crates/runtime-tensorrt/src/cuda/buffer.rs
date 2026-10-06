@@ -210,6 +210,71 @@ impl<T: DeviceCopy> GpuBuffer<T> {
         Ok(())
     }
 
+    /// Asynchronously copies elements from another GPU buffer to this one on the given stream.
+    pub fn async_copy_from_device(
+        &mut self,
+        src: &Self,
+        stream: &CudaStream,
+    ) -> Result<(), CudaError> {
+        if src.len != self.len {
+            return Err(CudaError::CopyFailed {
+                direction: "DeviceToDevice: length mismatch",
+                code: -1,
+            });
+        }
+
+        if self.size_bytes == 0 {
+            return Ok(());
+        }
+
+        let funcs = self.driver.functions();
+        // SAFETY: Both device_ptr buffers are allocated with self.size_bytes.
+        let res = unsafe {
+            (funcs.cu_memcpy_dtod_async)(
+                self.device_ptr,
+                src.device_ptr,
+                self.size_bytes,
+                stream.raw_stream(),
+            )
+        };
+
+        if res != CUDA_SUCCESS {
+            return Err(CudaError::CopyFailed {
+                direction: "DeviceToDevice",
+                code: res,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Asynchronously zero-fills this GPU buffer on the given stream.
+    pub fn async_zero_fill(&mut self, stream: &CudaStream) -> Result<(), CudaError> {
+        if self.size_bytes == 0 {
+            return Ok(());
+        }
+
+        let funcs = self.driver.functions();
+        // SAFETY: device_ptr is allocated with self.size_bytes.
+        let res = unsafe {
+            (funcs.cu_memset_d8_async)(
+                self.device_ptr,
+                0,
+                self.size_bytes,
+                stream.raw_stream(),
+            )
+        };
+
+        if res != CUDA_SUCCESS {
+            return Err(CudaError::CopyFailed {
+                direction: "MemsetD8Async",
+                code: res,
+            });
+        }
+
+        Ok(())
+    }
+
     #[must_use]
     pub const fn device_ptr(&self) -> CUdeviceptr {
         self.device_ptr

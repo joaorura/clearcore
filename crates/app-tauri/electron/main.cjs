@@ -1145,6 +1145,11 @@ async function pollDaemonStatus() {
         updateTrayMenu();
       }
       syncPresetToHelper(res.preset);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const local = voiceProfileStore.readVoiceProfile();
+        const merged = voiceProfileMerge.mergeLocalAndServiceProfile(local, res);
+        mainWindow.webContents.send('voice-profile-update', { success: true, profile: merged, ...merged });
+      }
     }
   } catch {
     // Daemon not running yet or unreachable
@@ -1181,8 +1186,9 @@ app.whenReady().then(async () => {
   }
   createWindow();
 
-  // 1. Check user config: Start activated (default: true) or stopped
+  // 1. Check user config: Start activated (default: true) or stopped, and selected runtime
   const settings = readAppSettings();
+  currentSelectedBackend = settings.selectedBackend || 'auto';
   const shouldStartActivated = settings.startActivated !== false;
 
   if (shouldStartActivated) {
@@ -1190,6 +1196,14 @@ app.whenReady().then(async () => {
     await ensureDaemonRunning();
     await verifyAndAutoCreateVirtualMicOnStartup();
     isServiceRunning = true;
+    if (currentSelectedBackend && currentSelectedBackend !== 'auto') {
+      try {
+        const daemonBackend = mapBackendToDaemon(currentSelectedBackend);
+        await sendIpcRequest({ SetBackend: daemonBackend });
+      } catch (e) {
+        console.log('[Startup] Daemon SetBackend forward skipped/failed:', e.message);
+      }
+    }
   } else {
     console.log('[Startup] ClearCore configurado para subir DESATIVADO (Parado).');
     isServiceRunning = false;
@@ -1333,7 +1347,7 @@ ipcMain.handle('set_input_device', (_event, args) => {
   return setSystemInputDevice(deviceId);
 });
 
-let currentSelectedBackend = 'auto';
+let currentSelectedBackend = readAppSettings().selectedBackend || 'auto';
 
 function queryHardwareBackends() {
   const isLinux = process.platform === 'linux';
@@ -1427,8 +1441,6 @@ function queryHardwareBackends() {
       if (ldOut.includes('libnvinfer')) hasTensorRtRuntime = true;
 
       const directCandidates = [
-        '/home/joaorura/opt/TensorRT-11.3.0.99/lib/libnvinfer.so',
-        '/home/joaorura/opt/TensorRT-11.3.0.99/lib/libnvinfer.so.11',
         '/opt/tensorrt/lib/libnvinfer.so',
         '/opt/tensorrt/lib/libnvinfer.so.11',
         '/usr/lib64/libnvinfer.so',
@@ -1672,6 +1684,7 @@ ipcMain.handle('set_hardware_backend', async (_event, backendId) => {
   const result = resolveBackendSelection(backendId);
   if (result.success) {
     currentSelectedBackend = result.active_backend;
+    writeAppSettings({ selectedBackend: result.active_backend });
     if (await isDaemonResponsive()) {
       try {
         const daemonBackend = mapBackendToDaemon(result.active_backend);
