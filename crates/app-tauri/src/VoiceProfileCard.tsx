@@ -46,6 +46,7 @@ export interface VoiceProfileCardProps {
 export { isVirtualOrLoopbackAudioDevice, resolvePhysicalAudioDevice } from './voice/captureDevice';
 // Pure card logic lives in ./voice/hooks/voiceProfileLogic; re-exported for the same reason.
 export {
+  hasServiceVoiceProfile,
   normalizeVoiceProfileStatus,
   voiceProfileStatusLabelKey,
   voiceProfileActivationState,
@@ -120,8 +121,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const modal = useVoluntarySample({ recorder: rec, playback, jobs, t, samplesCount: samples.length, flash });
   const { isModalOpen, modalSampleName, setModalSampleName, modalCaptured } = modal;
 
-  // One-time local migration: legacy voice keys are removed; old local-only samples are announced once.
   const [legacyNotice, setLegacyNotice] = useState<boolean>(false);
+  const [isReenrolling, setIsReenrolling] = useState<boolean>(false);
   useEffect(() => {
     const storage = browserStorage();
     if (takeLegacyNotice(purgeLegacyVoiceKeys(storage), storage)) setLegacyNotice(true);
@@ -129,23 +130,85 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
 
   // Initial state: samples, takes and profile status from the service.
   useEffect(() => {
-    const initVoiceData = async () => {
-      const list = await refreshSamples();
-      await refreshCallTakes();
-      const initialProfile = await profile.loadInitialStatus(list?.samples.length ?? 0);
-      if (list?.samples && list.samples.length > 0) {
-        steps.syncFromSamples(list.samples, !hasServiceVoiceProfile(initialProfile));
-      }
-      if (hasServiceVoiceProfile(initialProfile)) {
-        setCurrentStep(5);
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const initVoiceData = async (attempt = 1) => {
+      try {
+        const list = await refreshSamples();
+        if (cancelled) return;
+        await refreshCallTakes();
+        if (cancelled) return;
+        const initialProfile = await profile.loadInitialStatus(list?.samples?.length ?? 0);
+        if (cancelled) return;
+
+        const enrolled = hasServiceVoiceProfile(initialProfile) || initialProfile.is_enrolled === true;
+        if (list?.samples && list.samples.length > 0) {
+          steps.syncFromSamples(list.samples, true, enrolled);
+        } else if (enrolled) {
+          steps.syncFromSamples([], true, true);
+        }
+        if (enrolled) {
+          setCurrentStep(5);
+        }
+
+        // If list failed to load on initial mount (daemon was starting up), retry up to 4 times
+        if (!list && attempt < 5 && !cancelled) {
+          retryTimer = setTimeout(() => {
+            if (!cancelled) void initVoiceData(attempt + 1);
+          }, attempt * 800);
+        }
+      } catch {
+        if (!cancelled && attempt < 5) {
+          retryTimer = setTimeout(() => {
+            if (!cancelled) void initVoiceData(attempt + 1);
+          }, attempt * 800);
+        }
       }
     };
+
     void initVoiceData();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [refreshSamples, refreshCallTakes]);
+
+  // Re-fetch samples whenever a profile update arrives from the daemon
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      if (samples.length === 0) {
+        void refreshSamples().then((list) => {
+          if (list?.samples && list.samples.length > 0) {
+            const enrolled = hasServiceVoiceProfile(profileStatus) || profileStatus.is_enrolled === true;
+            steps.syncFromSamples(list.samples, true, enrolled);
+          }
+        });
+      }
+    };
+    window.addEventListener('clearcore_profile_updated', handleProfileUpdate);
+    const api = typeof window !== 'undefined' ? window.clearcoreApi : undefined;
+    const cleanup = api?.onVoiceProfileUpdate?.(() => handleProfileUpdate());
+    return () => {
+      window.removeEventListener('clearcore_profile_updated', handleProfileUpdate);
+      if (cleanup) cleanup();
+    };
+  }, [samples.length, refreshSamples, profileStatus, steps]);
+
+  const handleResetEnrollment = () => {
+    setIsReenrolling(true);
+    steps.resetSteps();
+    changeTab({ by: 'user', id: 'enroll' });
+  };
 
   const handleBuildProfile = async (origin: 'enroll' | 'profile') => {
     if (profile.isBuilding) return;
-    if (await profile.buildProfile(origin)) flash(t('voiceProfile.profileActivatedSuccess'), 6000);
+    if (await profile.buildProfile(origin)) {
+      setIsReenrolling(false);
+      flash(t('voiceProfile.profileActivatedSuccess'), 6000);
+      await refreshSamples();
+    }
   };
 
   const handleDeleteSample = async (id: string) => {
@@ -227,10 +290,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             isBuilding={profile.isBuilding}
             feedback={feedbackFor('profile')}
             onBuildProfile={() => void handleBuildProfile('profile')}
-            onResetEnrollment={() => {
-              steps.resetSteps();
-              changeTab({ by: 'user', id: 'enroll' });
-            }}
+            onResetEnrollment={handleResetEnrollment}
             stale={showStaleProfileNotice(profileStatus, sampleList ? profileSampleIds(samples) : null, profile.idsAtBuild)}
           />
         );
@@ -240,7 +300,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             t={t}
             locale={locale}
             labels={labels}
-            isEnrolled={hasServiceVoiceProfile(profileStatus)}
+            isEnrolled={(hasServiceVoiceProfile(profileStatus) || profileStatus.is_enrolled === true) && !isReenrolling}
             currentStep={currentStep}
             isReadingMode={isReadingMode}
             completedSteps={completedSteps}
@@ -260,7 +320,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             onRedoStep={steps.redoStep}
             onNextStep={steps.nextStep}
             onBuildProfile={() => void handleBuildProfile('enroll')}
-            onResetEnrollment={steps.resetSteps}
+            onResetEnrollment={handleResetEnrollment}
           />
         );
     }

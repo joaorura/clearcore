@@ -16,16 +16,23 @@ import { formatDecimalLocale, formatSecondsLocale } from '../format';
  */
 export function hasServiceVoiceProfile(status: Partial<VoiceProfileStatus> | null | undefined): boolean {
   if (!status || typeof status !== 'object') return false;
-  const id = status.stored_voice_profile_id;
-  return (typeof id === 'string' && id.length > 0) || status.has_voice_profile === true;
+  const storedId = status.stored_voice_profile_id;
+  const activeId = status.active_voice_profile_id;
+  return (typeof storedId === 'string' && storedId.length > 0)
+    || (typeof activeId === 'string' && activeId.length > 0)
+    || status.has_voice_profile === true
+    || status.is_voice_profile_active === true;
 }
 
 export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
-  const r = (res ?? {}) as Partial<VoiceProfileStatus> & { profile?: Partial<VoiceProfileStatus> };
+  const r = (res ?? {}) as Partial<VoiceProfileStatus> & { profile?: Partial<VoiceProfileStatus>; voice_samples_count?: number };
   const src = r.profile ?? r;
+  const samplesCount = typeof (src as { voice_samples_count?: number }).voice_samples_count === 'number'
+    ? (src as { voice_samples_count: number }).voice_samples_count
+    : (src.active_samples_count ?? 0);
   return {
     is_enrolled: hasServiceVoiceProfile(src),
-    active_samples_count: src.active_samples_count ?? 0,
+    active_samples_count: samplesCount,
     embedding_dim: src.embedding_dim ?? 0,
     neural_eq_calibrated: Boolean(src.neural_eq_calibrated),
     gain_boost_db: src.gain_boost_db,
@@ -75,7 +82,14 @@ export function voiceProfileActivationState(status: VoiceProfileStatus): VoicePr
   return hasServiceVoiceProfile(status) ? 'stored_not_applied' : 'none';
 }
 
-const SERVICE_STATUS_KEYS_IN_RESPONSE = ['stored_voice_profile_id', 'has_voice_profile', 'is_voice_profile_active'] as const;
+const SERVICE_STATUS_KEYS_IN_RESPONSE = [
+  'stored_voice_profile_id',
+  'has_voice_profile',
+  'is_voice_profile_active',
+  'active_voice_profile_id',
+  'voice_samples_count',
+  'neural_eq_calibrated',
+] as const;
 
 export function mergeVoiceProfileStatus(
   initial: VoiceProfileStatus,
@@ -116,6 +130,7 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'has_voice_profile',
   'voice_profile_supported',
   'neural_eq_calibrated',
+  'voice_samples_count',
   'dev_base_model',
   'dev_base_model_error',
 ] as const;

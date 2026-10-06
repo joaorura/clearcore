@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { invokeBridge } from '../bridge';
-import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState, voiceProfileStatusLabelKey, stripServiceVoiceProfileKeys, applySetVoiceProfileResult, voiceProfileErrorKey } from '../VoiceProfileCard';
+import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState, voiceProfileStatusLabelKey, stripServiceVoiceProfileKeys, applySetVoiceProfileResult, voiceProfileErrorKey, hasServiceVoiceProfile } from '../VoiceProfileCard';
+import { syncCompletedStepsFromSamples } from '../voice/hooks/guidedSteps';
 import { ptBR } from '../i18n/locales/pt-BR';
 import { enUS } from '../i18n/locales/en-US';
 import type { VoiceProfileStatus, CallSuggestionTake, StudioPreset } from '../types';
@@ -11,6 +12,8 @@ import os from 'os';
 // Test the Node.js VoiceProfileStore module directly
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const voiceProfileStore = require('../../electron/voice-profile-store.cjs');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const voiceProfileMerge = require('../../electron/voice-profile-merge.cjs');
 
 describe('VoiceProfileStore (electron/voice-profile-store.cjs)', () => {
   const testDir = path.join(os.tmpdir(), `clearcore-test-store-${Date.now()}`);
@@ -448,5 +451,78 @@ describe('relabel (I2/T7)', () => {
     expect(ptBR.voiceProfile.appliedInServiceNote).toBe('O microfone virtual empacotado ainda não usa este perfil.');
     expect(enUS.voiceProfile.appliedInServiceNote).toBe('The packaged virtual microphone does not use this profile yet.');
     expect('enrolledUnconfirmed' in ptBR.voiceProfile).toBe(false);
+  });
+});
+
+describe('Daemon Active Profile & Gallery Synchronization', () => {
+  const daemonStatus = {
+    active_backend: 'nvidia-tensorrt',
+    active_voice_profile_id: 'p-1791285533887-8',
+    backend_device: 'GPU',
+    backend_runtime: 'tensorrt',
+    can_restart: true,
+    crash_count_15m: 0,
+    dev_base_model: 'base',
+    dev_base_model_error: null,
+    dsp_preset: 'Natural',
+    has_voice_profile: true,
+    intake_pending_count: 0,
+    is_hardware_accelerated: true,
+    is_terminal: false,
+    is_voice_profile_active: true,
+    mode: 'Active',
+    neural_eq_calibrated: true,
+    preset: 'Natural',
+    requested_backend: 'tensorrt',
+    state: 'Running',
+    stored_voice_profile_id: 'p-1791285533887-8',
+    total_crashes: 0,
+    voice_profile_error: null,
+    voice_profile_selected: true,
+    voice_profile_supported: true,
+    voice_samples_count: 5,
+  };
+
+  it('serviceHasVoiceProfile recognizes daemon active profile by id or flag', () => {
+    expect(voiceProfileMerge.serviceHasVoiceProfile(daemonStatus)).toBe(true);
+    expect(voiceProfileMerge.serviceHasVoiceProfile({ active_voice_profile_id: 'p-1' })).toBe(true);
+    expect(voiceProfileMerge.serviceHasVoiceProfile({ is_voice_profile_active: true })).toBe(true);
+    expect(voiceProfileMerge.serviceHasVoiceProfile({ stored_voice_profile_id: 'p-1' })).toBe(true);
+    expect(voiceProfileMerge.serviceHasVoiceProfile({ has_voice_profile: true })).toBe(true);
+    expect(voiceProfileMerge.serviceHasVoiceProfile({})).toBe(false);
+  });
+
+  it('mergeLocalAndServiceProfile populates is_enrolled and active_samples_count from daemon status', () => {
+    const local = { is_enrolled: false, active_samples_count: 0 };
+    const merged = voiceProfileMerge.mergeLocalAndServiceProfile(local, daemonStatus);
+    expect(merged.is_enrolled).toBe(true);
+    expect(merged.active_voice_profile_id).toBe('p-1791285533887-8');
+    expect(merged.neural_eq_calibrated).toBe(true);
+    expect(merged.is_voice_profile_active).toBe(true);
+    expect(merged.active_samples_count).toBe(5);
+  });
+
+  it('hasServiceVoiceProfile in frontend recognizes active daemon profile', () => {
+    expect(hasServiceVoiceProfile(daemonStatus)).toBe(true);
+    expect(hasServiceVoiceProfile({ active_voice_profile_id: 'p-123' })).toBe(true);
+    expect(hasServiceVoiceProfile({ is_voice_profile_active: true })).toBe(true);
+    expect(hasServiceVoiceProfile({})).toBe(false);
+  });
+
+  it('syncCompletedStepsFromSamples fills all 5 steps when enrolled or given 5 samples', () => {
+    const mockSamples = [
+      { id: 's-1', name: 'Início de Reunião', timestamp: '1000', speechSeconds: 4.4, deviceLabel: 'Mic', usedInProfile: true, needsReenroll: false, otherMicrophone: false },
+      { id: 's-2', name: 'Rotina Matinal', timestamp: '1001', speechSeconds: 3.0, deviceLabel: 'Mic', usedInProfile: true, needsReenroll: false, otherMicrophone: false },
+      { id: 's-3', name: 'Foco de Trabalho', timestamp: '1002', speechSeconds: 3.5, deviceLabel: 'Mic', usedInProfile: true, needsReenroll: false, otherMicrophone: false },
+      { id: 's-4', name: 'Espaço de Trabalho', timestamp: '1003', speechSeconds: 3.8, deviceLabel: 'Mic', usedInProfile: true, needsReenroll: false, otherMicrophone: false },
+      { id: 's-5', name: 'Lazer / Descontração', timestamp: '1004', speechSeconds: 3.4, deviceLabel: 'Mic', usedInProfile: true, needsReenroll: false, otherMicrophone: false },
+    ];
+
+    const completed = syncCompletedStepsFromSamples(mockSamples, {}, undefined, true);
+    expect(Object.keys(completed)).toHaveLength(5);
+    for (let s = 1; s <= 5; s++) {
+      expect(completed[s]).toBeDefined();
+      expect(completed[s].sampleId).toBe(`s-${s}`);
+    }
   });
 });

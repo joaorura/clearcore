@@ -29,7 +29,7 @@ export interface GuidedSteps {
   toggleReadingMode: () => void;
   resetSteps: () => void;
   isSubmitting: boolean;
-  syncFromSamples: (samples: ServiceSample[], advanceStep?: boolean) => void;
+  syncFromSamples: (samples: ServiceSample[], advanceStep?: boolean, isEnrolled?: boolean) => void;
 }
 
 /** The 5-step guided enrollment: each accepted take is one sample in the service. */
@@ -61,10 +61,10 @@ export function useGuidedSteps(opts: {
     }
   }, []);
 
-  const syncFromSamples = useCallback((newSamples: ServiceSample[], advanceStep = false) => {
+  const syncFromSamples = useCallback((newSamples: ServiceSample[], advanceStep = false, isEnrolled = false) => {
     if (hasExplicitlyResetRef.current) return;
     setCompletedSteps((prev) => {
-      const synced = syncCompletedStepsFromSamples(newSamples, prev, t);
+      const synced = syncCompletedStepsFromSamples(newSamples, prev, t, isEnrolled);
       if (advanceStep && Object.keys(synced).length > 0) {
         setCurrentStep(initialStepFromCompleted(synced));
       }

@@ -54,6 +54,8 @@ export interface ClearcoreApi {
   getVoiceProfileStatus?: () => Promise<VoiceProfileStatus>;
   setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean; profile?: VoiceProfileStatus }>;
   getCallTakes?: () => Promise<{ success: boolean; takes: CallSuggestionTake[] } | CallSuggestionTake[]>;
+  listVoiceSamples?: () => Promise<unknown>;
+  listSamples?: () => Promise<unknown>;
   approveCallTake?: (id: string, name?: string, take?: unknown) => Promise<{ success: boolean; id: string; sample?: VoiceSample }>;
   dismissCallTake?: (id: string) => Promise<{ success: boolean; id: string; takes?: CallSuggestionTake[] }>;
   exportDiagnostics?: () => Promise<string>;
@@ -151,6 +153,14 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
         return (await api.getCallTakes()) as unknown as T;
       }
     }
+    if (cmd === 'enrollment_list_samples' || cmd === 'list_voice_samples') {
+      if (typeof api.listVoiceSamples === 'function') {
+        return (await api.listVoiceSamples()) as unknown as T;
+      }
+      if (typeof api.listSamples === 'function') {
+        return (await api.listSamples()) as unknown as T;
+      }
+    }
     if (cmd === 'approve_call_take') {
       if (typeof api.approveCallTake === 'function') {
         return (await api.approveCallTake(String(args?.id ?? ''), args?.name as string | undefined, args?.take)) as unknown as T;
@@ -168,6 +178,9 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     }
   }
   if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+    if (typeof window.__TAURI_INTERNALS__.invoke === 'function') {
+      return window.__TAURI_INTERNALS__.invoke<T>(cmd, args);
+    }
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<T>(cmd, args);
   }

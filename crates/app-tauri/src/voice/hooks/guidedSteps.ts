@@ -73,7 +73,7 @@ export function normalizeCategoryName(name: string): string {
 const KNOWN_STEP_CATEGORY_NAMES: Record<number, string[]> = {
   1: ['inicio de reuniao', 'meeting kickoff', 'reuniao', 'kickoff'],
   2: ['rotina matinal', 'morning routine', 'rotina', 'matinal'],
-  3: ['foco de trabalho', 'work focus', 'trabalho', 'work'],
+  3: ['foco de trabalho', 'work focus', 'foco', 'work'],
   4: ['espaco de trabalho', 'workspace setup', 'workspace', 'espaco'],
   5: ['lazer descontracao', 'leisure downtime', 'leisure and downtime', 'lazer', 'descontracao'],
 };
@@ -83,6 +83,7 @@ export function matchSampleToStep(sample: Pick<ServiceSample, 'name'>, step: num
   if (step < 1 || step > GUIDED_STEP_COUNT) return false;
   const normName = normalizeCategoryName(sample.name);
   if (!normName) return false;
+  if (step === 3 && (normName.includes('espaco') || normName.includes('workspace'))) return false;
 
   // 1. Translated category check
   if (t) {
@@ -113,6 +114,7 @@ export function syncCompletedStepsFromSamples(
   samples: ServiceSample[],
   prevSteps: CompletedSteps = {},
   t?: Translate,
+  isEnrolled?: boolean,
 ): CompletedSteps {
   const result: CompletedSteps = { ...prevSteps };
 
@@ -147,6 +149,29 @@ export function syncCompletedStepsFromSamples(
         duration: best.speechSeconds,
         sampleId: best.id,
       };
+    }
+  }
+
+  // Fallback 1: fill remaining empty steps with any unused samples from the gallery
+  const usedSampleIds = new Set(Object.values(result).map((take) => take.sampleId).filter(Boolean));
+  const unusedSamples = samples.filter((samp) => !usedSampleIds.has(samp.id));
+  let unusedIdx = 0;
+  for (let s = 1; s <= GUIDED_STEP_COUNT && unusedIdx < unusedSamples.length; s++) {
+    if (!result[s]?.sampleId) {
+      const samp = unusedSamples[unusedIdx++];
+      result[s] = {
+        duration: samp.speechSeconds,
+        sampleId: samp.id,
+      };
+    }
+  }
+
+  // Fallback 2: if profile is confirmed enrolled, ensure all 5 steps are marked complete
+  if (isEnrolled) {
+    for (let s = 1; s <= GUIDED_STEP_COUNT; s++) {
+      if (!result[s]) {
+        result[s] = { duration: 5 };
+      }
     }
   }
 
