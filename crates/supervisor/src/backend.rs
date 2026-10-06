@@ -67,6 +67,20 @@ pub fn find_stateful_model_dir() -> Option<PathBuf> {
         }
     }
 
+    if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
+        let p = PathBuf::from(data_home).join("clearcore/models/stateful");
+        if has_stateful_models(&p) {
+            return Some(p);
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        let p = PathBuf::from(&home).join(".local/share/clearcore/models/stateful");
+        if has_stateful_models(&p) {
+            return Some(p);
+        }
+    }
+
     None
 }
 
