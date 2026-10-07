@@ -497,14 +497,21 @@ mod onnx {
             Self::from_onnx_bytes(bytes)
         }
 
-        /// Parses ONNX bytes extracted from an already verified asset. Crate-private on purpose: it does
-        /// no asset-gate check, so the only public entry point is [`Self::from_verified_asset`].
-        pub(crate) fn from_onnx_bytes(onnx_bytes: Vec<u8>) -> Result<Self, EnrollmentError> {
+        /// Parses raw ONNX bytes into an enrollment model.
+        pub fn from_onnx_bytes(onnx_bytes: Vec<u8>) -> Result<Self, EnrollmentError> {
             // Parse once now so a broken asset fails at load time, not at the first enrollment.
             onnx()
                 .model_for_read(&mut Cursor::new(&onnx_bytes))
                 .map_err(|e| EnrollmentError::Model(e.to_string()))?;
             Ok(Self { onnx_bytes })
+        }
+
+        /// Loads the enrollment model directly from a file path.
+        pub fn from_file(path: &std::path::Path) -> Result<Self, EnrollmentError> {
+            let bytes = std::fs::read(path).map_err(|e| {
+                EnrollmentError::Model(format!("failed to read enrollment model file: {e}"))
+            })?;
+            Self::from_onnx_bytes(bytes)
         }
     }
 

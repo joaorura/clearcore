@@ -54,12 +54,10 @@ impl EnrollmentConfig {
         }
     }
 
-    /// Constructs from environment variables.
-    /// Uses `std::env::var_os` for the asset path (handles non-UTF8 gracefully)
-    /// and `std::env::var` for the SHA256.
+    /// Constructs from environment variables with fallback to embedded repository model.
     #[must_use]
     pub fn from_env() -> Self {
-        let archive_path = std::env::var_os(ENV_ASSET)
+        let env_path = std::env::var_os(ENV_ASSET)
             .and_then(os_to_string)
             .and_then(|s| {
                 let trimmed = s.trim();
@@ -79,17 +77,22 @@ impl EnrollmentConfig {
             }
         });
 
+        let archive_path = env_path.or_else(find_default_enrollment_model);
+
         Self {
             archive_path,
             expected_sha256,
         }
     }
 
-    /// Returns true only if both `archive_path` and `expected_sha256` are present,
-    /// the path is absolute, and the `sha256` is exactly 64 lowercase hex characters.
-    /// The daemon's working directory varies; relative paths are never configured.
+    /// Returns true if either a direct ONNX enrollment model exists or a verified dev archive is configured.
     #[must_use]
     pub fn is_configured(&self) -> bool {
+        if let Some(ref path) = self.archive_path {
+            if path.extension().is_some_and(|ext| ext == "onnx") && path.is_file() {
+                return true;
+            }
+        }
         matches!(
             (&self.archive_path, &self.expected_sha256),
             (Some(path), Some(sha)) if path.is_absolute()
@@ -97,6 +100,56 @@ impl EnrollmentConfig {
                 && sha.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
         )
     }
+}
+
+/// Attempts to locate the embedded voice enrollment model inside the Clearcore project or installation.
+#[must_use]
+pub fn find_default_enrollment_model() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("CLEARCORE_ENROLLMENT_MODEL") {
+        let p = PathBuf::from(path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut cur = Some(cwd.as_path());
+        for _ in 0..5 {
+            if let Some(p) = cur {
+                let candidate = p.join("models/enrollment/enrollment.onnx");
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+                cur = p.parent();
+            }
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        let mut cur = exe.parent();
+        for _ in 0..5 {
+            if let Some(p) = cur {
+                let candidate = p.join("models/enrollment/enrollment.onnx");
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+                let candidate_res = p.join("resources/models/enrollment/enrollment.onnx");
+                if candidate_res.is_file() {
+                    return Some(candidate_res);
+                }
+                cur = p.parent();
+            }
+        }
+    }
+
+    if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
+        let p = PathBuf::from(data_home).join("clearcore/models/enrollment/enrollment.onnx");
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

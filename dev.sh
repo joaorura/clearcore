@@ -27,15 +27,12 @@ if [[ -f "${SCRIPT_DIR}/scripts/detect-dev-models.sh" ]]; then
     source "${SCRIPT_DIR}/scripts/detect-dev-models.sh"
 fi
 
-# Modelo de cadastro de voz (só desenvolvimento). O daemon é iniciado pelo Electron e
-# herda estas variáveis do ambiente deste script; sem elas, "Gerar perfil" termina em
-# ENROLL_MODEL_NOT_CONFIGURED (as amostras continuam sendo gravadas e denoisadas).
-if [[ -n "${CLEARCORE_DEV_ENROLLMENT_ASSET:-}" && -n "${CLEARCORE_DEV_ENROLLMENT_SHA256:-}" ]]; then
+# Modelo de cadastro de voz nativo do Clearcore.
+if [[ -f "models/enrollment/enrollment.onnx" ]]; then
+    echo "🎙️  Modelo de cadastro de voz nativo ativo: models/enrollment/enrollment.onnx"
+elif [[ -n "${CLEARCORE_DEV_ENROLLMENT_ASSET:-}" && -n "${CLEARCORE_DEV_ENROLLMENT_SHA256:-}" ]]; then
     export CLEARCORE_DEV_ENROLLMENT_ASSET CLEARCORE_DEV_ENROLLMENT_SHA256
-    echo "🧪 Modelo de cadastro (dev): ${CLEARCORE_DEV_ENROLLMENT_ASSET}"
-else
-    echo "ℹ️  CLEARCORE_DEV_ENROLLMENT_ASSET/_SHA256 não definidas: gerar perfil ficará ENROLL_MODEL_NOT_CONFIGURED."
-    echo "    Veja a seção de desenvolvimento do AGENTS.md para defini-las."
+    echo "🧪 Modelo de cadastro (dev override): ${CLEARCORE_DEV_ENROLLMENT_ASSET}"
 fi
 
 

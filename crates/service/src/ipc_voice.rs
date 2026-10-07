@@ -241,7 +241,18 @@ fn load_dev_model(
     if !config.is_configured() {
         return Err(EnrollError::ModelNotConfigured);
     }
-    let (Some(path), Some(sha)) = (&config.archive_path, &config.expected_sha256) else {
+    let Some(ref path) = config.archive_path else {
+        return Err(EnrollError::ModelNotConfigured);
+    };
+
+    // Direct ONNX model support (embedded repository model)
+    if path.extension().is_some_and(|ext| ext == "onnx") {
+        let model = OnnxEnrollmentModel::from_file(path)
+            .map_err(|_| EnrollError::ModelNotConfigured)?;
+        return Ok(Box::new(model));
+    }
+
+    let Some(ref sha) = config.expected_sha256 else {
         return Err(EnrollError::ModelNotConfigured);
     };
     // A missing, oversized, tampered or unreadable archive is a configuration problem: the

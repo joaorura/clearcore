@@ -331,8 +331,8 @@ impl EngineSupervisor {
         self.active_profile.as_ref().map(|p| p.id.as_str())
     }
 
-    /// Whether the live backend can apply a conditioned voice profile (cheap; no inference).
-    /// `false` without a backend.
+    /// Whether the live backend can apply a conditioned voice profile.
+    /// Enrollment and voice profile handling are native capabilities of Clearcore.
     #[must_use]
     pub fn supports_voice_profile(&self) -> bool {
         if self
@@ -345,7 +345,10 @@ impl EngineSupervisor {
         if self.dev_base_model.is_some() {
             return true;
         }
-        if self.backend.is_some() && self.is_accelerator_base() {
+        if self.backend.is_some()
+            && (self.is_accelerator_base()
+                || matches!(self.active_backend_name.as_str(), "tract" | "cpu-tract"))
+        {
             return true;
         }
         false

@@ -117,3 +117,147 @@ CLEARCORE_DEV_PDFNET3_SHA256=42dfc577fdf8a881ecbafce7777bf6f0a4cf914ffc1aaff2580
 ## Orca IDE Integration
 Tasks are configured in `.vscode/tasks.json` and can be triggered directly via `Ctrl+Shift+B` or Command Palette (`Tasks: Run Task`).
 Debug and Launch profiles are located in `.vscode/launch.json`.
+
+---
+
+## MCP Tools & Knowledge Graph Integration (Codegraph, Serena, Enquire)
+
+> [!CAUTION]
+> **OBRIGATÓRIO: Pesquisa Semântica Antes de Leitura (`Codegraph` / `Serena`)**
+> É expressamente proibido fazer leituras sequenciais cegas (`view_file` repetido de arquivos inteiros) para "procurar" código.
+> Agentes DEVEM usar ferramentas semânticas e AST primeiro:
+> 1. Use `codegraph:codegraph_explore` para traçar fluxo de execução e entender impacto antes de tocar em código.
+> 2. Use `serena:find_symbol` ou `serena:get_symbols_overview` para localizar o símbolo e obter o corpo exato e números de linha.
+> 3. Use `serena:find_referencing_symbols` para analisar call sites.
+> Apenas após localizar cirurgicamente o ponto de edição deve ser feita a leitura/alteração pontual.
+
+This workspace integrates three Model Context Protocol (MCP) servers designed for deep semantic code navigation, AST-aware refactoring, and structured knowledge management: **Codegraph**, **Serena**, and **Enquire**.
+
+### Tool Selection & Decision Matrix
+
+Always prefer the highest-leverage semantic tool over generic text-scanning loops:
+
+| Objective / Task | Recommended Tool | Fallback | Prohibited Anti-Pattern |
+| :--- | :--- | :--- | :--- |
+| **Trace execution / call paths across codebase** | `codegraph:codegraph_explore` | `serena:find_referencing_symbols` | Recursive grep loops and sequential file reads |
+| **Inspect blast radius & code before refactoring** | `codegraph:codegraph_explore` | `view_file` | Ingesting entire files without checking dependents |
+| **Inspect symbol hierarchy of a single file** | `serena:get_symbols_overview` | `view_file` (lines 1–100) | Ingesting 1000+ line files whole |
+| **Inspect specific function / struct / method body** | `serena:find_symbol` (`include_body=True`) | `codegraph:codegraph_explore` | Grepping identifier and calculating line offsets manually |
+| **Trace references and call sites of a symbol** | `serena:find_referencing_symbols` | `codegraph:codegraph_explore` | Running repo-wide `grep -rn "symbol"` |
+| **Find trait or interface implementations** | `serena:find_implementations` | `codegraph:codegraph_explore` | Manual directory search / ripgrep |
+| **Check compilation / LSP diagnostics** | `serena:get_diagnostics_for_file` | `run_command` (cargo check) | Blindly applying edits without diagnostic confirmation |
+| **Atomic symbol rename across entire workspace** | `serena:rename_symbol` | Multi-file text edits | Ad-hoc regex scripts or sed |
+| **Replace method / function / class body** | `serena:replace_symbol_body` | `replace_file_content` | Whole-file rewrites or manual slicing |
+| **Insert types/functions at start/end of file** | `serena:insert_before_symbol` / `insert_after_symbol` | `replace_file_content` | Manually calculating EOF offsets |
+| **Multi-file pattern replacement with dry-run** | `serena:replace_in_files` | Manual edits | Sequential shell scripts or untested mass replaces |
+| **Persist architectural decisions and conventions** | `serena:write_memory` / `read_memory` | Ephemeral scratchpad | Writing conventions to temporary scratch notes |
+| **Search Obsidian notes / architecture docs** | `enquire:obsidian_search` / `obsidian_hyde_search` | Ripgrep on vault | Reading raw markdown files directly from vault |
+| **Build LLM context pack from Obsidian vault** | `enquire:obsidian_context_pack` | `enquire:obsidian_read_note` | Manual copy-pasting of notes and backlinks |
+| **Structured metadata query in Obsidian vault** | `enquire:obsidian_dataview_query` | `enquire:obsidian_frontmatter_search` | Custom YAML parsers with python/bash |
+| **Traverse links / graph path in Obsidian vault** | `enquire:obsidian_find_path` / `obsidian_get_note_neighbors` | `enquire:obsidian_get_backlinks` | Manually scraping `[[wikilinks]]` |
+
+---
+
+### 1. Codegraph (`codegraph`)
+A SQLite knowledge graph indexing symbols, AST edges, and dynamic hops across 30+ languages (Rust, C/C++, TypeScript, Python, etc.).
+- **Primary Tool:** `codegraph_explore` (returns verbatim, line-numbered source code with caller context and blast radius).
+- **Token Optimization:** Cross-call deduplication can be enabled via `CODEGRAPH_EXPLORE_DEDUP=1` to prevent redundant source payload across queries.
+- **Dynamic Dispatch:** Follows dynamic hops, callbacks, and channel sends across language boundaries (e.g. C PipeWire callbacks into Rust FFI).
+- **Exact Identifiers & Suggestions:** Requires exact symbol names (e.g. `AudioProcessor::process_frame` or `crate::engine::AudioContext`). If a symbol is mistyped, the tool returns "did-you-mean" candidate suggestions.
+- **Rules & Invariants:**
+  - Code returned by `codegraph_explore` is already verbatim and line-numbered: **do not re-read with `view_file`**.
+  - Respect staleness banners: `⚠️ Some files referenced below were edited since the last index sync...` means only those specific files need direct reading.
+  - If a directory lacks `.codegraph/`, do not run `codegraph init` automatically without user consent.
+
+#### Example Scenario: Tracing Audio Buffer Across Boundaries
+```json
+{
+  "query": "pipewire_process_callback tract_onnx_infer",
+  "projectPath": "/home/joaorura/orca/workspaces/clearcore/hippocamp"
+}
+```
+*Result:* Returns the topological call path from `platform/linux/helper` C bridge -> `crates/filter-capi` -> `crates/engine` -> `crates/runtime-openvino`/`tract` without reading files manually.
+
+---
+
+### 2. Serena (`serena`)
+LSP-powered semantic code intelligence server providing AST symbol navigation, diagnostic queries, atomic refactoring, and persistent memory.
+
+> [!CAUTION]
+> **Line Numbering:** Line numbers returned by Serena tools are **0-based**. When translating Serena line numbers to native tools (such as `replace_file_content` or `view_file`), **you must add 1 (+1)**.
+> **Parallel Mutations:** Never dispatch parallel mutation tool calls (`replace_content`, `replace_symbol_body`, etc.) on the **same file** in a single turn, as offsets will shift and corrupt code. Serena handles parallel calls sequentially across distinct files safely.
+
+- **Symbol Path Syntax:** Always use forward slashes (`/`) for hierarchical symbol paths, regardless of language (e.g., `AudioProcessor/set_bypass`, not `::` or `.`).
+- **Semantic Inspection:**
+  - `get_symbols_overview(relative_path)`: Inspect file structure without ingesting body lines.
+  - `find_symbol(name_path_pattern, relative_path, include_body)`: Retrieve exact symbol body without full-file overhead.
+  - `find_referencing_symbols(name_path, relative_path)`: Contextual call sites across the workspace.
+  - `find_implementations(name_path, relative_path)`: Locate trait implementations.
+  - `get_diagnostics_for_file(relative_path, min_severity="warning")`: Check compiler errors/warnings before/after changes.
+- **Structured Refactoring:**
+  - `rename_symbol(name_path, relative_path, new_name)`: Atomic project-wide rename across declarations, usages, and imports.
+  - `safe_delete_symbol(name_path_pattern, relative_path)`: Refuses deletion if references exist.
+  - `replace_symbol_body(name_path, relative_path, body)`: Replaces method/function body cleanly.
+  - `insert_before_symbol` / `insert_after_symbol`: Inserts code relative to top-level symbols.
+  - `replace_in_files(needle, repl, mode, dry_run=true)`: Preview diffs across multiple files before committing changes.
+- **Project Memories (`serena`):**
+  - Graph-based memory hierarchy initialized in this repository:
+    - `mem:core` (root node and references to domains)
+    - `mem:tech_stack` (pinned toolchains, runtimes, audio drivers)
+    - `mem:suggested_commands` (real developer lifecycle, dev, package, offline gate)
+    - `mem:conventions` (zero-allocation realtime audio, `unsafe_code = forbid`, `unwrap_used = deny`)
+    - `mem:task_completion` (Definition of Done and verification checklist)
+  - Access via `read_memory(memory_name)` and manage via `write_memory` / `edit_memory`.
+
+#### Example Scenario: Inspecting and Editing a Method Safely
+```json
+{
+  "name_path_pattern": "AudioProcessor/set_bypass",
+  "relative_path": "crates/engine/src/lib.rs",
+  "include_body": true
+}
+```
+*Result:* Returns only the `set_bypass` method body and 0-based lines (e.g., lines 45–52). The agent can then call `replace_symbol_body` directly, or map to lines 46–53 for native tools.
+
+---
+
+### 3. Enquire (`enquire`)
+Topological and semantic integration with Obsidian Personal Knowledge Management (PKM) vaults, architecture decision records (ADRs), and research notes.
+- **Search & Retrieval:**
+  - `obsidian_search`: Multi-signal search combining BM25 (FTS5), TF-IDF, dense vector embeddings, and graph proximity (`graph_boost=true`).
+  - `obsidian_hyde_search`: Hypothetical Document Embeddings search. Requires `hypothetical_answer` to match conceptual intent rather than exact keywords.
+  - `obsidian_context_pack`: Assembles a compact markdown package of notes, backlinks, and daily context constrained to `budget_tokens`.
+- **Graph Traversal:**
+  - `obsidian_resolve_wikilink`: Resolves `[[Note#Section|Alias]]` to vault paths without manual regex parsing.
+  - `obsidian_get_backlinks` / `obsidian_get_outbound_links`: Bidirectional link exploration.
+  - `obsidian_find_path`: Shortest-path BFS traversal between two concepts in the knowledge graph.
+  - `obsidian_get_communities`: Louvain modularity clustering over the vault graph.
+- **Structured Queries & Vault Hygiene:**
+  - `obsidian_dataview_query`: Execute structured queries: `(LIST|TABLE col1, col2) FROM ("folder"|#tag) [WHERE condition] [SORT field] [LIMIT n]`.
+  - `obsidian_validate_note_proposal`: Lints proposed note drafts before saving to prevent broken wikilinks or malformed YAML frontmatter.
+  - `obsidian_lint_wiki`: Vault health audit for orphan notes, dead ends, stubs, and broken references.
+
+#### Example Scenario: Context Pack for Architecture Research
+```json
+{
+  "query": "DeepFilterNet3 isolation model and voice profile integration",
+  "budget_tokens": 3000,
+  "include_backlinks": true
+}
+```
+
+---
+
+### Monorepo Crate Topology & Navigation Guide
+
+When searching or refactoring code in Clearcore, target the relevant crate directly rather than running global searches:
+
+- **`crates/engine`**: Core audio engine orchestrator. Manages real-time audio graph bridging, model switching, ring buffer state, and backpressure.
+- **`crates/studio-dsp`**: Deterministic, pure digital signal processing routines (gain, limiter, noise gate, EQ). **Zero-allocation (`no_alloc`) realtime invariants apply here**.
+- **`crates/supervisor`**: Background daemon management, privilege escalation, lifecycle handling, autostart, and crash handling.
+- **`crates/service`**: IPC and protocol communication layer exposing status, mode switching (`active`, `bypass`, `mute`), and audio telemetry to the frontend.
+- **`crates/app-tauri`**: Electron / React frontend interface, tray controller, and user settings.
+- **`platform/linux/helper`**: Low-level C bridge connecting PipeWire virtual microphone nodes to the Rust engine (`crates/filter-capi`).
+- **`crates/runtime-*` (`runtime-openvino`, `runtime-tensorrt`, `runtime-coreml`)**: Hardware-accelerated neural network execution backends.
+
+

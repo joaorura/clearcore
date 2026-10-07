@@ -173,37 +173,17 @@ async function isDaemonResponsive() {
   }
 }
 
-// Auto-detect trained M3 model for voice enrollment
+// Auto-detect native embedded model for voice enrollment
 function detectDevModels() {
-  if (process.env.CLEARCORE_DEV_ENROLLMENT_ASSET) {
+  if (process.env.CLEARCORE_DEV_ENROLLMENT_ASSET || process.env.CLEARCORE_ENROLLMENT_MODEL) {
     return;
   }
-  const crypto = require('crypto');
-  const candidateDirs = [
-    process.env.CLEARCORE_TRAIN_M3_DIR,
-    path.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'projects', 'clearcore-train', 'runs', 'm3'),
-    path.join(os.homedir(), 'orca', 'projects', 'clearcore-train', 'runs', 'm3'),
-  ].filter(Boolean);
-
-  let m3Dir = null;
-  for (const d of candidateDirs) {
-    if (fs.existsSync(d)) {
-      m3Dir = d;
-      break;
-    }
-  }
-  if (!m3Dir) return;
-
-  const enrollFile = path.join(m3Dir, 'voice-enrollment-asset-v1.tar.gz');
-  if (!process.env.CLEARCORE_DEV_ENROLLMENT_ASSET && fs.existsSync(enrollFile)) {
-    try {
-      const hash = crypto.createHash('sha256').update(fs.readFileSync(enrollFile)).digest('hex');
-      process.env.CLEARCORE_DEV_ENROLLMENT_ASSET = enrollFile;
-      process.env.CLEARCORE_DEV_ENROLLMENT_SHA256 = hash;
-      console.log(`[Clearcore Daemon] Auto-detected M3 enrollment asset: ${enrollFile}`);
-    } catch (e) {
-      console.warn('[Clearcore Daemon] Could not hash enrollment asset:', e.message);
-    }
+  const root = path.resolve(__dirname, '..', '..', '..');
+  const nativeModel = path.join(root, 'models', 'enrollment', 'enrollment.onnx');
+  if (fs.existsSync(nativeModel)) {
+    process.env.CLEARCORE_ENROLLMENT_MODEL = nativeModel;
+    console.log(`[Clearcore Daemon] Using embedded enrollment model: ${nativeModel}`);
+    return;
   }
 }
 

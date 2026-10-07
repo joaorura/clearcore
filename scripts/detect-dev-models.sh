@@ -5,6 +5,16 @@
 # Se as variáveis de ambiente já estiverem definidas, respeita os valores existentes.
 
 detect_and_export_dev_models() {
+    local current_script_dir
+    current_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local repo_root
+    repo_root="$(cd "${current_script_dir}/.." && pwd)"
+
+    # Se o modelo oficial nativo já existe no repositório, nenhuma ação externa é necessária
+    if [[ -f "${repo_root}/models/enrollment/enrollment.onnx" ]]; then
+        return 0
+    fi
+
     local candidate_dirs=()
 
     if [[ -n "${CLEARCORE_TRAIN_M3_DIR:-}" ]]; then
