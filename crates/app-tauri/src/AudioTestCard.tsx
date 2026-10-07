@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useI18n } from './i18n';
 import { formatDecimalLocale } from './voice/format';
+import { resolvePhysicalAudioDevice } from './voice/captureDevice';
 import { InputDeviceInfo } from './App';
+import { logger } from './utils/logger';
 
 interface AudioTestCardProps {
   virtualMicPresent: boolean;
@@ -197,23 +199,27 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
         }
       }
 
+      let computedDb = 28;
       if (minRawRms < Infinity && correspFilteredRms < Infinity) {
         const ratio = (minRawRms + 1e-5) / (correspFilteredRms + 1e-5);
         const db = 20 * Math.log10(ratio);
-        const roundedDb = Math.max(12, Math.min(45, Math.round(db)));
-        setNoiseReductionDb(roundedDb);
+        computedDb = Math.max(12, Math.min(45, Math.round(db)));
+        setNoiseReductionDb(computedDb);
       } else {
         setNoiseReductionDb(28); // Standard DeepFilterNet3 typical baseline
       }
 
       await ctx.close();
+      logger.info('AudioTestCard: computed noise reduction metrics', { noiseReductionDb: computedDb });
     } catch (e) {
       console.warn('Could not compute exact audio metrics:', e);
+      logger.warn('AudioTestCard: could not compute exact audio metrics, falling back to 30dB', { error: String(e) });
       setNoiseReductionDb(30);
     }
   };
 
   const startRecording = async () => {
+    logger.info('AudioTestCard: user initiated startRecording');
     stopAndResetPlayback();
     setErrorMessage(null);
     revokeUrls();
@@ -251,20 +257,12 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
       );
 
       // 2. Identify Physical Microphone (Hardware Mic / Antes - 100% puro do hardware, sem filtro)
-      const knownPhysical = inputDevices.find((d) => d.id === selectedInputId);
-      const physicalDev = audioInputs.find(
-        (d) =>
-          d.deviceId !== 'default' &&
-          d.deviceId !== 'communications' &&
-          !d.label.toLowerCase().includes('realtime') &&
-          !d.label.toLowerCase().includes('clearcore') &&
-          !d.label.toLowerCase().includes('virtual') &&
-          ((selectedInputId && d.deviceId === selectedInputId) ||
-            (knownPhysical &&
-              (d.label.toLowerCase().includes(knownPhysical.name.toLowerCase()) ||
-                knownPhysical.name.toLowerCase().includes(d.label.toLowerCase()))) ||
-            d.label.length > 0)
-      );
+      const physicalDev = resolvePhysicalAudioDevice(audioInputs, selectedInputId, inputDevices);
+      logger.info('AudioTestCard: audio devices identified', {
+        physicalDevice: physicalDev?.label || physicalDev?.deviceId || 'default',
+        virtualDevice: virtualDev?.label || virtualDev?.deviceId || 'none',
+        virtualMicPresent,
+      });
 
       const baseConstraints: MediaTrackConstraints = {
         echoCancellation: false,
@@ -281,25 +279,15 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
             video: false,
           });
         } catch (err) {
-          console.warn('Fallback to standard getUserMedia for raw stream:', err);
-        }
-      }
-      if (!streamRaw) {
-        const anyPhysical = audioInputs.find(
-          (d) =>
-            d.deviceId !== 'default' &&
-            d.deviceId !== 'communications' &&
-            !d.label.toLowerCase().includes('realtime') &&
-            !d.label.toLowerCase().includes('clearcore') &&
-            !d.label.toLowerCase().includes('virtual')
-        );
-        if (anyPhysical?.deviceId) {
+          console.warn('Exact deviceId getUserMedia failed for raw stream, trying ideal constraint:', err);
           try {
             streamRaw = await navigator.mediaDevices.getUserMedia({
-              audio: { deviceId: { exact: anyPhysical.deviceId }, ...baseConstraints },
+              audio: { deviceId: { ideal: physicalDev.deviceId }, ...baseConstraints },
               video: false,
             });
-          } catch {}
+          } catch (idealErr) {
+            console.warn('Fallback to standard getUserMedia for raw stream:', idealErr);
+          }
         }
       }
       if (!streamRaw) {
@@ -451,6 +439,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
       if (filteredRecorder) {
         filteredRecorder.start(100);
       }
+      logger.info('AudioTestCard: MediaRecorders started', { hasFilteredStream: Boolean(streamFiltered) });
       setIsRecording(true);
 
       // 10s maximum recording limit
@@ -463,6 +452,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
         }
       }, 1000);
     } catch (err) {
+      logger.error('AudioTestCard: error starting recording', { error: String(err) });
       cleanupAudioStreams();
       setIsRecording(false);
       setErrorMessage(t('testAudio.errorMicAccess', { error: String(err) }));
@@ -470,6 +460,7 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
   };
 
   const stopRecording = () => {
+    logger.info('AudioTestCard: stopRecording requested');
     if (rawRecorderRef.current && rawRecorderRef.current.state === 'recording') {
       rawRecorderRef.current.stop();
     }
@@ -507,6 +498,12 @@ export const AudioTestCard: React.FC<AudioTestCardProps> = ({
       isAbPlaying ||
       (!rawAudio.paused && !rawAudio.ended) ||
       (!filteredAudio.paused && !filteredAudio.ended);
+
+    logger.info('AudioTestCard: toggleAbPlay called', {
+      isCurrentlyPlaying,
+      activeAbTrack,
+      rawAudioTime: rawAudio.currentTime,
+    });
 
     if (isCurrentlyPlaying) {
       playSessionRef.current += 1;

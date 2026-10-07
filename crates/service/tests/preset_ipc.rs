@@ -239,3 +239,72 @@ fn click_free_preset_switching_during_audio_processing() {
         assert!(out.iter().all(|s| s.is_finite()));
     }
 }
+
+#[test]
+fn set_filter_intensity_updates_status_and_response() {
+    let mut daemon = ServiceDaemon::new();
+
+    // Default intensity is 50
+    let status_init = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status_init.status, IpcStatus::Ok);
+    assert_eq!(status_init.payload["filter_intensity"], 50);
+
+    // Set intensity to 75
+    let resp = send(
+        &mut daemon,
+        IpcCommand::SetFilterIntensity { intensity: 75 },
+    );
+    assert_eq!(resp.status, IpcStatus::Ok);
+    assert_eq!(resp.request_id, "set-filter-intensity-resp");
+    assert_eq!(resp.payload["filter_intensity"], 75);
+    assert_eq!(resp.payload["success"], true);
+
+    // Verify in GetStatus
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["filter_intensity"], 75);
+
+    // Set intensity to 100
+    let resp_100 = send(
+        &mut daemon,
+        IpcCommand::SetFilterIntensity { intensity: 100 },
+    );
+    assert_eq!(resp_100.status, IpcStatus::Ok);
+    assert_eq!(resp_100.payload["filter_intensity"], 100);
+
+    // Clamping > 100 to 100
+    let resp_clamped = send(
+        &mut daemon,
+        IpcCommand::SetFilterIntensity { intensity: 150 },
+    );
+    assert_eq!(resp_clamped.status, IpcStatus::Ok);
+    assert_eq!(resp_clamped.payload["filter_intensity"], 100);
+}
+
+#[test]
+fn set_voice_leveler_updates_status_and_response() {
+    let mut daemon = ServiceDaemon::new();
+
+    // Default voice leveler intensity is 0
+    let status_init = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status_init.status, IpcStatus::Ok);
+    assert_eq!(status_init.payload["voice_leveler"], 0);
+
+    // Set leveler intensity to 50
+    let resp = send(&mut daemon, IpcCommand::SetVoiceLeveler { intensity: 50 });
+    assert_eq!(resp.status, IpcStatus::Ok);
+    assert_eq!(resp.request_id, "set-voice-leveler-resp");
+    assert_eq!(resp.payload["voice_leveler"], 50);
+    assert_eq!(resp.payload["success"], true);
+
+    // Verify in GetStatus
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_leveler"], 50);
+    assert_eq!(status.payload["voice_leveler_intensity"], 50);
+    assert_eq!(daemon.supervisor().voice_leveler_intensity(), 50);
+
+    // Clamping > 100 to 100
+    let resp_clamped = send(&mut daemon, IpcCommand::SetVoiceLeveler { intensity: 120 });
+    assert_eq!(resp_clamped.status, IpcStatus::Ok);
+    assert_eq!(resp_clamped.payload["voice_leveler"], 100);
+    assert_eq!(daemon.supervisor().voice_leveler_intensity(), 100);
+}

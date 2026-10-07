@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useI18n } from './i18n';
 import { invokeBridge, HardwareBackendItem, HardwareBackendsResponse } from './bridge';
+import { logger } from './utils/logger';
 import {
   interpretSelectionResult,
   isBackendSelectable,
@@ -70,9 +71,14 @@ export const HardwareAcceleratorCard: React.FC = () => {
   }, []);
 
   const handleSelectBackend = async (backend: HardwareBackendItem) => {
+    logger.info('ACCELERATOR_UI', `Backend card clicked: '${backend.name}' (id: ${backend.id})`, {
+      detected: backend.hardware_detected,
+      installed: backend.runtime_installed,
+    });
     // Se o backend não for selecionável (hardware ausente ou runtime não instalada)
     if (!isBackendSelectable(backend)) {
       if (backend.hardware_detected && !backend.runtime_installed) {
+        logger.warn('ACCELERATOR_UI', `Cannot select backend with missing runtime: ${backend.id}`);
         setSelectedHelpBackend(backend);
         setActionError(t('hardwareBackend.cannotSelectMissing'));
         setTimeout(() => setActionError(null), 5000);
@@ -87,14 +93,17 @@ export const HardwareAcceleratorCard: React.FC = () => {
       );
       const outcome = interpretSelectionResult(backend.id, res);
       if (outcome.kind === 'applied') {
+        logger.info('ACCELERATOR_UI', `Backend '${backend.name}' successfully applied (activeId: ${outcome.activeId})`);
         setActiveBackendId(outcome.activeId);
         setActionFeedback(t('hardwareBackend.switchSuccess', { name: backend.name }));
         setTimeout(() => setActionFeedback(null), 4000);
       } else {
+        logger.warn('ACCELERATOR_UI', `Backend selection fell back or was rejected: ${outcome.reason}`);
         setActionError(outcome.reason);
         setTimeout(() => setActionError(null), 5000);
       }
     } catch (err) {
+      logger.error('ACCELERATOR_UI', `Error applying backend '${backend.id}': ${err}`);
       setActionError(String(err));
       setTimeout(() => setActionError(null), 5000);
     }

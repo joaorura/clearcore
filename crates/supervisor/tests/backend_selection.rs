@@ -14,26 +14,15 @@ fn supervisor_auto_selects_accelerator_when_stateful_model_present() {
     let mut supervisor = EngineSupervisor::default();
     let info = supervisor.select_backend("auto", stateful_dir.as_deref(), root.as_deref());
 
-    if realtime_noise_accelerators::TensorRtBackend::is_available() {
-        assert!(info.is_hardware_accelerated);
-        assert_eq!(info.name, "nvidia-tensorrt");
+    // Priority in Auto: NPU -> iGPU -> dGPU (TensorRT) -> CPU (Tract)
+    if info.is_hardware_accelerated {
         assert!(supervisor.is_hardware_accelerated());
+        assert!(matches!(
+            info.name.as_str(),
+            "openvino-npu" | "openvino-gpu" | "nvidia-tensorrt"
+        ));
         assert_eq!(supervisor.active_backend_name(), info.name);
-        assert_eq!(
-            supervisor.status().active_backend.as_deref(),
-            Some(info.name.as_str())
-        );
-    } else if stateful_dir.is_some() && realtime_noise_accelerators::OpenVINOBackend::is_available() {
-        assert!(info.is_hardware_accelerated);
-        assert!(info.name.starts_with("openvino"));
-        assert!(supervisor.is_hardware_accelerated());
-        assert_eq!(supervisor.active_backend_name(), info.name);
-        assert_eq!(
-            supervisor.status().active_backend.as_deref(),
-            Some(info.name.as_str())
-        );
     } else {
-        assert!(!info.is_hardware_accelerated);
         assert!(info.name.starts_with("tract"));
     }
 }
@@ -133,15 +122,95 @@ fn supervisor_selects_openvino_npu_explicitly_when_available() {
 
     let info = supervisor.select_backend("openvino-npu", stateful_dir.as_deref(), root.as_deref());
     if realtime_noise_accelerators::OpenVINOBackend::is_available() && stateful_dir.is_some() {
-        assert_eq!(info.name, "openvino-npu");
-        assert!(info.is_hardware_accelerated);
-        assert!(!info.is_fallback);
-        assert_eq!(supervisor.active_backend_name(), "openvino-npu");
-        assert!(supervisor.is_hardware_accelerated());
-        assert_eq!(supervisor.active_backend_device().as_deref(), Some("NPU"));
+        if !info.is_fallback {
+            assert_eq!(info.name, "openvino-npu");
+            assert!(info.is_hardware_accelerated);
+            assert_eq!(supervisor.active_backend_name(), "openvino-npu");
+            assert!(supervisor.is_hardware_accelerated());
+            assert_eq!(supervisor.active_backend_device().as_deref(), Some("NPU"));
 
-        let test_frame: AudioFrame = [0.1; HOP_SAMPLES];
-        let processed = supervisor.process_frame(&test_frame).expect("inference");
-        assert!(processed.iter().all(|&s| s.is_finite()));
+            let test_frame: AudioFrame = [0.1; HOP_SAMPLES];
+            let processed = supervisor.process_frame(&test_frame).expect("inference");
+            assert!(processed.iter().all(|&s| s.is_finite()));
+        } else {
+            // Graceful fallback when host driver does not support dynamic shapes on NPU
+            assert_eq!(info.name, "tract");
+            assert!(!info.is_hardware_accelerated);
+        }
     }
+}
+
+struct SlowMockBackend {
+    delay: std::time::Duration,
+    descriptor: realtime_noise_model::BackendDescriptor,
+}
+
+impl SlowMockBackend {
+    fn new(delay: std::time::Duration) -> Self {
+        Self {
+            delay,
+            descriptor: realtime_noise_model::BackendDescriptor {
+                backend: "mock",
+                backend_version: "1.0.0",
+                runtime: "mock",
+                runtime_version: "1.0.0",
+                asset_id: "test-asset".to_string(),
+                asset_sha256: "test-sha".to_string(),
+                cpu_profile: "generic",
+            },
+        }
+    }
+}
+
+impl realtime_noise_model::InferenceBackend for SlowMockBackend {
+    fn descriptor(&self) -> realtime_noise_model::BackendDescriptor {
+        self.descriptor.clone()
+    }
+
+    fn algorithmic_latency_samples(&self) -> u32 {
+        1440
+    }
+
+    fn process(
+        &mut self,
+        input: &AudioFrame,
+    ) -> Result<realtime_noise_model::ProcessedFrame, realtime_noise_model::InferenceError> {
+        if self.delay > std::time::Duration::ZERO {
+            std::thread::sleep(self.delay);
+        }
+        realtime_noise_model::ProcessedFrame::checked(*input, 1440, self.descriptor())
+    }
+
+    fn set_voice_profile(
+        &mut self,
+        profile: Option<&realtime_noise_model::VoiceProfile>,
+    ) -> Result<(), realtime_noise_model::InferenceError> {
+        realtime_noise_model::reject_unsupported_voice_profile(profile)
+    }
+
+    fn supports_voice_profile(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn runtime_qualification_rejects_backend_exceeding_deadline() {
+    use realtime_noise_supervisor::qualify_backend_runtime;
+    use std::time::Duration;
+
+    // A backend that takes 15ms per frame exceeds the 8.0ms threshold and the 10.0ms deadline
+    let mut slow_backend = SlowMockBackend::new(Duration::from_millis(15));
+    let qualified = qualify_backend_runtime(&mut slow_backend, 8.0);
+    assert!(!qualified, "Slow backend taking 15ms must be rejected by runtime qualification");
+}
+
+#[test]
+fn runtime_qualification_accepts_fast_backend_within_deadline() {
+    use realtime_noise_supervisor::qualify_backend_runtime;
+    use std::time::Duration;
+
+    // A fast backend taking 0ms per frame passes comfortably
+    let mut fast_backend = SlowMockBackend::new(Duration::ZERO);
+    let qualified = qualify_backend_runtime(&mut fast_backend, 8.0);
+    assert!(qualified, "Fast backend must pass runtime qualification");
 }

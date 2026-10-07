@@ -22,6 +22,8 @@ export interface ProfilePanelProps {
   onBuildProfile: () => void;
   /** Callback to restart guided enrollment flow. */
   onResetEnrollment?: () => void;
+  /** Callback to toggle voice isolation active/inactive in audio engine. */
+  onToggleVoiceIsolation?: (enabled: boolean) => void;
   /** Samples changed since the last build in this session: ask to rebuild (never automatic). */
   stale?: boolean;
 }
@@ -33,6 +35,7 @@ export interface ProfilePanelProps {
 export function ProfilePanel(p: ProfilePanelProps) {
   const { t, profileStatus } = p;
   const status = profileStatusLabel(profileStatus, t);
+  const hasProfile = hasServiceVoiceProfile(profileStatus) || profileStatus.is_enrolled === true;
   // Only an explicit `false` from the service; an absent field keeps today's behavior.
   const unsupported = voiceProfileUnsupported(profileStatus);
   const unsupportedText = t('voiceProfile.profileUnsupportedNotice');
@@ -68,6 +71,22 @@ export function ProfilePanel(p: ProfilePanelProps) {
               {t('voiceProfile.appliedInServiceNote')}
             </div>
           </div>
+          {p.onToggleVoiceIsolation && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="toggle-switch-wrapper" title={t('voiceProfile.isolationSwitch')}>
+                <input
+                  type="checkbox"
+                  checked={true}
+                  disabled={p.busy || p.isBuilding}
+                  onChange={(e) => p.onToggleVoiceIsolation?.(e.target.checked)}
+                />
+                <span className="toggle-switch-slider" />
+              </label>
+              <span className="toggle-status-pill pill-on">
+                {t('voiceProfile.isolationEnabled')}
+              </span>
+            </div>
+          )}
           {p.onResetEnrollment && (
             <button
               className="action-btn"
@@ -77,6 +96,49 @@ export function ProfilePanel(p: ProfilePanelProps) {
             >
               {t('voiceProfile.reEnrollBtn')}
             </button>
+          )}
+        </div>
+      )}
+      {!status.active && hasProfile && (
+        <div
+          role="status"
+          className="profile-paused-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 16px',
+            background: 'rgba(148, 163, 184, 0.1)',
+            border: '1px solid rgba(148, 163, 184, 0.25)',
+            borderRadius: 8,
+            marginBottom: 16,
+            color: 'var(--text-main)',
+          }}
+        >
+          <span style={{ fontSize: '1.4rem' }}>⏸️</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+              {t('voiceProfile.isolationSwitch')}: {t('voiceProfile.isolationDisabled')}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {t('voiceProfile.isolationDisabledFeedback')}
+            </div>
+          </div>
+          {p.onToggleVoiceIsolation && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="toggle-switch-wrapper" title={t('voiceProfile.isolationSwitch')}>
+                <input
+                  type="checkbox"
+                  checked={false}
+                  disabled={p.busy || p.isBuilding}
+                  onChange={(e) => p.onToggleVoiceIsolation?.(e.target.checked)}
+                />
+                <span className="toggle-switch-slider" />
+              </label>
+              <span className="toggle-status-pill pill-off">
+                {t('voiceProfile.isolationDisabled')}
+              </span>
+            </div>
           )}
         </div>
       )}

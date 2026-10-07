@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from './i18n';
+import { logger } from './utils/logger';
 import type { CallSuggestionTake, InputDeviceInfo } from './types';
 import { errorLabel } from './voice/enrollmentErrors';
 import { buildEnrollmentLabels, hasServiceVoiceProfile, profileSampleIds, samplesUsedInProfile, showStaleProfileNotice } from './voice/hooks/voiceProfileLogic';
@@ -79,6 +80,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   const [activeTab, setActiveTab] = useState<VoiceTabId>(() => loadVoiceTab(browserStorage()));
   const changeTab = (change: TabChange) => {
     const { tab, persist } = resolveTabChange(activeTab, change);
+    logger.info('VOICE_UI', `Voice profile tab changed to '${tab}' (reason: ${change.by})`);
     setActiveTab(tab);
     if (persist) saveVoiceTab(tab, browserStorage());
   };
@@ -245,6 +247,22 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     { id: 'profile', label: t('voiceProfile.tabProfile') },
   ].map((tab) => ({ ...tab, disabled: (isRecording || isSubmitting || profile.isBuilding) && tab.id !== activeTab }));
 
+  const isVoiceIsolationActive = profileStatus.is_voice_profile_active === true;
+  const hasProfile = hasServiceVoiceProfile(profileStatus) || profileStatus.is_enrolled === true;
+
+  const handleToggleVoiceIsolation = async (enabled: boolean) => {
+    logger.info('VoiceProfileCard: toggling voice isolation', { enabled });
+    const success = await profile.setVoiceIsolation(enabled);
+    if (success) {
+      flash(
+        enabled
+          ? t('voiceProfile.isolationEnabledFeedback')
+          : t('voiceProfile.isolationDisabledFeedback'),
+        4000,
+      );
+    }
+  };
+
   const renderPanel = (id: string) => {
     switch (parseVoiceTab(id)) {
       case 'gallery':
@@ -291,6 +309,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             feedback={feedbackFor('profile')}
             onBuildProfile={() => void handleBuildProfile('profile')}
             onResetEnrollment={handleResetEnrollment}
+            onToggleVoiceIsolation={(enabled) => void handleToggleVoiceIsolation(enabled)}
             stale={showStaleProfileNotice(profileStatus, sampleList ? profileSampleIds(samples) : null, profile.idsAtBuild)}
           />
         );
@@ -329,9 +348,30 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   return (
     <div className="card voice-profile-card">
       <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <h2 className="card-title" style={{ margin: 0 }}>{t('voiceProfile.title')}</h2>
-          <span className={`status-pill ${status.active ? 'pill-active' : 'pill-pending'}`}>{status.text}</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <h2 className="card-title" style={{ margin: 0 }}>{t('voiceProfile.title')}</h2>
+            <span className={`status-pill ${status.active ? 'pill-active' : 'pill-pending'}`}>{status.text}</span>
+          </div>
+          {hasProfile && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label
+                className="toggle-switch-wrapper"
+                title={isVoiceIsolationActive ? t('voiceProfile.isolationDisabled') : t('voiceProfile.isolationEnabled')}
+              >
+                <input
+                  type="checkbox"
+                  checked={isVoiceIsolationActive}
+                  disabled={profile.isBuilding || jobBusy}
+                  onChange={(e) => void handleToggleVoiceIsolation(e.target.checked)}
+                />
+                <span className="toggle-switch-slider" />
+              </label>
+              <span className={`toggle-status-pill ${isVoiceIsolationActive ? 'pill-on' : 'pill-off'}`}>
+                {isVoiceIsolationActive ? t('voiceProfile.isolationEnabled') : t('voiceProfile.isolationDisabled')}
+              </span>
+            </div>
+          )}
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 6, lineHeight: 1.45 }}>
           {t('voiceProfile.description')}

@@ -24,15 +24,22 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
   setStartActivatedConfig: (enabled) => ipcRenderer.invoke('set_start_activated_config', enabled),
   getStudioPreset: () => ipcRenderer.invoke('get_studio_preset'),
   setStudioPreset: (preset) => ipcRenderer.invoke('set_studio_preset', preset),
+  getVoiceLeveler: () => ipcRenderer.invoke('get_voice_leveler'),
+  setVoiceLeveler: (intensity) => ipcRenderer.invoke('set_voice_leveler', typeof intensity === 'object' ? intensity : { intensity }),
+  getFilterIntensity: () => ipcRenderer.invoke('get_filter_intensity'),
+  setFilterIntensity: (intensity) => ipcRenderer.invoke('set_filter_intensity', { intensity }),
   getVoiceProfile: () => ipcRenderer.invoke('get_voice_profile'),
   getVoiceProfileStatus: () => ipcRenderer.invoke('get_voice_profile_status'),
   setVoiceProfile: (profile) => ipcRenderer.invoke('set_voice_profile', { profile }),
+  setVoiceIsolation: (enabled) => ipcRenderer.invoke('set_voice_isolation', enabled),
   getCallTakes: () => ipcRenderer.invoke('get_call_takes'),
   listVoiceSamples: () => ipcRenderer.invoke('enrollment_list_samples'),
   listSamples: () => ipcRenderer.invoke('enrollment_list_samples'),
   approveCallTake: (id, name, take) => ipcRenderer.invoke('approve_call_take', { id, name, take }),
   dismissCallTake: (id) => ipcRenderer.invoke('dismiss_call_take', { id }),
   exportDiagnostics: () => ipcRenderer.invoke('export_diagnostics'),
+  logMessage: (level, target, message, data) =>
+    ipcRenderer.invoke('log_message', { level, target, message, data }),
   onVoiceProfileUpdate: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('voice-profile-update', handler);

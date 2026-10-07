@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_const_for_fn)]
 
-use crate::ServiceDaemon;
+use crate::{ServiceDaemon, log_error, log_info, log_warn};
 use realtime_noise_ipc::default_endpoint_path;
 use std::io;
 use std::path::PathBuf;
@@ -89,7 +89,8 @@ impl ServiceBootstrap {
     #[must_use]
     pub fn new(config: ServiceConfig) -> Self {
         let settings = crate::settings::Settings::load(&config.settings_path);
-        let mut daemon = ServiceDaemon::with_settings(settings.clone(), Some(config.settings_path.clone()));
+        let mut daemon =
+            ServiceDaemon::with_settings(settings.clone(), Some(config.settings_path.clone()));
         if let Some(ref model_dir) = config.model_dir {
             daemon.set_model_dir(model_dir.clone());
         }
@@ -133,33 +134,48 @@ impl ServiceBootstrap {
         }
 
         let listener = std::os::unix::net::UnixListener::bind(socket_path)?;
+        let active_backend = self.daemon.supervisor().active_backend_name();
+        let is_accelerated = self.daemon.supervisor().is_hardware_accelerated();
         println!(
             "Service listening on unix domain socket: {}",
             socket_path.display()
         );
         println!(
-            "ClearCore daemon active backend: {} (accelerated: {})",
-            self.daemon.supervisor().active_backend_name(),
-            self.daemon.supervisor().is_hardware_accelerated()
+            "ClearCore daemon active backend: {active_backend} (accelerated: {is_accelerated})"
+        );
+        log_info!(
+            "BOOTSTRAP",
+            "Service listening on unix socket: {} (active backend: {active_backend}, accelerated: {is_accelerated})",
+            socket_path.display()
         );
 
         for stream_res in listener.incoming() {
             if self.daemon.is_shutdown() {
+                log_info!(
+                    "BOOTSTRAP",
+                    "Shutdown flag detected in incoming loop; stopping listener"
+                );
                 break;
             }
             match stream_res {
                 Ok(stream) => {
                     if apply_client_timeouts(&stream).is_err() {
+                        log_warn!(
+                            "BOOTSTRAP",
+                            "Refused client connection: timeouts could not be set"
+                        );
                         eprintln!("Refused a client connection: its timeouts could not be set");
                         continue;
                     }
                     let reader = std::io::BufReader::new(stream.try_clone()?);
                     let writer = stream;
                     if self.daemon.serve_client(reader, writer).is_err() {
+                        log_warn!("BOOTSTRAP", "Client session ended with I/O error");
                         eprintln!("{SESSION_ERROR_MESSAGE}");
                     }
                 }
                 Err(e) => {
+                    log_error!("BOOTSTRAP", "Failed to accept incoming connection: {e}");
                     eprintln!("Failed to accept connection: {e}");
                 }
             }
@@ -168,6 +184,7 @@ impl ServiceBootstrap {
         if socket_path.exists() {
             let _ = std::fs::remove_file(socket_path);
         }
+        log_info!("BOOTSTRAP", "Service stopped cleanly; socket removed");
         println!("Service stopped cleanly.");
         Ok(())
     }
@@ -176,35 +193,50 @@ impl ServiceBootstrap {
     pub fn run(&mut self) -> io::Result<()> {
         let bind_addr = "127.0.0.1:49215";
         let listener = std::net::TcpListener::bind(bind_addr)?;
+        let active_backend = self.daemon.supervisor().active_backend_name();
+        let is_accelerated = self.daemon.supervisor().is_hardware_accelerated();
         println!("Service listening on TCP localhost: {bind_addr}");
         println!(
-            "ClearCore daemon active backend: {} (accelerated: {})",
-            self.daemon.supervisor().active_backend_name(),
-            self.daemon.supervisor().is_hardware_accelerated()
+            "ClearCore daemon active backend: {active_backend} (accelerated: {is_accelerated})"
+        );
+        log_info!(
+            "BOOTSTRAP",
+            "Service listening on TCP {bind_addr} (active backend: {active_backend}, accelerated: {is_accelerated})"
         );
 
         for stream_res in listener.incoming() {
             if self.daemon.is_shutdown() {
+                log_info!(
+                    "BOOTSTRAP",
+                    "Shutdown flag detected in incoming loop; stopping listener"
+                );
                 break;
             }
             match stream_res {
                 Ok(stream) => {
                     if apply_client_timeouts(&stream).is_err() {
+                        log_warn!(
+                            "BOOTSTRAP",
+                            "Refused client connection: timeouts could not be set"
+                        );
                         eprintln!("Refused a client connection: its timeouts could not be set");
                         continue;
                     }
                     let reader = std::io::BufReader::new(stream.try_clone()?);
                     let writer = stream;
                     if self.daemon.serve_client(reader, writer).is_err() {
+                        log_warn!("BOOTSTRAP", "Client session ended with I/O error");
                         eprintln!("{SESSION_ERROR_MESSAGE}");
                     }
                 }
                 Err(e) => {
+                    log_error!("BOOTSTRAP", "Failed to accept incoming connection: {e}");
                     eprintln!("Failed to accept connection: {e}");
                 }
             }
         }
 
+        log_info!("BOOTSTRAP", "Service stopped cleanly.");
         println!("Service stopped cleanly.");
         Ok(())
     }

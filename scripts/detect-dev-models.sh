@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/detect-dev-models.sh
-# Detecta e configura automaticamente os modelos treinados no M3
-# para cadastro de voz (voice-enrollment) e isolamento acústico (pDFNet3 com FiLM).
+# Detecta e configura automaticamente o modelo treinado no M3
+# para cadastro de voz (voice-enrollment).
 # Se as variáveis de ambiente já estiverem definidas, respeita os valores existentes.
 
 detect_and_export_dev_models() {
@@ -42,18 +42,6 @@ detect_and_export_dev_models() {
             export CLEARCORE_DEV_ENROLLMENT_ASSET="${enroll_file}"
             export CLEARCORE_DEV_ENROLLMENT_SHA256="${enroll_sha}"
             echo "🧪 [Auto-detect] Modelo de cadastro de voz detectado: ${enroll_file}"
-        fi
-    fi
-
-    # 2. Modelo de isolamento pDFNet3 com FiLM
-    if [[ -z "${CLEARCORE_DEV_PDFNET3_ASSET:-}" || -z "${CLEARCORE_DEV_PDFNET3_SHA256:-}" ]]; then
-        local pdfnet3_file="${m3_dir}/pdfnet3-release-asset-v1.tar.gz"
-        if [[ -f "${pdfnet3_file}" ]]; then
-            local pdfnet3_sha
-            pdfnet3_sha="$(sha256sum "${pdfnet3_file}" | cut -d' ' -f1)"
-            export CLEARCORE_DEV_PDFNET3_ASSET="${pdfnet3_file}"
-            export CLEARCORE_DEV_PDFNET3_SHA256="${pdfnet3_sha}"
-            echo "🧪 [Auto-detect] Modelo de isolamento pDFNet3 detectado: ${pdfnet3_file}"
         fi
     fi
 }

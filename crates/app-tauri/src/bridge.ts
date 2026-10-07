@@ -54,15 +54,21 @@ export interface ClearcoreApi {
   setStartActivatedConfig?: (enabled: boolean) => Promise<boolean>;
   getStudioPreset?: () => Promise<StudioPreset>;
   setStudioPreset?: (preset: StudioPreset) => Promise<{ success: boolean; preset: StudioPreset }>;
+  getVoiceLeveler?: () => Promise<number>;
+  setVoiceLeveler?: (intensity: number) => Promise<{ success: boolean; intensity: number; voice_leveler?: number }>;
+  getFilterIntensity?: () => Promise<number>;
+  setFilterIntensity?: (intensity: number) => Promise<{ success: boolean; filter_intensity: number }>;
   getVoiceProfile?: () => Promise<VoiceProfileStatus & { success: boolean; profile: VoiceProfileStatus }>;
   getVoiceProfileStatus?: () => Promise<VoiceProfileStatus>;
   setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean; profile?: VoiceProfileStatus }>;
+  setVoiceIsolation?: (enabled: boolean) => Promise<{ success: boolean; voice_isolation_enabled?: boolean; profile?: VoiceProfileStatus }>;
   getCallTakes?: () => Promise<{ success: boolean; takes: CallSuggestionTake[] } | CallSuggestionTake[]>;
   listVoiceSamples?: () => Promise<unknown>;
   listSamples?: () => Promise<unknown>;
   approveCallTake?: (id: string, name?: string, take?: unknown) => Promise<{ success: boolean; id: string; sample?: VoiceSample }>;
   dismissCallTake?: (id: string) => Promise<{ success: boolean; id: string; takes?: CallSuggestionTake[] }>;
   exportDiagnostics?: () => Promise<string>;
+  logMessage?: (level: string, target: string, message: string, data?: unknown) => Promise<{ ok: boolean }>;
   onVoiceProfileUpdate?: (cb: (profile: VoiceProfileStatus) => void) => () => void;
   onServiceStateUpdate?: (cb: (data: { isRunning: boolean }) => void) => () => void;
   onStartActivatedConfigUpdate?: (cb: (enabled: boolean) => void) => () => void;
@@ -78,6 +84,30 @@ declare global {
     __TAURI_INTERNALS__?: {
       invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
     };
+  }
+}
+
+const memStorage: Record<string, string> = {};
+function storageGet(key: string): string | null {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const val = localStorage.getItem(key);
+      if (val !== null) return val;
+    } catch {
+      // fallback
+    }
+  }
+  return memStorage[key] ?? null;
+}
+
+function storageSet(key: string, val: string): void {
+  memStorage[key] = val;
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(key, val);
+    } catch {
+      // fallback
+    }
   }
 }
 
@@ -139,6 +169,28 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
         return (await api.setStudioPreset(args?.preset as StudioPreset)) as unknown as T;
       }
     }
+    if (cmd === 'get_voice_leveler') {
+      if (typeof api.getVoiceLeveler === 'function') {
+        return (await api.getVoiceLeveler()) as unknown as T;
+      }
+    }
+    if (cmd === 'set_voice_leveler') {
+      if (typeof api.setVoiceLeveler === 'function') {
+        const intensity = typeof args?.intensity === 'number' ? args.intensity : (typeof args === 'number' ? args : 0);
+        return (await api.setVoiceLeveler(intensity)) as unknown as T;
+      }
+    }
+    if (cmd === 'get_filter_intensity') {
+      if (typeof api.getFilterIntensity === 'function') {
+        return (await api.getFilterIntensity()) as unknown as T;
+      }
+    }
+    if (cmd === 'set_filter_intensity') {
+      if (typeof api.setFilterIntensity === 'function') {
+        const intensity = typeof args?.intensity === 'number' ? args.intensity : (typeof args === 'number' ? args : 50);
+        return (await api.setFilterIntensity(intensity)) as unknown as T;
+      }
+    }
     if (cmd === 'get_voice_profile' || cmd === 'get_voice_profile_status') {
       if (typeof api.getVoiceProfile === 'function') {
         return (await api.getVoiceProfile()) as unknown as T;
@@ -150,6 +202,12 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     if (cmd === 'set_voice_profile') {
       if (typeof api.setVoiceProfile === 'function') {
         return (await api.setVoiceProfile(args?.profile ?? args)) as unknown as T;
+      }
+    }
+    if (cmd === 'set_voice_isolation') {
+      if (typeof api.setVoiceIsolation === 'function') {
+        const enabled = typeof args?.enabled === 'boolean' ? args.enabled : Boolean(args);
+        return (await api.setVoiceIsolation(enabled)) as unknown as T;
       }
     }
     if (cmd === 'get_call_takes') {
@@ -180,6 +238,14 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
         return (await api.exportDiagnostics()) as unknown as T;
       }
     }
+    if (cmd === 'log_message') {
+      if (typeof api.logMessage === 'function') {
+        const level = String(args?.level || 'INFO');
+        const target = String(args?.target || 'FRONTEND');
+        const message = String(args?.message || '');
+        return (await api.logMessage(level, target, message, args?.data)) as unknown as T;
+      }
+    }
   }
   if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
     if (typeof window.__TAURI_INTERNALS__.invoke === 'function') {
@@ -191,42 +257,54 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
 
   // Graceful browser / test fallbacks
   if (cmd === 'get_start_activated_config') {
-    const val = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_start_activated') : null;
+    const val = storageGet('clearcore_start_activated');
     return (val === null ? true : val === 'true') as unknown as T;
   }
   if (cmd === 'set_start_activated_config') {
     const enabled = Boolean(args?.enabled);
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('clearcore_start_activated', String(enabled));
-    }
+    storageSet('clearcore_start_activated', String(enabled));
     return enabled as unknown as T;
   }
   if (cmd === 'get_service_running_state') {
-    const state = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_service_running') : null;
+    const state = storageGet('clearcore_service_running');
     return { isRunning: state === null ? true : state === 'true' } as unknown as T;
   }
   if (cmd === 'start_audio_service') {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('clearcore_service_running', 'true');
-    }
+    storageSet('clearcore_service_running', 'true');
     return { success: true, isRunning: true, virtualMic: { present: true, node_id: 1, node_name: 'realtime-noise-source' } } as unknown as T;
   }
   if (cmd === 'stop_audio_service') {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('clearcore_service_running', 'false');
-    }
+    storageSet('clearcore_service_running', 'false');
     return { success: true, isRunning: false, virtualMic: { present: false, node_id: null, node_name: 'realtime-noise-source' } } as unknown as T;
   }
   if (cmd === 'get_studio_preset') {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_studio_preset') : null;
+    const saved = storageGet('clearcore_studio_preset');
     return (saved || 'Natural') as unknown as T;
   }
   if (cmd === 'set_studio_preset') {
     const preset = String(args?.preset ?? 'Natural');
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('clearcore_studio_preset', preset);
-    }
+    storageSet('clearcore_studio_preset', preset);
     return { success: true, preset } as unknown as T;
+  }
+  if (cmd === 'get_voice_leveler') {
+    const saved = storageGet('clearcore_voice_leveler');
+    return (saved ? Number(saved) : 0) as unknown as T;
+  }
+  if (cmd === 'set_voice_leveler') {
+    const raw = args?.intensity ?? args;
+    const intensity = Math.max(0, Math.min(100, Math.round(Number(raw ?? 0))));
+    storageSet('clearcore_voice_leveler', String(intensity));
+    return { success: true, intensity, voice_leveler: intensity } as unknown as T;
+  }
+  if (cmd === 'get_filter_intensity') {
+    const saved = storageGet('clearcore_filter_intensity');
+    return (saved ? Number(saved) : 50) as unknown as T;
+  }
+  if (cmd === 'set_filter_intensity') {
+    const raw = args?.intensity ?? args;
+    const intensity = Math.max(0, Math.min(100, Math.round(Number(raw ?? 50))));
+    storageSet('clearcore_filter_intensity', String(intensity));
+    return { success: true, filter_intensity: intensity } as unknown as T;
   }
   // No service in a plain browser: the voice profile is neutral and nothing is kept locally
   // (samples, takes and the enrolled flag live only in the service).
@@ -248,4 +326,20 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
   }
 
   return {} as T;
+}
+
+export async function getFilterIntensity(): Promise<number> {
+  return await invokeBridge<number>('get_filter_intensity');
+}
+
+export async function setFilterIntensity(intensity: number): Promise<{ success: boolean; filter_intensity: number }> {
+  return await invokeBridge<{ success: boolean; filter_intensity: number }>('set_filter_intensity', { intensity });
+}
+
+export async function getVoiceLeveler(): Promise<number> {
+  return await invokeBridge<number>('get_voice_leveler');
+}
+
+export async function setVoiceLeveler(intensity: number): Promise<{ success: boolean; intensity: number; voice_leveler?: number }> {
+  return await invokeBridge<{ success: boolean; intensity: number; voice_leveler?: number }>('set_voice_leveler', { intensity });
 }

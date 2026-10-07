@@ -734,3 +734,42 @@ fn accelerator_base_applies_stored_voice_profile_via_bridge() {
     assert_eq!(status.payload["voice_profile_supported"], true);
     assert_eq!(status.payload["voice_profile_error"], json!(null));
 }
+
+#[test]
+fn set_voice_isolation_temporarily_disables_without_deleting() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _) = daemon_with(&dir, true);
+    set_profile(&mut daemon, &profile_json("prof-1"));
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["stored_voice_profile_id"], "prof-1");
+    assert_eq!(status.payload["active_voice_profile_id"], "prof-1");
+    assert_eq!(status.payload["is_voice_profile_active"], true);
+
+    // Disable voice isolation
+    let resp = send(&mut daemon, IpcCommand::SetVoiceIsolation { enabled: false });
+    assert_eq!(resp.payload["voice_isolation_enabled"], false);
+    assert_eq!(resp.payload["is_voice_profile_active"], false);
+
+    // Verify GetStatus reflects deactivated voice profile while keeping stored profile
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["stored_voice_profile_id"], "prof-1");
+    assert_eq!(status.payload["has_voice_profile"], true);
+    assert_eq!(status.payload["active_voice_profile_id"], json!(null));
+    assert_eq!(status.payload["is_voice_profile_active"], false);
+    assert_eq!(status.payload["voice_isolation_enabled"], false);
+
+    // Re-enable voice isolation
+    let resp = send(&mut daemon, IpcCommand::SetVoiceIsolation { enabled: true });
+    assert_eq!(resp.payload["voice_isolation_enabled"], true);
+    assert_eq!(resp.payload["is_voice_profile_active"], true);
+
+    // Verify GetStatus reflects active profile again
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["stored_voice_profile_id"], "prof-1");
+    assert_eq!(status.payload["active_voice_profile_id"], "prof-1");
+    assert_eq!(status.payload["is_voice_profile_active"], true);
+    assert_eq!(status.payload["voice_isolation_enabled"], true);
+}
+

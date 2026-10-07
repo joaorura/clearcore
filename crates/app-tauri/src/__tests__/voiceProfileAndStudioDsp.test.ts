@@ -263,4 +263,31 @@ describe('Voice Profile Microphone Capture & Audio Anti-Loopback Specs', () => {
       expect(gone in card, gone).toBe(false);
     }
   });
+
+  it('provides complete translations for Voice Isolation switch in pt-BR and en-US', () => {
+    expect(ptBR.voiceProfile.isolationSwitch).toBe('Isolamento de Voz');
+    expect(ptBR.voiceProfile.isolationEnabled).toBe('Ativado');
+    expect(ptBR.voiceProfile.isolationDisabled).toBe('Desativado');
+    expect(ptBR.voiceProfile.isolationEnabledFeedback).toContain('ativado');
+    expect(ptBR.voiceProfile.isolationDisabledFeedback).toContain('pausado');
+
+    expect(enUS.voiceProfile.isolationSwitch).toBe('Voice Isolation');
+    expect(enUS.voiceProfile.isolationEnabled).toBe('Enabled');
+    expect(enUS.voiceProfile.isolationDisabled).toBe('Disabled');
+    expect(enUS.voiceProfile.isolationEnabledFeedback).toContain('enabled');
+    expect(enUS.voiceProfile.isolationDisabledFeedback).toContain('paused');
+  });
+
+  it('provides complete translations for Neural EQ toggle in pt-BR and en-US', () => {
+    expect(ptBR.studioDsp.neuralEqSwitch).toBe('Equalizador Neural');
+    expect(ptBR.studioDsp.neuralEqEnabled).toBe('Ativado');
+    expect(ptBR.studioDsp.neuralEqDisabled).toBe('Bypass (Neutro)');
+    expect(ptBR.studioDsp.neuralEqBypassedDesc).toContain('bypass');
+
+    expect(enUS.studioDsp.neuralEqSwitch).toBe('Neural Equalizer');
+    expect(enUS.studioDsp.neuralEqEnabled).toBe('Enabled');
+    expect(enUS.studioDsp.neuralEqDisabled).toBe('Bypass (Neutral)');
+    expect(enUS.studioDsp.neuralEqBypassedDesc).toContain('bypassed');
+  });
 });
+

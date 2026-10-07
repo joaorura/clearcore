@@ -7,6 +7,9 @@ export interface EngineStatus {
   mode: DenoiseMode;
   crash_count_15m: number;
   total_crashes: number;
+  filter_intensity?: number;
+  voice_leveler?: number;
+  voice_leveler_intensity?: number;
 }
 
 export interface VirtualMicStatus {
@@ -85,5 +88,7 @@ export interface VoiceProfileStatus {
   dev_base_model?: 'pdfnet3-dev' | 'base';
   /** Service-reported fixed code (`DEV_MODEL_*`) when the configured development model is not in use. */
   dev_base_model_error?: string | null;
+  /** Service-reported: whether voice isolation is enabled in settings. */
+  voice_isolation_enabled?: boolean;
 }
 

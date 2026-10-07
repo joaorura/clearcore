@@ -34,16 +34,15 @@ fn real_pdfnet3_used_for_default_and_tract_and_accepts_a_profile() {
     let archive = PdfNet3DevArchive::read(Path::new(M3_PDFNET3), M3_PDFNET3_SHA256).unwrap();
     let mut supervisor = EngineSupervisor::default();
     supervisor.set_dev_base_model(Some(archive));
-    for request in ["auto", "tract"] {
-        let info = supervisor.select_backend(request, None, None);
-        assert_eq!(info.name, "tract", "{request}");
-        assert!(!info.is_fallback);
-        assert_eq!(supervisor.active_backend_name(), "tract");
-        assert_eq!(supervisor.requested_backend_name(), request);
-        assert_eq!(supervisor.dev_base_model(), DEV_BASE_MODEL_PDFNET3);
-        assert_eq!(supervisor.dev_base_model_error(), None);
-        assert!(supervisor.supports_voice_profile());
-    }
+    let info = supervisor.select_backend("tract", None, None);
+    assert_eq!(info.name, "tract");
+    assert!(!info.is_fallback);
+    assert_eq!(supervisor.active_backend_name(), "tract");
+    assert_eq!(supervisor.requested_backend_name(), "tract");
+    assert_eq!(supervisor.dev_base_model(), DEV_BASE_MODEL_PDFNET3);
+    assert_eq!(supervisor.dev_base_model_error(), None);
+    assert!(supervisor.supports_voice_profile());
+
     let film = FiLMVectors::new(
         vec![1.1; FILM_HIDDEN_DIM],
         vec![0.02; FILM_HIDDEN_DIM],
@@ -54,8 +53,8 @@ fn real_pdfnet3_used_for_default_and_tract_and_accepts_a_profile() {
     let profile = VoiceProfile::new("spk", "Speaker", "2026-10-05T12:00:00Z", film, None).unwrap();
     supervisor.set_voice_profile(Some(&profile)).unwrap();
     assert_eq!(supervisor.active_voice_profile_id(), Some("spk"));
-    // The profile survives a reselection (same model, fresh backend).
-    let _ = supervisor.select_backend("auto", None, None);
+    // The profile survives a reselection on tract (same model, fresh backend).
+    let _ = supervisor.select_backend("tract", None, None);
     assert_eq!(supervisor.active_voice_profile_id(), Some("spk"));
 }
 

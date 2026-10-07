@@ -366,32 +366,32 @@ impl CalibrationReport {
 
 /// Priority score for candidate backends in AUTO selection.
 /// Higher score indicates higher selection priority:
-/// - Dedicated GPU:
-///   * Proprietary / Vendor-Specific GPU runtimes: `TensorRT` score 100, `CUDA` score 95
-///   * General / Universal GPU runtimes: `DirectML` on dGPU score 90, `Vulkan` score 85
 /// - NPU: Intel NPU via `OpenVINO` score 80; AMD NPU via Ryzen AI / XDNA score 80; Apple Neural Engine via `CoreML` 75
 /// - Integrated GPU: Intel Arc / iGPU via `OpenVINO` GPU score 70; AMD iGPU via Ryzen AI score 70; DirectML on iGPU score 70
-/// - CPU: Intel CPU prefers `OpenVINO` CPU AMX/VNNI score 60; Tract pure Rust CPU baseline score 50
+/// - Dedicated GPU:
+///   * Proprietary / Vendor-Specific GPU runtimes: `TensorRT` score 60, `CUDA` score 58
+///   * General / Universal GPU runtimes: `DirectML` on dGPU score 55, `Vulkan` score 52
+/// - CPU: Intel CPU prefers `OpenVINO` CPU AMX/VNNI score 40; Tract pure Rust CPU baseline score 30
 #[must_use]
 pub fn backend_priority_score(backend_name: &str) -> u32 {
     match backend_name.to_ascii_lowercase().as_str() {
-        // Tier 1: Dedicated GPU - Proprietary / Vendor-Specific runtimes (NVIDIA TensorRT)
-        "tensorrt" | "cuda" | "nvidia" => 100,
-        // Tier 1: Dedicated GPU - General / Universal runtimes (DirectML below proprietary runtimes, Vulkan)
-        "directml" | "directml-dgpu" | "dx12" => 90,
-        "vulkan" | "vulkan-dgpu" => 85,
-        // Tier 2: NPU (Intel NPU via OpenVINO, AMD NPU via Ryzen AI / XDNA)
+        // Priority 1: NPU (Intel NPU via OpenVINO, AMD NPU via Ryzen AI / XDNA)
         "openvino-npu" | "intel-npu" | "npu" | "ryzenai-npu" | "ryzen-ai" | "ryzenai"
         | "amd-npu" | "vitisai" | "xdna" => 80,
-        // Tier 2: Apple Neural Engine via CoreML
+        // Priority 1 (Apple): Apple Neural Engine via CoreML
         "coreml" | "ane" => 75,
-        // Tier 3: Integrated GPU (Intel Arc / iGPU via OpenVINO GPU, AMD iGPU via Ryzen AI, DirectML iGPU)
+        // Priority 2: Integrated GPU (Intel Arc / iGPU via OpenVINO GPU, AMD iGPU via Ryzen AI, DirectML iGPU)
         "openvino-gpu" | "intel-gpu" | "arc" | "ryzenai-gpu" | "ryzen-ai-gpu" | "amd-igpu"
         | "rdna-igpu" | "directml-igpu" => 70,
         "openvino" => 65,
-        // Tier 4: CPU - Intel CPU prefers OpenVINO (score 60) over ONNX / Tract baseline (score 50)
-        "openvino-cpu" | "intel-cpu" => 60,
-        "tract" | "cpu" | "onnx" => 50,
+        // Priority 3: Dedicated GPU - Proprietary / Vendor-Specific runtimes (NVIDIA TensorRT)
+        "tensorrt" | "cuda" | "nvidia" => 60,
+        // Priority 3: Dedicated GPU - General / Universal runtimes (DirectML on dGPU, Vulkan)
+        "directml" | "directml-dgpu" | "dx12" => 55,
+        "vulkan" | "vulkan-dgpu" => 52,
+        // Priority 4: CPU - Intel CPU prefers OpenVINO (score 40) over ONNX / Tract baseline (score 30)
+        "openvino-cpu" | "intel-cpu" => 40,
+        "tract" | "cpu" | "onnx" => 30,
         _ => 10,
     }
 }
@@ -729,14 +729,14 @@ mod tests {
     use super::backend_priority_score;
 
     #[test]
-    fn backend_priority_order_is_tensorrt_directml_vulkan_npu_igpu_tract() {
+    fn backend_priority_order_is_npu_igpu_dgpu_cpu() {
         let ordered = [
-            ("tensorrt", 100),
-            ("directml", 90),
-            ("vulkan", 85),
             ("openvino-npu", 80),
             ("openvino-gpu", 70),
-            ("tract", 50),
+            ("tensorrt", 60),
+            ("directml", 55),
+            ("vulkan", 52),
+            ("tract", 30),
         ];
         for (name, score) in ordered {
             assert_eq!(backend_priority_score(name), score, "{name}");
@@ -751,6 +751,6 @@ mod tests {
         }
         // Unknown names rank below the CPU baseline and the lookup is case-insensitive.
         assert!(backend_priority_score("unknown") < backend_priority_score("tract"));
-        assert_eq!(backend_priority_score("TensorRT"), 100);
+        assert_eq!(backend_priority_score("TensorRT"), 60);
     }
 }
