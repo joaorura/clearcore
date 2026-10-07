@@ -21,19 +21,8 @@ fi
 export CLEARCORE_DAEMON_BIN="${SCRIPT_DIR}/target/release/realtime-noise-service"
 export CLEARCORE_DEV_OWN_DAEMON=1
 
-# Auto-detecta modelos treinados no M3 se disponíveis localmente
-if [[ -f "${SCRIPT_DIR}/scripts/detect-dev-models.sh" ]]; then
-    # shellcheck source=scripts/detect-dev-models.sh
-    source "${SCRIPT_DIR}/scripts/detect-dev-models.sh"
-fi
-
-# Modelo de cadastro de voz nativo do Clearcore.
-if [[ -f "models/enrollment/enrollment.onnx" ]]; then
-    echo "🎙️  Modelo de cadastro de voz nativo ativo: models/enrollment/enrollment.onnx"
-elif [[ -n "${CLEARCORE_DEV_ENROLLMENT_ASSET:-}" && -n "${CLEARCORE_DEV_ENROLLMENT_SHA256:-}" ]]; then
-    export CLEARCORE_DEV_ENROLLMENT_ASSET CLEARCORE_DEV_ENROLLMENT_SHA256
-    echo "🧪 Modelo de cadastro (dev override): ${CLEARCORE_DEV_ENROLLMENT_ASSET}"
-fi
+# Modelo de cadastro de voz e modelos de inferência nativos embutidos no Clearcore.
+echo "🎙️  Utilizando modelos nativos embutidos: models/enrollment/ e models/stateful/"
 
 
 # Core dump desligado neste shell e em tudo que ele inicia (Electron e o daemon, que
