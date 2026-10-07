@@ -1,5 +1,5 @@
 # the name by which the project can be referenced within Serena/when chatting with the LLM.
-project_name: "hippocamp"
+project_name: "clearcore"
 
 # list of language servers to start when using the LSP backend; choose from:
 #   ada                    al                     angular                ansible                bash
@@ -37,7 +37,10 @@ project_name: "hippocamp"
 # When using multiple language servers, the first language server that supports a given file will be used for that file.
 # The first language server is the default language and the respective language server will be used as a fallback.
 # Note that when using the JetBrains backend, language servers are not used and this list is correspondingly ignored.
-language_servers: []
+language_servers:
+- rust
+- python
+- typescript
 
 # the encoding used by text files in the project
 # For a list of possible encodings, see https://docs.python.org/3.11/library/codecs.html#standard-encodings
@@ -115,7 +118,8 @@ ls_additional_workspace_folders: []
 #     - "**/bin/**"
 #     - "**/obj/**"
 # Note: global ignored_paths from serena_config.yml are also applied additively.
-ignored_paths: []
+ignored_paths:
+- ".codegraph/**"
 
 # whether the project is in read-only mode
 # If set to true, all editing tools will be disabled and attempts to use them will result in an error
