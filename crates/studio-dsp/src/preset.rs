@@ -36,18 +36,33 @@ impl Preset {
     }
 }
 
-/// Thread-safe preset selector: the control thread writes, the audio thread reads once per hop.
+/// Thread-safe preset selector and voice leveler control:
+/// the control thread writes, the audio thread reads once per hop.
 #[derive(Debug)]
 pub struct StudioControl {
     preset: AtomicU8,
+    leveler_intensity: AtomicU8,
 }
 
 impl StudioControl {
-    /// Creates a control initialised to `preset`.
+    /// Creates a control initialised to `preset` with default leveler intensity (0 for Off, 50 otherwise).
     #[must_use]
     pub const fn new(preset: Preset) -> Self {
         Self {
             preset: AtomicU8::new(preset.as_u8()),
+            leveler_intensity: AtomicU8::new(match preset {
+                Preset::Off => 0,
+                Preset::Natural | Preset::Podcast | Preset::Broadcast => 50,
+            }),
+        }
+    }
+
+    /// Creates a control initialised with specific preset and leveler intensity.
+    #[must_use]
+    pub const fn with_leveler(preset: Preset, leveler_intensity: u8) -> Self {
+        Self {
+            preset: AtomicU8::new(preset.as_u8()),
+            leveler_intensity: AtomicU8::new(leveler_intensity),
         }
     }
 
@@ -60,6 +75,18 @@ impl StudioControl {
     #[must_use]
     pub fn preset(&self) -> Preset {
         Preset::from_u8(self.preset.load(Ordering::Acquire)).unwrap_or(Preset::Off)
+    }
+
+    /// Sets the voice auto-leveler intensity (0–100).
+    pub fn set_leveler_intensity(&self, intensity: u8) {
+        self.leveler_intensity
+            .store(intensity.min(100), Ordering::Release);
+    }
+
+    /// Returns the voice auto-leveler intensity (0–100).
+    #[must_use]
+    pub fn leveler_intensity(&self) -> u8 {
+        self.leveler_intensity.load(Ordering::Acquire).min(100)
     }
 }
 
@@ -97,7 +124,19 @@ mod tests {
     fn control_stores_and_returns_the_selected_preset() {
         let control = StudioControl::new(Preset::Off);
         assert_eq!(control.preset(), Preset::Off);
+        assert_eq!(control.leveler_intensity(), 0);
         control.set_preset(Preset::Broadcast);
         assert_eq!(control.preset(), Preset::Broadcast);
+    }
+
+    #[test]
+    fn control_stores_and_updates_leveler_intensity() {
+        let control = StudioControl::with_leveler(Preset::Podcast, 75);
+        assert_eq!(control.preset(), Preset::Podcast);
+        assert_eq!(control.leveler_intensity(), 75);
+        control.set_leveler_intensity(100);
+        assert_eq!(control.leveler_intensity(), 100);
+        control.set_leveler_intensity(0);
+        assert_eq!(control.leveler_intensity(), 0);
     }
 }

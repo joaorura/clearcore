@@ -45,6 +45,7 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     voice_profile_supported: typeof src.voice_profile_supported === 'boolean' ? src.voice_profile_supported : undefined,
     dev_base_model: devBaseModel(src.dev_base_model),
     dev_base_model_error: devBaseModelError(src.dev_base_model_error),
+    voice_isolation_enabled: typeof src.voice_isolation_enabled === 'boolean' ? src.voice_isolation_enabled : undefined,
   };
 }
 
@@ -89,6 +90,7 @@ const SERVICE_STATUS_KEYS_IN_RESPONSE = [
   'active_voice_profile_id',
   'voice_samples_count',
   'neural_eq_calibrated',
+  'voice_isolation_enabled',
 ] as const;
 
 export function mergeVoiceProfileStatus(
@@ -117,6 +119,7 @@ export function mergeVoiceProfileStatus(
     voice_profile_supported: prof.voice_profile_supported,
     dev_base_model: prof.dev_base_model,
     dev_base_model_error: prof.dev_base_model_error,
+    voice_isolation_enabled: prof.voice_isolation_enabled,
     active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
   };
 }
@@ -133,12 +136,13 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'voice_samples_count',
   'dev_base_model',
   'dev_base_model_error',
+  'voice_isolation_enabled',
 ] as const;
 
 /** Service-owned fields: the renderer never resends nor inherits them. */
 export function stripServiceVoiceProfileKeys(status: VoiceProfileStatus): VoiceProfileStatus {
   const out: VoiceProfileStatus = { ...status };
-  for (const key of SERVICE_VOICE_PROFILE_KEYS) delete out[key];
+  for (const key of SERVICE_VOICE_PROFILE_KEYS) delete (out as unknown as Record<string, unknown>)[key];
   return out;
 }
 

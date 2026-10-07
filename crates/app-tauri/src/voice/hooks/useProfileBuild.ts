@@ -25,6 +25,8 @@ export interface ProfileBuild {
    * `origin` is the tab whose button was clicked: progress and errors show there (and on Profile).
    */
   buildProfile: (origin: Extract<JobOrigin, 'enroll' | 'profile'>) => Promise<boolean>;
+  /** Activates or deactivates the voice profile in the audio engine without deleting it. */
+  setVoiceIsolation: (enabled: boolean) => Promise<boolean>;
   /** Ids of the samples the last successful build in this session used (null: none yet). */
   idsAtBuild: string[] | null;
   /** True while the neural profile is actively being built and applied. */
@@ -152,5 +154,20 @@ export function useProfileBuild(opts: {
     return done;
   };
 
-  return { profileStatus, loadInitialStatus, buildProfile: runBuild, idsAtBuild, isBuilding };
+  const setVoiceIsolation = async (enabled: boolean): Promise<boolean> => {
+    try {
+      await invokeBridge('set_voice_isolation', { enabled });
+      const res = await invokeBridge<unknown>('get_voice_profile');
+      const updated = normalizeVoiceProfileStatus(res);
+      setProfileStatus((prev) => mergeVoiceProfileStatus(prev, res, prev.active_samples_count));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('clearcore_profile_updated', { detail: updated }));
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  return { profileStatus, loadInitialStatus, buildProfile: runBuild, setVoiceIsolation, idsAtBuild, isBuilding };
 }

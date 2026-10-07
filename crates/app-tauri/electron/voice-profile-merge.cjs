@@ -17,6 +17,7 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'dev_base_model',
   // GetStatus: fixed DEV_MODEL_* code or null (free text, e.g. a path, is dropped).
   'dev_base_model_error',
+  'voice_isolation_enabled',
 ];
 
 const DEV_BASE_MODELS = new Set(['pdfnet3-dev', 'base']);
@@ -25,6 +26,7 @@ const DEV_BASE_MODEL_ERROR_RE = /^DEV_MODEL_[A-Z_]{1,48}$/;
 // Service fields accepted only as real booleans; anything else is dropped (= unknown).
 const BOOLEAN_SERVICE_KEYS = new Set([
   'is_voice_profile_active', 'has_voice_profile', 'voice_profile_supported', 'neural_eq_calibrated',
+  'voice_isolation_enabled',
 ]);
 
 function isObject(v) {

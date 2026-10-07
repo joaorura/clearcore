@@ -691,25 +691,35 @@ impl ServiceDaemon {
             let mut pcm = pcm;
             match ingest_sample(denoiser.as_mut(), &mut pcm.0) {
                 Ok(result) => {
-                    debug_voice_file_log(&format!("ingest_sample SUCCESS: speech_secs={}, peak={}, rms_dbfs={}", result.speech_seconds, result.peak, result.rms_dbfs));
+                    debug_voice_file_log(&format!(
+                        "ingest_sample SUCCESS: speech_secs={}, peak={}, rms_dbfs={}",
+                        result.speech_seconds, result.peak, result.rms_dbfs
+                    ));
                     Ok(IngestOutcome { kind, result })
                 }
                 Err(e) => {
-                    debug_voice_file_log(&format!("ingest_sample FAILED: error={e:?} (code={})", e.code()));
+                    debug_voice_file_log(&format!(
+                        "ingest_sample FAILED: error={e:?} (code={})",
+                        e.code()
+                    ));
                     Err(failure(e.code(), "denoise"))
                 }
             }
         });
         match spawned {
             Ok(job_id) => {
-                debug_voice_file_log(&format!("spawn_ingest: spawned job_id={SAMPLE_JOB_PREFIX}{job_id}"));
+                debug_voice_file_log(&format!(
+                    "spawn_ingest: spawned job_id={SAMPLE_JOB_PREFIX}{job_id}"
+                ));
                 IpcResponse::success(
                     request_id,
                     json!({"success": true, "job_id": format!("{SAMPLE_JOB_PREFIX}{job_id}")}),
                 )
             }
             Err(f) => {
-                debug_voice_file_log(&format!("spawn_ingest: FAILED spawning job (busy or error)"));
+                debug_voice_file_log(&format!(
+                    "spawn_ingest: FAILED spawning job (busy or error)"
+                ));
                 busy_or_failed(request_id, f)
             }
         }
@@ -725,7 +735,10 @@ impl ServiceDaemon {
         device_id_hash: &str,
     ) -> IpcResponse {
         const REQUEST_ID: &str = "add-voice-sample-resp";
-        debug_voice_file_log(&format!("add_voice_sample received: name={name}, rate={sample_rate}, label={device_label}, hash={device_id_hash}, b64_len={}", pcm_f32_le_b64.len()));
+        debug_voice_file_log(&format!(
+            "add_voice_sample received: name={name}, rate={sample_rate}, label={device_label}, hash={device_id_hash}, b64_len={}",
+            pcm_f32_le_b64.len()
+        ));
         if !valid_metadata(name, false)
             || !valid_metadata(device_label, true)
             || !valid_metadata(device_id_hash, true)
@@ -740,7 +753,9 @@ impl ServiceDaemon {
         }
         // Fail closed BEFORE decoding anything: without the base denoiser nothing is stored.
         let Some(denoiser) = self.make_denoiser() else {
-            debug_voice_file_log("add_voice_sample: FAILED make_denoiser is None (ModelNotConfigured)");
+            debug_voice_file_log(
+                "add_voice_sample: FAILED make_denoiser is None (ModelNotConfigured)",
+            );
             return enroll_error(REQUEST_ID, &EnrollError::ModelNotConfigured);
         };
         let pcm = match decode_pcm(pcm_f32_le_b64, sample_rate) {
@@ -800,7 +815,10 @@ impl ServiceDaemon {
     fn store_ingested(&mut self, job_id: &str, outcome: &IngestOutcome) {
         let external = format!("{SAMPLE_JOB_PREFIX}{job_id}");
         let r = &outcome.result;
-        debug_voice_file_log(&format!("store_ingested called: external={external}, speech_secs={}, peak={}, rms={}", r.speech_seconds, r.peak, r.rms_dbfs));
+        debug_voice_file_log(&format!(
+            "store_ingested called: external={external}, speech_secs={}, peak={}, rms={}",
+            r.speech_seconds, r.peak, r.rms_dbfs
+        ));
         let quality = Quality {
             peak: r.peak,
             rms_dbfs: r.rms_dbfs,
@@ -815,7 +833,10 @@ impl ServiceDaemon {
             } => {
                 let budget = budget_for(self.voice_samples.list_samples(), device_id_hash);
                 if !fits_manual(&budget, r.speech_seconds) {
-                    debug_voice_file_log(&format!("store_ingested: budget exceeded (used={}, max={}, needed={})", budget.used_seconds, budget.max_seconds, r.speech_seconds));
+                    debug_voice_file_log(&format!(
+                        "store_ingested: budget exceeded (used={}, max={}, needed={})",
+                        budget.used_seconds, budget.max_seconds, r.speech_seconds
+                    ));
                     self.enrollment.sample_jobs.mark_failed(
                         job_id,
                         JobFailure {
@@ -854,7 +875,9 @@ impl ServiceDaemon {
                     self.fail_sample_job(job_id);
                     return;
                 }
-                debug_voice_file_log(&format!("store_ingested: sample {sample_id} successfully saved to disk!"));
+                debug_voice_file_log(&format!(
+                    "store_ingested: sample {sample_id} successfully saved to disk!"
+                ));
                 self.enrollment.bump_generation();
                 self.enrollment.extras.insert(
                     external,

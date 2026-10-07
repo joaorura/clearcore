@@ -11,7 +11,7 @@ use crate::HOP_SAMPLES;
 use crate::loudness::LoudnessMeter;
 use crate::units::{db_to_linear, sample_rate};
 
-/// Loudness target, in LUFS.
+/// Loudness target for standard presets, in LUFS.
 pub const TARGET_LUFS: f64 = -16.0;
 /// Largest boost and largest cut, in dB.
 pub const MAX_GAIN_DB: f64 = 12.0;
@@ -33,19 +33,52 @@ fn hop_coefficient(tau_seconds: f64) -> f64 {
 pub struct Agc {
     meter: LoudnessMeter,
     gain_db: f64,
+    intensity: u8,
     up: f64,
     down: f64,
 }
 
+impl Default for Agc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Agc {
-    /// Creates an AGC with unity gain and an empty loudness window.
+    /// Target LUFS for a given intensity percentage (1..=100).
+    /// At 50%: -16.0 LUFS. At 100%: -12.0 LUFS. At 0%: -20.0 LUFS.
+    #[must_use]
+    pub fn target_lufs_for_intensity(intensity: u8) -> f64 {
+        let clamped = f64::from(intensity.min(100));
+        TARGET_LUFS + (clamped - 50.0) * 0.08
+    }
+
+    /// Creates an AGC with unity gain, empty loudness window, and default intensity 50 (-16.0 LUFS).
     pub fn new() -> Self {
+        Self::with_intensity(50)
+    }
+
+    /// Creates an AGC with specified intensity (0–100).
+    pub fn with_intensity(intensity: u8) -> Self {
         Self {
             meter: LoudnessMeter::new(),
             gain_db: 0.0,
+            intensity: intensity.min(100),
             up: hop_coefficient(TAU_UP_S),
             down: hop_coefficient(TAU_DOWN_S),
         }
+    }
+
+    /// Sets the AGC intensity (0–100). 0 is bypass, 50 is balanced (-16 LUFS), 100 is maximum (-12 LUFS).
+    pub fn set_intensity(&mut self, intensity: u8) {
+        self.intensity = intensity.min(100);
+    }
+
+    /// Returns the current AGC intensity (0–100).
+    #[allow(dead_code)]
+    #[must_use]
+    pub const fn intensity(&self) -> u8 {
+        self.intensity
     }
 
     /// Resets the gain to unity and clears the loudness window.
@@ -63,11 +96,29 @@ impl Agc {
     /// Measures `hop`, updates the gain and applies it in place with a linear ramp.
     #[allow(clippy::cast_precision_loss)]
     pub fn process_hop(&mut self, hop: &mut [f64; HOP_SAMPLES]) {
+        if self.intensity == 0 && self.gain_db.abs() < 1e-4 {
+            self.gain_db = 0.0;
+            return;
+        }
+
         self.meter.push_hop(hop);
         let loudness = self.meter.momentary_lufs();
         let previous_gain = db_to_linear(self.gain_db);
-        if loudness >= FREEZE_BELOW_LUFS {
-            let desired = (TARGET_LUFS - loudness).clamp(MIN_GAIN_DB, MAX_GAIN_DB);
+
+        if self.intensity == 0 {
+            let desired = 0.0;
+            let coefficient = if desired < self.gain_db {
+                self.down
+            } else {
+                self.up
+            };
+            self.gain_db = coefficient * self.gain_db + (1.0 - coefficient) * desired;
+            if self.gain_db.abs() < 1e-4 {
+                self.gain_db = 0.0;
+            }
+        } else if loudness >= FREEZE_BELOW_LUFS {
+            let target = Self::target_lufs_for_intensity(self.intensity);
+            let desired = (target - loudness).clamp(MIN_GAIN_DB, MAX_GAIN_DB);
             let coefficient = if desired < self.gain_db {
                 self.down
             } else {
@@ -75,6 +126,7 @@ impl Agc {
             };
             self.gain_db = coefficient * self.gain_db + (1.0 - coefficient) * desired;
         }
+
         let next_gain = db_to_linear(self.gain_db);
         for (index, sample) in hop.iter_mut().enumerate() {
             let fraction = (index + 1) as f64 / HOP_SAMPLES as f64;
@@ -200,5 +252,22 @@ mod tests {
         run_tone(&mut agc, -26.0, 5);
         agc.reset();
         assert!(agc.gain_db().abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn intensity_zero_acts_as_bypass() {
+        let mut agc = Agc::with_intensity(0);
+        let input = sine(1_000.0, amplitude_for(-26.0), HOP_SAMPLES * 5);
+        let output = run(&mut agc, &input);
+        assert_eq!(agc.gain_db(), 0.0);
+        assert_eq!(input, output);
+    }
+
+    #[test]
+    fn intensity_hundred_steers_to_minus_twelve_lufs() {
+        let mut agc = Agc::with_intensity(100);
+        assert_eq!(Agc::target_lufs_for_intensity(100), -12.0);
+        let output = run_tone(&mut agc, -20.0, 40);
+        assert!((lufs_of_tail(&output) - (-12.0)).abs() < 0.5);
     }
 }

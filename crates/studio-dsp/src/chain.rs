@@ -79,6 +79,10 @@ impl Path {
         path
     }
 
+    fn set_leveler_intensity(&mut self, intensity: u8) {
+        self.agc.set_intensity(intensity);
+    }
+
     const fn reset(&mut self) {
         self.high_pass.reset();
         self.low_mid_cut.reset();
@@ -110,21 +114,55 @@ impl Path {
 #[derive(Clone, Debug)]
 pub struct StudioChain {
     target: Preset,
+    leveler_intensity: u8,
+    explicit_leveler: bool,
     main: Option<Path>,
     outgoing: Option<Path>,
     fading: bool,
+    standalone_agc: Agc,
+    standalone_limiter: Limiter,
 }
 
 impl StudioChain {
     /// Creates a chain running `preset` from the first hop.
     #[must_use]
     pub fn new(preset: Preset) -> Self {
-        Self {
+        let leveler_intensity = match preset {
+            Preset::Off => 0,
+            _ => 50,
+        };
+        let mut chain = Self {
             target: preset,
+            leveler_intensity,
+            explicit_leveler: false,
             main: for_preset(preset).map(Path::new),
             outgoing: None,
             fading: false,
+            standalone_agc: Agc::with_intensity(leveler_intensity),
+            standalone_limiter: Limiter::new(),
+        };
+        if let Some(path) = chain.main.as_mut() {
+            path.set_leveler_intensity(leveler_intensity);
         }
+        chain
+    }
+
+    /// Sets the voice auto-leveler intensity (0–100).
+    /// 0 is bypass, 50 is balanced (-16 LUFS), 100 is maximum (-12 LUFS).
+    pub fn set_leveler_intensity(&mut self, intensity: u8) {
+        let intensity = intensity.min(100);
+        self.leveler_intensity = intensity;
+        self.explicit_leveler = true;
+        if let Some(path) = self.main.as_mut() {
+            path.set_leveler_intensity(intensity);
+        }
+        self.standalone_agc.set_intensity(intensity);
+    }
+
+    /// Returns the current voice auto-leveler intensity (0–100).
+    #[must_use]
+    pub const fn leveler_intensity(&self) -> u8 {
+        self.leveler_intensity
     }
 
     /// Switches preset. The change is rendered with a one-hop crossfade (about 10 ms) on the next
@@ -138,10 +176,20 @@ impl StudioChain {
             self.fading = true;
         }
         self.target = preset;
+        if !self.explicit_leveler {
+            self.leveler_intensity = match preset {
+                Preset::Off => 0,
+                _ => 50,
+            };
+            self.standalone_agc.set_intensity(self.leveler_intensity);
+        }
         self.main = for_preset(preset).map(|params| {
-            self.outgoing
+            let mut path = self
+                .outgoing
                 .as_ref()
-                .map_or_else(|| Path::new(params), |old| old.with_params(params))
+                .map_or_else(|| Path::new(params), |old| old.with_params(params));
+            path.set_leveler_intensity(self.leveler_intensity);
+            path
         });
         if self.main.is_none() && self.outgoing.is_none() {
             // Settled on `Off` with nothing audible to fade out (for example Off -> X -> Off before
@@ -152,13 +200,22 @@ impl StudioChain {
 
     /// Processes one hop in place: no allocation, no panic.
     pub fn process(&mut self, hop: &mut [f32; HOP_SAMPLES]) {
-        if !self.fading && self.main.is_none() {
+        if !self.fading && self.main.is_none() && self.leveler_intensity == 0 {
             return;
         }
         sanitize(hop);
         if !self.fading {
             if let Some(path) = self.main.as_mut() {
                 path.process(hop);
+            } else if self.leveler_intensity > 0 {
+                let mut scratch = [0.0_f64; HOP_SAMPLES];
+                for (slot, &sample) in scratch.iter_mut().zip(hop.iter()) {
+                    *slot = f64::from(sample);
+                }
+                self.standalone_agc.process_hop(&mut scratch);
+                for (out, &value) in hop.iter_mut().zip(scratch.iter()) {
+                    *out = self.standalone_limiter.process(value);
+                }
             }
             return;
         }
@@ -167,10 +224,28 @@ impl StudioChain {
         let mut old = dry;
         if let Some(path) = self.outgoing.as_mut() {
             path.process(&mut old);
+        } else if self.leveler_intensity > 0 {
+            let mut scratch = [0.0_f64; HOP_SAMPLES];
+            for (slot, &sample) in scratch.iter_mut().zip(old.iter()) {
+                *slot = f64::from(sample);
+            }
+            self.standalone_agc.process_hop(&mut scratch);
+            for (out, &value) in old.iter_mut().zip(scratch.iter()) {
+                *out = self.standalone_limiter.process(value);
+            }
         }
         let mut new = dry;
         if let Some(path) = self.main.as_mut() {
             path.process(&mut new);
+        } else if self.leveler_intensity > 0 {
+            let mut scratch = [0.0_f64; HOP_SAMPLES];
+            for (slot, &sample) in scratch.iter_mut().zip(new.iter()) {
+                *slot = f64::from(sample);
+            }
+            self.standalone_agc.process_hop(&mut scratch);
+            for (out, &value) in new.iter_mut().zip(scratch.iter()) {
+                *out = self.standalone_limiter.process(value);
+            }
         }
         self.outgoing = None;
         self.fading = false;
@@ -194,12 +269,14 @@ impl StudioChain {
 
     /// Clears all filter, envelope, AGC and limiter state; the selected preset is kept and any
     /// pending crossfade is dropped.
-    pub const fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.outgoing = None;
         self.fading = false;
         if let Some(path) = self.main.as_mut() {
             path.reset();
         }
+        self.standalone_agc.reset();
+        self.standalone_limiter.reset();
     }
 }
 

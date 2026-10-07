@@ -4,9 +4,11 @@ import { AudioTestCard } from './AudioTestCard';
 import { HardwareAcceleratorCard } from './HardwareAcceleratorCard';
 import { VoiceProfileCard } from './VoiceProfileCard';
 import { StudioDspCard } from './StudioDspCard';
+import { NoiseSuppressionSlider } from './NoiseSuppressionSlider';
 import { UpdateBanner } from './UpdateBanner';
 import { useI18n } from './i18n';
 import { invokeBridge } from './bridge';
+import { logger } from './utils/logger';
 import type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo } from './types';
 
 export type { DenoiseMode, EngineStatus, VirtualMicStatus, InputDeviceInfo };
@@ -108,6 +110,7 @@ export const App: React.FC = () => {
 
   const handleDeviceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newId = e.target.value;
+    logger.info('UI', `Microphone selection changed: '${newId}'`);
     setSelectedDeviceId(newId);
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem('clearcore_selected_input_device', newId);
@@ -115,9 +118,11 @@ export const App: React.FC = () => {
     const dev = inputDevices.find((d) => d.id === newId);
     try {
       await invokeBridge('set_input_device', { deviceId: newId });
+      logger.info('UI', `Device '${dev ? dev.name : newId}' applied successfully`);
       setMicActionMessage(t('inputDevice.deviceSelectedFeedback', { name: dev ? dev.name : newId }));
       setTimeout(() => setMicActionMessage(null), 4000);
     } catch (err) {
+      logger.error('UI', `Device selection failed: ${err}`);
       setErrorMessage(t('inputDevice.selectionFailed', { error: String(err) }));
     }
   };
@@ -307,10 +312,13 @@ export const App: React.FC = () => {
   }, []);
 
   const handleModeChange = async (newMode: DenoiseMode) => {
+    logger.info('UI', `Mode switch button clicked: ${newMode} (previous: ${mode})`);
     try {
       await invokeBridge('set_mode', { mode: newMode });
       setMode(newMode);
+      logger.info('UI', `Mode switch to ${newMode} succeeded`);
     } catch (err) {
+      logger.error('UI', `Mode switch to ${newMode} failed: ${err}`);
       setErrorMessage(t('modes.switchFailed', { error: String(err) }));
     }
   };
@@ -522,6 +530,10 @@ export const App: React.FC = () => {
             {t('modes.mute')}
           </button>
         </div>
+        <NoiseSuppressionSlider
+          currentStatus={status}
+          disabled={!isServiceRunning || mode !== 'Active'}
+        />
       </div>
 
       {/* Perfil de Voz do Usuário & Isolamento Vocal */}

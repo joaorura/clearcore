@@ -29,7 +29,20 @@ fn service_starts_with_auto_accelerator_and_reports_status() {
         .expect("active_backend");
     assert!(!active_backend.is_empty());
 
-    if realtime_noise_accelerators::TensorRtBackend::is_available() {
+    if realtime_noise_accelerators::OpenVINOBackend::is_available()
+        && realtime_noise_accelerators::OpenVINOBackend::available_devices()
+            .iter()
+            .any(|d| d.eq_ignore_ascii_case("NPU"))
+    {
+        assert!(
+            resp.payload["is_hardware_accelerated"]
+                .as_bool()
+                .unwrap_or(false)
+        );
+        assert_eq!(active_backend, "openvino-npu");
+        assert_eq!(resp.payload["backend_device"], "NPU");
+        assert_eq!(resp.payload["backend_runtime"], "openvino-npu");
+    } else if realtime_noise_accelerators::TensorRtBackend::is_available() {
         assert!(
             resp.payload["is_hardware_accelerated"]
                 .as_bool()
@@ -45,8 +58,6 @@ fn service_starts_with_auto_accelerator_and_reports_status() {
                 .unwrap_or(false)
         );
         assert!(active_backend.starts_with("openvino"));
-        assert_eq!(resp.payload["backend_device"], "NPU");
-        assert_eq!(resp.payload["backend_runtime"], "openvino-npu");
     }
 }
 
@@ -99,7 +110,10 @@ fn service_switches_backend_via_set_backend_ipc() {
         );
 
         let status_after_trt = send(&mut daemon, IpcCommand::GetStatus);
-        assert_eq!(status_after_trt.payload["active_backend"], "nvidia-tensorrt");
+        assert_eq!(
+            status_after_trt.payload["active_backend"],
+            "nvidia-tensorrt"
+        );
         assert_eq!(status_after_trt.payload["is_hardware_accelerated"], true);
         assert_eq!(status_after_trt.payload["backend_device"], "GPU");
     }

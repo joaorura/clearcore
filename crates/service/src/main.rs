@@ -51,6 +51,16 @@ fn main() -> ExitCode {
                 }
             }
 
+            if let Err(e) = realtime_noise_service::logger::DaemonLogger::init() {
+                eprintln!("Warning: failed to initialize daemon file logger: {e}");
+            }
+            realtime_noise_service::log_info!(
+                "DAEMON",
+                "realtime-noise-service starting (PID: {}, args: {:?})",
+                std::process::id(),
+                env::args().collect::<Vec<_>>()
+            );
+
             let config = ServiceConfig {
                 initial_backend,
                 model_dir,
@@ -58,12 +68,25 @@ fn main() -> ExitCode {
             };
             let mut bootstrap = ServiceBootstrap::new(config);
             match ProfileStore::default_dir() {
-                Some(dir) => bootstrap
-                    .daemon_mut()
-                    .attach_profile_store(ProfileStore::new(dir)),
-                None => eprintln!(
-                    "No data directory available: voice profiles cannot be stored or restored"
-                ),
+                Some(dir) => {
+                    realtime_noise_service::log_info!(
+                        "DAEMON",
+                        "Attaching profile store at {}",
+                        dir.display()
+                    );
+                    bootstrap
+                        .daemon_mut()
+                        .attach_profile_store(ProfileStore::new(dir));
+                }
+                None => {
+                    realtime_noise_service::log_warn!(
+                        "DAEMON",
+                        "No data directory available: voice profiles cannot be stored or restored"
+                    );
+                    eprintln!(
+                        "No data directory available: voice profiles cannot be stored or restored"
+                    );
+                }
             }
             if let Err(err) = bootstrap.run() {
                 eprintln!("Daemon execution error: {err}");

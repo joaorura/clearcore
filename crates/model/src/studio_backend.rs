@@ -47,6 +47,7 @@ pub struct StudioBackend<B: InferenceBackend> {
     chain: StudioChain,
     control: Arc<StudioControl>,
     applied: Preset,
+    applied_leveler: u8,
     reset: StudioResetHandle,
 }
 
@@ -64,11 +65,15 @@ impl<B: InferenceBackend> StudioBackend<B> {
         reset: StudioResetHandle,
     ) -> Self {
         let applied = control.preset();
+        let applied_leveler = control.leveler_intensity();
+        let mut chain = StudioChain::new(applied);
+        chain.set_leveler_intensity(applied_leveler);
         Self {
             inner,
-            chain: StudioChain::new(applied),
+            chain,
             control,
             applied,
+            applied_leveler,
             reset,
         }
     }
@@ -94,6 +99,11 @@ impl<B: InferenceBackend> InferenceBackend for StudioBackend<B> {
         if wanted != self.applied {
             self.chain.set_preset(wanted);
             self.applied = wanted;
+        }
+        let wanted_leveler = self.control.leveler_intensity();
+        if wanted_leveler != self.applied_leveler {
+            self.chain.set_leveler_intensity(wanted_leveler);
+            self.applied_leveler = wanted_leveler;
         }
 
         self.chain.process(&mut processed.samples);

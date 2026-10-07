@@ -7,6 +7,8 @@
 
 pub mod bootstrap;
 pub mod install;
+#[macro_use]
+pub mod logger;
 pub mod settings;
 pub mod voice_intake;
 pub mod voice_samples;
@@ -127,6 +129,9 @@ impl ServiceDaemon {
             version: settings::SETTINGS_VERSION,
             preset: supervisor.dsp_preset(),
             backend: None,
+            filter_intensity: 50,
+            voice_isolation_enabled: true,
+            voice_leveler: supervisor.voice_leveler_intensity(),
         };
         Self {
             supervisor,
@@ -150,6 +155,9 @@ impl ServiceDaemon {
     pub fn with_settings(settings: settings::Settings, settings_path: Option<PathBuf>) -> Self {
         let mut daemon = Self::new();
         daemon.supervisor.set_dsp_preset(settings.preset);
+        daemon
+            .supervisor
+            .set_voice_leveler_intensity(settings.voice_leveler);
         if let Some(ref backend) = settings.backend {
             let _ = daemon.select_backend(backend);
         }
@@ -186,13 +194,46 @@ impl ServiceDaemon {
         match store.load_active() {
             Ok(Some(profile)) => {
                 self.stored_voice_profile_id = Some(profile.id.clone());
-                if self.supervisor.set_voice_profile(Some(&profile)).is_err() {
-                    eprintln!("Stored voice profile was not applied: the backend rejected it");
-                    self.voice_profile_error = Some(NOT_APPLIED_MESSAGE.to_owned());
+                log_info!(
+                    "VOICE_PROFILE",
+                    "Loaded active voice profile from disk (id: {})",
+                    profile.id
+                );
+                if self.settings.voice_isolation_enabled {
+                    if self.supervisor.set_voice_profile(Some(&profile)).is_err() {
+                        log_warn!(
+                            "VOICE_PROFILE",
+                            "Stored voice profile '{}' was rejected by the active backend",
+                            profile.id
+                        );
+                        eprintln!("Stored voice profile was not applied: the backend rejected it");
+                        self.voice_profile_error = Some(NOT_APPLIED_MESSAGE.to_owned());
+                    } else {
+                        log_info!(
+                            "VOICE_PROFILE",
+                            "Stored voice profile '{}' successfully applied to backend",
+                            profile.id
+                        );
+                    }
+                } else {
+                    log_info!(
+                        "VOICE_PROFILE",
+                        "Stored voice profile '{}' present, but voice isolation is currently disabled in settings",
+                        profile.id
+                    );
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                log_info!(
+                    "VOICE_PROFILE",
+                    "No active voice profile found in storage (neutral voice active)"
+                );
+            }
             Err(_) => {
+                log_warn!(
+                    "VOICE_PROFILE",
+                    "Stored voice profile failed validation or has insecure permissions"
+                );
                 eprintln!(
                     "Stored voice profile was not loaded: it failed validation or has insecure permissions"
                 );
@@ -206,10 +247,19 @@ impl ServiceDaemon {
             && legacy != dir
             && voice_storage_migration::migrate_legacy_into_dir(&legacy, &dir).is_err()
         {
+            log_warn!(
+                "VOICE_PROFILE",
+                "Legacy voice samples migration failed or skipped"
+            );
             eprintln!("Legacy voice samples were not migrated");
         }
         self.voice_samples =
             VoiceSampleManager::load(&dir).unwrap_or_else(|_| VoiceSampleManager::new(&dir));
+        log_info!(
+            "VOICE_PROFILE",
+            "Voice samples loaded: {} samples available",
+            self.voice_samples.list_samples().len()
+        );
         self.voice_intake = VoiceIntakeEngine::new(Some(dir));
         self.profile_store = Some(store);
     }
@@ -282,6 +332,9 @@ impl ServiceDaemon {
     /// After a backend swap the supervisor only carries over the profile it had applied. Retry the
     /// stored one (a previous backend may have rejected it) and refresh the diagnostic.
     fn reapply_stored_profile(&mut self) {
+        if !self.settings.voice_isolation_enabled {
+            return;
+        }
         reapply_stored_profile(
             &mut self.supervisor,
             self.profile_store.as_ref(),
@@ -387,12 +440,25 @@ impl ServiceDaemon {
     }
 
     fn handle_command(&mut self, cmd: &IpcCommand) -> IpcResponse {
+        log_debug!(
+            "DAEMON_IPC",
+            "Handling command: {:?}",
+            std::mem::discriminant(cmd)
+        );
         match cmd {
             IpcCommand::GetStatus => {
                 let status = self.supervisor.status();
                 let mode_ipc = convert_engine_mode_to_ipc(status.active_mode);
                 let preset_ipc = convert_dsp_preset_to_ipc(status.dsp_preset);
                 let desc = self.supervisor.active_backend_descriptor();
+                log_debug!(
+                    "DAEMON_IPC",
+                    "GetStatus: state={:?}, mode={:?}, backend={:?}, accelerated={}",
+                    status.state,
+                    mode_ipc,
+                    self.supervisor.active_backend_name(),
+                    self.supervisor.is_hardware_accelerated()
+                );
                 IpcResponse::success(
                     "status-resp",
                     json!({
@@ -436,11 +502,16 @@ impl ServiceDaemon {
                         // is a fixed code (never a path) when the configured model is not in use.
                         "dev_base_model": self.supervisor.dev_base_model(),
                         "dev_base_model_error": self.supervisor.dev_base_model_error(),
+                        "filter_intensity": self.settings.filter_intensity,
+                        "voice_isolation_enabled": self.settings.voice_isolation_enabled,
+                        "voice_leveler": self.settings.voice_leveler,
+                        "voice_leveler_intensity": self.settings.voice_leveler,
                     }),
                 )
             }
             IpcCommand::SetMode(ipc_mode) => {
                 let engine_mode = convert_ipc_mode_to_engine(*ipc_mode);
+                log_info!("DAEMON_IPC", "SetMode: switching mode to {:?}", ipc_mode);
                 self.supervisor.set_mode(engine_mode);
                 IpcResponse::success(
                     "set-mode-resp",
@@ -452,6 +523,7 @@ impl ServiceDaemon {
             }
             IpcCommand::SetBackend(payload) => {
                 let req_name = payload.as_str();
+                log_info!("DAEMON_IPC", "SetBackend requested: '{req_name}'");
                 let info = select_backend_and_reapply(
                     &mut self.supervisor,
                     req_name,
@@ -461,9 +533,21 @@ impl ServiceDaemon {
                     &mut self.stored_voice_profile_id,
                     &mut self.voice_profile_error,
                 );
+                log_info!(
+                    "DAEMON_IPC",
+                    "SetBackend resolved: requested='{}', active='{}', device='{}', runtime='{}', accelerated={}, fallback={}",
+                    req_name,
+                    info.name,
+                    info.device,
+                    info.runtime,
+                    info.is_hardware_accelerated,
+                    info.is_fallback
+                );
                 self.settings.backend = Some(req_name.to_string());
-                let persisted =
-                    settings::persist_settings(self.settings.clone(), self.settings_path.as_deref());
+                let persisted = settings::persist_settings(
+                    self.settings.clone(),
+                    self.settings_path.as_deref(),
+                );
                 IpcResponse::success(
                     "set-backend-resp",
                     json!({
@@ -481,6 +565,12 @@ impl ServiceDaemon {
             }
             IpcCommand::GetBackend => {
                 let desc = self.supervisor.active_backend_descriptor();
+                log_debug!(
+                    "DAEMON_IPC",
+                    "GetBackend: active={}, device={:?}",
+                    self.supervisor.active_backend_name(),
+                    self.supervisor.active_backend_device()
+                );
                 IpcResponse::success(
                     "get-backend-resp",
                     json!({
@@ -494,10 +584,17 @@ impl ServiceDaemon {
             }
             IpcCommand::SetPreset(ipc_preset) => {
                 let dsp_preset = convert_ipc_preset_to_dsp(*ipc_preset);
+                log_info!(
+                    "DAEMON_IPC",
+                    "SetPreset: setting DSP preset to {:?}",
+                    ipc_preset
+                );
                 self.supervisor.set_dsp_preset(dsp_preset);
                 self.settings.preset = dsp_preset;
-                let persisted =
-                    settings::persist_settings(self.settings.clone(), self.settings_path.as_deref());
+                let persisted = settings::persist_settings(
+                    self.settings.clone(),
+                    self.settings_path.as_deref(),
+                );
                 IpcResponse::success(
                     "set-preset-resp",
                     json!({
@@ -519,16 +616,25 @@ impl ServiceDaemon {
                 )
             }
             IpcCommand::RestartGeneration => match self.supervisor.reset() {
-                Ok(()) => IpcResponse::success(
-                    "restart-resp",
-                    json!({"restarted": true, "state": "Running"}),
-                ),
-                Err(err) => IpcResponse::error(
-                    "restart-resp",
-                    IpcStatus::InternalError,
-                    "RESTART_FAILED",
-                    err.to_string(),
-                ),
+                Ok(()) => {
+                    log_info!(
+                        "DAEMON_IPC",
+                        "RestartGeneration: supervisor reset succeeded"
+                    );
+                    IpcResponse::success(
+                        "restart-resp",
+                        json!({"restarted": true, "state": "Running"}),
+                    )
+                }
+                Err(err) => {
+                    log_error!("DAEMON_IPC", "RestartGeneration failed: {err}");
+                    IpcResponse::error(
+                        "restart-resp",
+                        IpcStatus::InternalError,
+                        "RESTART_FAILED",
+                        err.to_string(),
+                    )
+                }
             },
             IpcCommand::GetDiagnostics => {
                 let diag = self.supervisor.diagnostics();
@@ -545,11 +651,16 @@ impl ServiceDaemon {
             }
             IpcCommand::SetVoiceProfile { profile_json } => {
                 // A running build must not override a profile chosen after it started.
+                log_info!("DAEMON_IPC", "SetVoiceProfile received");
                 self.enrollment.bump_generation();
                 self.set_voice_profile_json(profile_json)
             }
             IpcCommand::ClearVoiceProfile => {
                 // A running build must not revive a cleared profile.
+                log_info!(
+                    "DAEMON_IPC",
+                    "ClearVoiceProfile received: resetting to neutral voice"
+                );
                 self.enrollment.bump_generation();
                 clear_voice_profile(
                     &mut self.supervisor,
@@ -558,23 +669,47 @@ impl ServiceDaemon {
                     &mut self.voice_profile_error,
                 )
             }
-            IpcCommand::ListVoiceSamples => self.list_voice_samples(),
+            IpcCommand::ListVoiceSamples => {
+                let resp = self.list_voice_samples();
+                log_debug!(
+                    "DAEMON_IPC",
+                    "ListVoiceSamples: returning sample count {}",
+                    self.voice_samples.list_samples().len()
+                );
+                resp
+            }
             IpcCommand::AddVoiceSample {
                 name,
                 pcm_f32_le_b64,
                 sample_rate,
                 device_label,
                 device_id_hash,
-            } => self.add_voice_sample(
-                name,
-                pcm_f32_le_b64,
-                *sample_rate,
-                device_label,
-                device_id_hash,
-            ),
-            IpcCommand::BuildVoiceProfile { name } => self.build_voice_profile(name),
-            IpcCommand::GetEnrollmentJob { job_id } => self.get_enrollment_job(job_id),
+            } => {
+                log_info!(
+                    "DAEMON_IPC",
+                    "AddVoiceSample received: name='{name}', rate={sample_rate}, label='{device_label}', hash='{device_id_hash}'"
+                );
+                self.add_voice_sample(
+                    name,
+                    pcm_f32_le_b64,
+                    *sample_rate,
+                    device_label,
+                    device_id_hash,
+                )
+            }
+            IpcCommand::BuildVoiceProfile { name } => {
+                log_info!("DAEMON_IPC", "BuildVoiceProfile received: name='{name}'");
+                self.build_voice_profile(name)
+            }
+            IpcCommand::GetEnrollmentJob { job_id } => {
+                log_debug!(
+                    "DAEMON_IPC",
+                    "GetEnrollmentJob queried for job_id='{job_id}'"
+                );
+                self.get_enrollment_job(job_id)
+            }
             IpcCommand::DeleteVoiceSample { id } => {
+                log_info!("DAEMON_IPC", "DeleteVoiceSample received for id='{id}'");
                 match self.voice_samples.delete_sample(id, true) {
                     // The WAV goes with the sample (confined to `samples/`); the client rebuilds.
                     // A build that may have read the deleted audio is made stale.
@@ -654,7 +789,73 @@ impl ServiceDaemon {
                     ),
                 }
             }
+            IpcCommand::SetFilterIntensity { intensity } => {
+                let clamped = (*intensity).min(100);
+                log_info!("DAEMON_IPC", "SetFilterIntensity received: {clamped}%");
+                self.settings.filter_intensity = clamped;
+                let persisted = settings::persist_settings(
+                    self.settings.clone(),
+                    self.settings_path.as_deref(),
+                );
+                let beta = settings::intensity_to_post_filter_beta(clamped);
+                IpcResponse::success(
+                    "set-filter-intensity-resp",
+                    json!({
+                        "filter_intensity": clamped,
+                        "post_filter_beta": beta,
+                        "success": true,
+                        "persisted": persisted,
+                    }),
+                )
+            }
+            IpcCommand::SetVoiceIsolation { enabled } => {
+                let enabled = *enabled;
+                log_info!("DAEMON_IPC", "SetVoiceIsolation received: {enabled}");
+                self.settings.voice_isolation_enabled = enabled;
+                let persisted = settings::persist_settings(
+                    self.settings.clone(),
+                    self.settings_path.as_deref(),
+                );
+                if enabled {
+                    self.reapply_stored_profile();
+                } else {
+                    let _ = self.supervisor.set_voice_profile(None);
+                }
+                IpcResponse::success(
+                    "set-voice-isolation-resp",
+                    json!({
+                        "voice_isolation_enabled": enabled,
+                        "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
+                        "success": true,
+                        "persisted": persisted,
+                    }),
+                )
+            }
+            IpcCommand::SetVoiceLeveler { intensity } => {
+                let clamped = (*intensity).min(100);
+                log_info!("DAEMON_IPC", "SetVoiceLeveler received: {clamped}%");
+                self.supervisor.set_voice_leveler_intensity(clamped);
+                self.settings.voice_leveler = clamped;
+                let persisted = settings::persist_settings(
+                    self.settings.clone(),
+                    self.settings_path.as_deref(),
+                );
+                IpcResponse::success(
+                    "set-voice-leveler-resp",
+                    json!({
+                        "intensity": clamped,
+                        "voice_leveler": clamped,
+                        "voice_leveler_intensity": clamped,
+                        "success": true,
+                        "persisted": persisted,
+                    }),
+                )
+            }
             IpcCommand::Shutdown => {
+                log_info!(
+                    "DAEMON_IPC",
+                    "Shutdown command received: initiating clean daemon termination"
+                );
                 self.shutdown = true;
                 IpcResponse::success("shutdown-resp", json!({"shutdown": true}))
             }
@@ -861,7 +1062,9 @@ fn reapply_stored_profile(
     let Some(store) = store else {
         return;
     };
-    if let (Some(id), Some(active_id)) = (stored_slot.as_deref(), supervisor.active_voice_profile_id()) {
+    if let (Some(id), Some(active_id)) =
+        (stored_slot.as_deref(), supervisor.active_voice_profile_id())
+    {
         if id == active_id {
             *error = None;
             return;

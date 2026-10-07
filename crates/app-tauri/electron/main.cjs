@@ -12,6 +12,7 @@ const updater = require('./updater.cjs');
 const voiceProfileStore = require('./voice-profile-store.cjs');
 const voiceProfileMerge = require('./voice-profile-merge.cjs');
 const enrollmentIpc = require('./enrollment-ipc.cjs');
+const appLogger = require('./app-logger.cjs');
 
 // ClearCore Runtime Application Version
 const APP_VERSION = '0.1.0-beta.1';
@@ -88,6 +89,9 @@ function getIpcEndpoint() {
 function sendIpcRequest(command, payload = {}, timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
     const endpoint = getIpcEndpoint();
+    const cmdName = typeof command === 'string' ? command : Object.keys(command)[0] || 'UnknownCommand';
+    appLogger.debug('IPC_CLIENT', `Sending command to daemon: ${cmdName}`, { timeoutMs });
+
     const req =
       JSON.stringify({
         version: 'realtime-noise.v1',
@@ -112,25 +116,30 @@ function sendIpcRequest(command, payload = {}, timeoutMs = 3000) {
       try {
         const parsed = JSON.parse(buffer.trim());
         if (parsed.status === 'Ok') {
+          appLogger.debug('IPC_CLIENT', `Daemon response Ok for: ${cmdName}`);
           resolve(parsed.payload);
         } else {
           const rejection = new Error(parsed.error ? parsed.error.message : 'IPC request rejected');
           if (parsed.error && typeof parsed.error.code === 'string') rejection.code = parsed.error.code;
+          appLogger.warn('IPC_CLIENT', `Daemon returned error for ${cmdName}:`, parsed.error);
           reject(rejection);
         }
       } catch (err) {
+        appLogger.error('IPC_CLIENT', `Failed to parse daemon response for ${cmdName}: ${err.message}`);
         reject(new Error(`Failed to parse daemon response: ${err.message}`));
       }
     });
 
     const targetDesc = endpoint.path ? endpoint.path : `${endpoint.host}:${endpoint.port}`;
     client.on('error', (err) => {
+      appLogger.warn('IPC_CLIENT', `Daemon unreachable at ${targetDesc}: ${err.message}`);
       reject(new Error(`Daemon unreachable at ${targetDesc}: ${err.message}`));
     });
 
     // Timeout (default 3 seconds)
     client.setTimeout(timeoutMs, () => {
       client.destroy();
+      appLogger.warn('IPC_CLIENT', `Daemon IPC timeout after ${timeoutMs}ms for ${cmdName}`);
       reject(new Error('Daemon IPC timeout'));
     });
   });
@@ -164,9 +173,9 @@ async function isDaemonResponsive() {
   }
 }
 
-// Auto-detect trained M3 models for voice enrollment & pDFNet3 speaker isolation
+// Auto-detect trained M3 model for voice enrollment
 function detectDevModels() {
-  if (process.env.CLEARCORE_DEV_ENROLLMENT_ASSET && process.env.CLEARCORE_DEV_PDFNET3_ASSET) {
+  if (process.env.CLEARCORE_DEV_ENROLLMENT_ASSET) {
     return;
   }
   const crypto = require('crypto');
@@ -194,18 +203,6 @@ function detectDevModels() {
       console.log(`[Clearcore Daemon] Auto-detected M3 enrollment asset: ${enrollFile}`);
     } catch (e) {
       console.warn('[Clearcore Daemon] Could not hash enrollment asset:', e.message);
-    }
-  }
-
-  const pdfnet3File = path.join(m3Dir, 'pdfnet3-release-asset-v1.tar.gz');
-  if (!process.env.CLEARCORE_DEV_PDFNET3_ASSET && fs.existsSync(pdfnet3File)) {
-    try {
-      const hash = crypto.createHash('sha256').update(fs.readFileSync(pdfnet3File)).digest('hex');
-      process.env.CLEARCORE_DEV_PDFNET3_ASSET = pdfnet3File;
-      process.env.CLEARCORE_DEV_PDFNET3_SHA256 = hash;
-      console.log(`[Clearcore Daemon] Auto-detected M3 pDFNet3 asset: ${pdfnet3File}`);
-    } catch (e) {
-      console.warn('[Clearcore Daemon] Could not hash pDFNet3 asset:', e.message);
     }
   }
 }
@@ -253,6 +250,7 @@ async function ensureDaemonRunning() {
   }
 
   console.log(`[Clearcore Daemon] Iniciando sidecar daemon: ${daemonBin} --run`);
+  appLogger.info('DAEMON_SUPERVISOR', `Starting sidecar daemon: ${daemonBin} --run`);
   try {
     const userData = app.getPath('userData');
     if (!fs.existsSync(userData)) {
@@ -270,14 +268,17 @@ async function ensureDaemonRunning() {
     });
 
     daemonSpawnedByApp = true;
+    appLogger.info('DAEMON_SUPERVISOR', `Daemon spawned with PID: ${daemonChildProcess.pid}`);
 
     daemonChildProcess.on('error', (err) => {
+      appLogger.error('DAEMON_SUPERVISOR', `Daemon process error: ${err.message}`);
       console.error('[Clearcore Daemon] Erro no processo do serviço:', err.message);
       daemonChildProcess = null;
       daemonSpawnedByApp = false;
     });
 
     daemonChildProcess.on('exit', (code, signal) => {
+      appLogger.warn('DAEMON_SUPERVISOR', `Daemon process exited with code=${code}, signal=${signal}`);
       console.warn(`[Clearcore Daemon] Processo do serviço finalizou (code=${code}, signal=${signal})`);
       daemonChildProcess = null;
       daemonSpawnedByApp = false;
@@ -287,14 +288,17 @@ async function ensureDaemonRunning() {
     for (let attempt = 1; attempt <= 18; attempt++) {
       await new Promise((r) => setTimeout(r, 200));
       if (await isDaemonResponsive()) {
+        appLogger.info('DAEMON_SUPERVISOR', `IPC connection established after ${attempt} attempts`);
         console.log(`[Clearcore Daemon] Conexão IPC estabelecida com sucesso na tentativa ${attempt}.`);
         return true;
       }
     }
 
+    appLogger.warn('DAEMON_SUPERVISOR', 'Daemon spawned but IPC did not respond within timeout');
     console.warn('[Clearcore Daemon] Daemon iniciado, mas IPC ainda não respondeu.');
     return false;
   } catch (err) {
+    appLogger.error('DAEMON_SUPERVISOR', `Failed to launch daemon: ${err.message}`);
     console.error('[Clearcore Daemon] Falha ao iniciar daemon:', err.message);
     return false;
   }
@@ -1278,15 +1282,37 @@ ipcMain.handle('set_start_activated_config', (_event, enabled) => {
 });
 
 ipcMain.handle('get_status', async () => {
-  return await sendIpcRequest('GetStatus');
+  const settings = readAppSettings();
+  try {
+    const res = await sendIpcRequest('GetStatus');
+    if (res && typeof res === 'object') {
+      if (res.filter_intensity === undefined) {
+        res.filter_intensity = typeof settings.filter_intensity === 'number' ? settings.filter_intensity : 50;
+      }
+    }
+    return res;
+  } catch (err) {
+    return {
+      state: 'Stopped',
+      mode: currentMode,
+      filter_intensity: typeof settings.filter_intensity === 'number' ? settings.filter_intensity : 50,
+      is_terminal: false,
+      can_restart: true,
+      crash_count_15m: 0,
+      total_crashes: 0,
+      error: err.message,
+    };
+  }
 });
 
 ipcMain.handle('set_mode', async (_event, args) => {
   const mode = args && args.mode ? args.mode : 'Active';
+  appLogger.info('ELECTRON', `set_mode requested: ${mode} (previous: ${currentMode})`);
   const res = await sendIpcRequest({ SetMode: mode });
   currentMode = mode;
   writeClearcoreSharedState({ mode });
   updateTrayMenu();
+  appLogger.info('ELECTRON', `set_mode successfully applied: ${mode}`);
   return res;
 });
 
@@ -1339,12 +1365,17 @@ ipcMain.handle('set_default_virtual_mic', async () => {
 });
 
 ipcMain.handle('get_input_devices', () => {
-  return enumerateSystemInputDevices();
+  const devices = enumerateSystemInputDevices();
+  appLogger.debug('AUDIO_DEVICE', `get_input_devices enumerated ${devices.length} devices`, devices);
+  return devices;
 });
 
 ipcMain.handle('set_input_device', (_event, args) => {
   const deviceId = typeof args === 'string' ? args : (args && args.deviceId ? args.deviceId : '');
-  return setSystemInputDevice(deviceId);
+  appLogger.info('AUDIO_DEVICE', `set_input_device requested: '${deviceId}'`);
+  const res = setSystemInputDevice(deviceId);
+  appLogger.info('AUDIO_DEVICE', `set_input_device result:`, res);
+  return res;
 });
 
 let currentSelectedBackend = readAppSettings().selectedBackend || 'auto';
@@ -1516,23 +1547,28 @@ function queryHardwareBackends() {
     }
   } catch {}
 
-  // Resolve Auto backend
+  // Resolve Auto backend (Priority: NPU -> iGPU -> dGPU -> CPU fallback)
   let fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
   if (isMac && process.arch === 'arm64') {
     fallbackAutoResolved = { id: 'apple_coreml', name: 'Apple Silicon (CoreML)' };
+  } else if (isIntel && hasOpenVinoRuntime && /ultra/i.test(cpuModel)) {
+    // 1. NPU (Intel Core Ultra AI Boost - minimal power consumption, dedicated silicon)
+    fallbackAutoResolved = { id: 'openvino_npu', name: 'Intel OpenVINO (NPU - AI Boost)' };
+  } else if (isIntel && hasOpenVinoRuntime) {
+    // 2. iGPU (Intel Arc / Iris integrated graphics - low power, offloads CPU)
+    fallbackAutoResolved = { id: 'openvino_gpu', name: 'Intel OpenVINO (iGPU - Intel Graphics)' };
   } else if (hasNvidiaGpu && hasTensorRtRuntime) {
+    // 3. dGPU (Dedicated NVIDIA GPU via TensorRT)
     fallbackAutoResolved = { id: 'nvidia_tensorrt', name: 'NVIDIA GPU (TensorRT / CUDA)' };
   } else if (isAmd) {
     // On AMD: never select OpenVINO! Prefer Pure-Rust CPU Tract (or Ryzen AI if configured)
     fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
-  } else if (isIntel) {
-    if (hasOpenVinoRuntime && /ultra/i.test(cpuModel)) {
-      fallbackAutoResolved = { id: 'openvino_npu', name: 'Intel OpenVINO (NPU - AI Boost)' };
-    } else if (hasOpenVinoRuntime) {
-      fallbackAutoResolved = { id: 'openvino_cpu', name: 'Intel OpenVINO (CPU - Otimizado)' };
-    } else {
-      fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
-    }
+  } else if (isIntel && hasOpenVinoRuntime) {
+    // 4. CPU (Intel CPU optimized via OpenVINO AVX/VNNI)
+    fallbackAutoResolved = { id: 'openvino_cpu', name: 'Intel OpenVINO (CPU - Otimizado)' };
+  } else {
+    // 4. CPU Fallback (Tract pure Rust)
+    fallbackAutoResolved = { id: 'cpu_tract', name: 'CPU Nativo (Tract Pure-Rust)' };
   }
 
   // Detect package commands on Linux
@@ -1703,14 +1739,18 @@ ipcMain.handle('get_hardware_backends', () => {
 });
 
 ipcMain.handle('set_hardware_backend', async (_event, backendId) => {
+  appLogger.info('ACCELERATOR', `set_hardware_backend requested:`, backendId);
   const result = resolveBackendSelection(backendId);
   if (result.success) {
     currentSelectedBackend = result.active_backend;
     writeAppSettings({ selectedBackend: result.active_backend });
+    appLogger.info('ACCELERATOR', `Selected backend resolved to: ${result.active_backend}`);
     if (await isDaemonResponsive()) {
       try {
         const daemonBackend = mapBackendToDaemon(result.active_backend);
+        appLogger.info('ACCELERATOR', `Forwarding SetBackend to daemon: '${daemonBackend}'`);
         const daemonResp = await sendIpcRequest({ SetBackend: daemonBackend });
+        appLogger.info('ACCELERATOR', `Daemon responded to SetBackend:`, daemonResp);
         if (daemonResp && typeof daemonResp === 'object') {
           return {
             ...result,
@@ -1718,9 +1758,12 @@ ipcMain.handle('set_hardware_backend', async (_event, backendId) => {
           };
         }
       } catch (e) {
+        appLogger.warn('ACCELERATOR', `Daemon SetBackend forward failed: ${e.message}`);
         console.log('[Clearcore IPC] Daemon SetBackend forward skipped/failed:', e.message);
       }
     }
+  } else {
+    appLogger.warn('ACCELERATOR', `resolveBackendSelection failed:`, result);
   }
   return result;
 });
@@ -1798,6 +1841,54 @@ ipcMain.handle('set_studio_preset', async (_event, args) => {
   return { success: false, preset: 'Off' };
 });
 
+// Noise Suppression Intensity Handlers
+ipcMain.handle('get_filter_intensity', () => {
+  const settings = readAppSettings();
+  if (settings && typeof settings.filter_intensity === 'number') {
+    return settings.filter_intensity;
+  }
+  return 50;
+});
+
+ipcMain.handle('set_filter_intensity', async (_event, args) => {
+  const rawIntensity = typeof args === 'number' ? args : (args && typeof args.intensity === 'number' ? args.intensity : 50);
+  const clamped = Math.max(0, Math.min(100, Math.round(rawIntensity)));
+  writeAppSettings({ filter_intensity: clamped });
+  let daemonResponse = null;
+  if (await isDaemonResponsive()) {
+    try {
+      daemonResponse = await sendIpcRequest({ SetFilterIntensity: { intensity: clamped } });
+    } catch (e) {
+      console.log('[Clearcore IPC] Daemon SetFilterIntensity forward skipped:', e.message);
+    }
+  }
+  return { success: true, filter_intensity: clamped, daemon: daemonResponse };
+});
+
+// Voice Auto-Leveler (AGC) Intensity Handlers
+ipcMain.handle('get_voice_leveler', () => {
+  const settings = readAppSettings();
+  if (settings && typeof settings.voice_leveler === 'number') {
+    return settings.voice_leveler;
+  }
+  return 0;
+});
+
+ipcMain.handle('set_voice_leveler', async (_event, args) => {
+  const rawIntensity = typeof args === 'number' ? args : (args && typeof args.intensity === 'number' ? args.intensity : 0);
+  const clamped = Math.max(0, Math.min(100, Math.round(rawIntensity)));
+  writeAppSettings({ voice_leveler: clamped });
+  let daemonResponse = null;
+  if (await isDaemonResponsive()) {
+    try {
+      daemonResponse = await sendIpcRequest({ SetVoiceLeveler: { intensity: clamped } });
+    } catch (e) {
+      console.log('[Clearcore IPC] Daemon SetVoiceLeveler forward skipped:', e.message);
+    }
+  }
+  return { success: true, intensity: clamped, voice_leveler: clamped, daemon: daemonResponse };
+});
+
 // Voice Profile & Speaker Isolation IPC Handlers
 async function getServiceVoiceProfileStatus() {
   try {
@@ -1855,6 +1946,27 @@ ipcMain.handle('set_voice_profile', async (_event, args) => {
   }
 });
 
+ipcMain.handle('set_voice_isolation', async (_event, args) => {
+  const enabled = typeof args === 'boolean' ? args : Boolean(args && typeof args === 'object' ? args.enabled : args);
+  let forwardError = null;
+  let serviceResp = null;
+  if (await isDaemonResponsive()) {
+    try {
+      serviceResp = await sendIpcRequest({ SetVoiceIsolation: { enabled } });
+    } catch (e) {
+      forwardError = e.message;
+      console.log('[Clearcore IPC] Daemon SetVoiceIsolation failed:', e.message);
+    }
+  } else {
+    forwardError = 'service_unavailable';
+  }
+  const merged = await readMergedVoiceProfile();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('voice-profile-update', merged);
+  }
+  return { success: !forwardError, voice_isolation_enabled: enabled, profile: merged, serviceResp };
+});
+
 ipcMain.handle('get_voice_profile', () => readMergedVoiceProfile());
 
 ipcMain.handle('get_voice_profile_status', () => readMergedVoiceProfile());
@@ -1863,6 +1975,16 @@ ipcMain.handle('get_voice_profile_status', () => readMergedVoiceProfile());
 enrollmentIpc.registerEnrollmentHandlers(ipcMain, { sendIpcRequest });
 ipcMain.handle('log_voice_debug', (_event, args) => {
   enrollmentIpc.appendDebugLog(args?.origin || 'FRONTEND', args?.message || '', args?.data);
+  appLogger.log(args?.level || 'DEBUG', args?.origin || 'FRONTEND', args?.message || '', args?.data);
+  return { ok: true };
+});
+
+ipcMain.handle('log_message', (_event, args) => {
+  const level = args?.level || 'INFO';
+  const target = args?.target || 'RENDERER';
+  const message = args?.message || '';
+  const data = args?.data;
+  appLogger.log(level, target, message, data);
   return { ok: true };
 });
 

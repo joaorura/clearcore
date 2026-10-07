@@ -202,6 +202,12 @@ export interface Translations {
     title: string;
     badge: string;
     description: string;
+    isolationSwitch: string;
+    isolationEnabled: string;
+    isolationDisabled: string;
+    isolationToggling: string;
+    isolationEnabledFeedback: string;
+    isolationDisabledFeedback: string;
     statusTitle: string;
     statusActive: string;
     appliedInServiceNote: string;
@@ -394,12 +400,26 @@ export interface Translations {
     blockBypassed: string;
     neuralEqSectionTitle: string;
     neuralEqDesc: string;
+    neuralEqSwitch: string;
+    neuralEqEnabled: string;
+    neuralEqDisabled: string;
+    neuralEqBypassedDesc: string;
+    neuralEqEnabledFeedback: string;
+    neuralEqDisabledFeedback: string;
     neuralEqStatusCalibrated: string;
     neuralEqStatusPending: string;
     neuralEqDetail: string;
     neuralEqCardCalibratedBadge: string;
     neuralEqCardActiveDesc: string;
     presetSwitchedFeedback: string;
+    voiceLevelerSectionTitle: string;
+    voiceLevelerDesc: string;
+    voiceLevelerSliderLabel: string;
+    voiceLevelerOff: string;
+    voiceLevelerGentle: string;
+    voiceLevelerBalanced: string;
+    voiceLevelerFirm: string;
+    voiceLevelerFeedback: string;
   };
   serviceControl: {
     title: string;
@@ -415,6 +435,17 @@ export interface Translations {
     startConfigDesc: string;
     startConfigEnabled: string;
     startConfigDisabled: string;
+  };
+  filterIntensity: {
+    title: string;
+    description: string;
+    mild: string;
+    standard: string;
+    aggressive: string;
+    maximum: string;
+    levelFormat: string;
+    feedback: string;
+    ariaLabel: string;
   };
 }
 

@@ -462,7 +462,7 @@ describe('Daemon Active Profile & Gallery Synchronization', () => {
     backend_runtime: 'tensorrt',
     can_restart: true,
     crash_count_15m: 0,
-    dev_base_model: 'base',
+    dev_base_model: 'base' as const,
     dev_base_model_error: null,
     dsp_preset: 'Natural',
     has_voice_profile: true,
@@ -523,6 +523,29 @@ describe('Daemon Active Profile & Gallery Synchronization', () => {
     for (let s = 1; s <= 5; s++) {
       expect(completed[s]).toBeDefined();
       expect(completed[s].sampleId).toBe(`s-${s}`);
+    }
+  });
+
+  it('merges voice_isolation_enabled from service status and handles set_voice_isolation via bridge', async () => {
+    const statusWithIsolation = { ...daemonStatus, voice_isolation_enabled: false, is_voice_profile_active: false };
+    const merged = voiceProfileMerge.mergeLocalAndServiceProfile({ is_enrolled: false, active_samples_count: 0 }, statusWithIsolation);
+    expect(merged.voice_isolation_enabled).toBe(false);
+    expect(merged.is_voice_profile_active).toBe(false);
+
+    // Test bridge delegation
+    const fakeWindow: Record<string, unknown> = {};
+    (globalThis as unknown as { window: unknown }).window = fakeWindow;
+    try {
+      const mockSetVoiceIsolation = vi.fn().mockResolvedValue({ success: true, voice_isolation_enabled: false });
+      fakeWindow.clearcoreApi = {
+        setVoiceIsolation: mockSetVoiceIsolation,
+      };
+
+      const res = await invokeBridge<{ success: boolean }>('set_voice_isolation', { enabled: false });
+      expect(res.success).toBe(true);
+      expect(mockSetVoiceIsolation).toHaveBeenCalledWith(false);
+    } finally {
+      delete (globalThis as unknown as { window?: unknown }).window;
     }
   });
 });

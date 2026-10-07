@@ -236,11 +236,12 @@ impl TensorRtBackend {
         let sm = session.device().sm_string();
         let device_name = session.device().name().to_owned();
         let precision = session.precision();
-        let descriptor = Self::descriptor_for_sm(&sm, asset_id, asset_sha256);
-
         let native_version = TensorRtLibrary::load()
             .ok()
             .map(|lib| lib.version_string().to_owned());
+
+        let mut descriptor = Self::descriptor_for_sm(&sm, asset_id, asset_sha256);
+        descriptor.runtime_version = "stateful";
 
         let model = TensorRtSpectralModel {
             session,

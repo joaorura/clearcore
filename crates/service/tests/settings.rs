@@ -86,6 +86,9 @@ fn save_then_load_round_trips_every_preset() {
             version: SETTINGS_VERSION,
             preset,
             backend: None,
+            filter_intensity: 50,
+            voice_isolation_enabled: true,
+            voice_leveler: 0,
         };
         settings.save(&path).unwrap();
         assert_eq!(Settings::load(&path), settings);
@@ -104,6 +107,9 @@ fn save_writes_versioned_json_creates_parents_and_leaves_no_temporary_file() {
         version: SETTINGS_VERSION,
         preset: Preset::Podcast,
         backend: None,
+        filter_intensity: 50,
+        voice_isolation_enabled: true,
+        voice_leveler: 0,
     }
     .save(&path)
     .unwrap();
@@ -141,6 +147,9 @@ fn save_replaces_a_stale_temporary_file() {
         version: SETTINGS_VERSION,
         preset: Preset::Natural,
         backend: None,
+        filter_intensity: 50,
+        voice_isolation_enabled: true,
+        voice_leveler: 0,
     }
     .save(&path)
     .unwrap();
@@ -157,6 +166,9 @@ fn failed_save_keeps_the_previous_file_intact() {
         version: SETTINGS_VERSION,
         preset: Preset::Natural,
         backend: None,
+        filter_intensity: 50,
+        voice_isolation_enabled: true,
+        voice_leveler: 0,
     }
     .save(&path)
     .unwrap();
@@ -166,6 +178,9 @@ fn failed_save_keeps_the_previous_file_intact() {
         version: SETTINGS_VERSION,
         preset: Preset::Broadcast,
         backend: None,
+        filter_intensity: 50,
+        voice_isolation_enabled: true,
+        voice_leveler: 0,
     }
     .save(&path);
 
@@ -180,6 +195,9 @@ fn persist_settings_reports_success_failure_and_absence_of_a_path() {
         version: SETTINGS_VERSION,
         preset: Preset::Podcast,
         backend: None,
+        filter_intensity: 50,
+        voice_isolation_enabled: true,
+        voice_leveler: 0,
     };
 
     assert!(persist_settings(
@@ -204,6 +222,9 @@ fn settings_round_trips_backend_field() {
         version: SETTINGS_VERSION,
         preset: Preset::Broadcast,
         backend: Some("nvidia-tensorrt".to_string()),
+        filter_intensity: 50,
+        voice_isolation_enabled: true,
+        voice_leveler: 0,
     };
     settings.save(&path).unwrap();
     assert_eq!(Settings::load(&path), settings);
@@ -249,4 +270,46 @@ fn settings_path_uses_the_clearcore_subdirectory_of_the_config_base() {
 fn settings_path_falls_back_to_the_temp_dir_without_a_config_base() {
     let path = settings_path_from(None, Path::new("/tmp"));
     assert_eq!(path, PathBuf::from("/tmp").join("clearcore-settings.json"));
+}
+
+#[test]
+fn settings_round_trips_filter_intensity_and_voice_isolation() {
+    let dir = TempDir::new("settings-intensity-roundtrip");
+    let path = dir.path().join("settings.json");
+    let settings = Settings {
+        version: SETTINGS_VERSION,
+        preset: Preset::Podcast,
+        backend: None,
+        filter_intensity: 75,
+        voice_isolation_enabled: false,
+        voice_leveler: 0,
+    };
+    settings.save(&path).unwrap();
+    let loaded = Settings::load(&path);
+    assert_eq!(loaded.filter_intensity, 75);
+    assert_eq!(loaded.voice_isolation_enabled, false);
+
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("\"filter_intensity\": 75"));
+    assert!(raw.contains("\"voice_isolation_enabled\": false"));
+}
+
+#[test]
+fn settings_round_trips_voice_leveler() {
+    let dir = TempDir::new("settings-voice-leveler-roundtrip");
+    let path = dir.path().join("settings.json");
+    let settings = Settings {
+        version: SETTINGS_VERSION,
+        preset: Preset::Natural,
+        backend: None,
+        filter_intensity: 50,
+        voice_isolation_enabled: true,
+        voice_leveler: 85,
+    };
+    settings.save(&path).unwrap();
+    let loaded = Settings::load(&path);
+    assert_eq!(loaded.voice_leveler, 85);
+
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("\"voice_leveler\": 85"));
 }

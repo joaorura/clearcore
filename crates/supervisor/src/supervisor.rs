@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::backend::{
-    BackendResolutionInfo, instantiate_backend_with_fallback, is_explicit_accelerator_request,
+    BackendResolutionInfo, instantiate_backend_with_fallback,
 };
 use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
@@ -165,6 +165,15 @@ impl EngineSupervisor {
     }
 
     #[must_use]
+    pub fn voice_leveler_intensity(&self) -> u8 {
+        self.studio_control.leveler_intensity()
+    }
+
+    pub fn set_voice_leveler_intensity(&mut self, intensity: u8) {
+        self.studio_control.set_leveler_intensity(intensity);
+    }
+
+    #[must_use]
     pub fn with_auto_backend(model_dir: Option<&Path>, repo_root: Option<&Path>) -> Self {
         let mut supervisor = Self::default();
         let _ = supervisor.select_backend("auto", model_dir, repo_root);
@@ -202,8 +211,10 @@ impl EngineSupervisor {
     pub fn is_hardware_accelerated(&self) -> bool {
         self.backend.as_ref().is_some_and(|b| {
             let desc = b.descriptor();
-            (desc.backend == "openvino" && desc.runtime != "openvino-cpu")
-                || desc.backend == "tensorrt"
+            desc.runtime_version != "mock"
+                && desc.runtime_version != "unknown"
+                && ((desc.backend == "openvino" && desc.runtime != "openvino-cpu")
+                    || desc.backend == "tensorrt")
         })
     }
 
@@ -248,6 +259,9 @@ impl EngineSupervisor {
 
     #[must_use]
     pub fn is_accelerator_base(&self) -> bool {
+        if self.active_backend_name == "mock" {
+            return false;
+        }
         self.is_hardware_accelerated()
             || matches!(
                 self.active_backend_name.as_str(),
@@ -331,7 +345,7 @@ impl EngineSupervisor {
         if self.dev_base_model.is_some() {
             return true;
         }
-        if self.active_profile.is_some() && self.is_accelerator_base() {
+        if self.backend.is_some() && self.is_accelerator_base() {
             return true;
         }
         false
@@ -354,7 +368,12 @@ impl EngineSupervisor {
         repo_root: Option<&Path>,
     ) -> BackendResolutionInfo {
         self.requested_backend_name = request.to_string();
-        if !is_explicit_accelerator_request(request) {
+        let trimmed = request.trim().to_ascii_lowercase().replace('_', "-");
+        let is_tract_request = matches!(
+            trimmed.as_str(),
+            "tract" | "cpu-tract" | "tract-cpu" | "cpu"
+        );
+        if is_tract_request {
             if let Some(archive) = &self.dev_base_model {
                 match archive.instantiate(CpuProfile::Avx2Minimum) {
                     Ok(backend) => {

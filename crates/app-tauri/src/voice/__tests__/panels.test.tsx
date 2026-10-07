@@ -184,6 +184,19 @@ describe('ProfilePanel', () => {
     expect(m).toContain('voiceProfile.profileCompletedTitle');
     expect(m).toContain('voiceProfile.reEnrollBtn');
   });
+  it('shows voice isolation toggle switch in active and paused states', () => {
+    const onToggle = vi.fn();
+    const active: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, is_voice_profile_active: true };
+    const mActive = html(<ProfilePanel {...profileProps({ profileStatus: active, onToggleVoiceIsolation: onToggle })} />);
+    expect(mActive).toContain('toggle-switch-wrapper');
+    expect(mActive).toContain('voiceProfile.isolationEnabled');
+
+    const paused: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, stored_voice_profile_id: 'p1', is_voice_profile_active: false };
+    const mPaused = html(<ProfilePanel {...profileProps({ profileStatus: paused, onToggleVoiceIsolation: onToggle })} />);
+    expect(mPaused).toContain('profile-paused-banner');
+    expect(mPaused).toContain('toggle-switch-wrapper');
+    expect(mPaused).toContain('voiceProfile.isolationDisabled');
+  });
   it('shows building indicator on button and disables it when isBuilding is true', () => {
     const m = html(<ProfilePanel {...profileProps({ isBuilding: true })} />);
     expect(m).toMatch(/<button[^>]*disabled=""[^>]*>⏳ voiceProfile.buildingProfile/);

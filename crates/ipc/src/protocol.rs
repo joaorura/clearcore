@@ -118,6 +118,23 @@ pub enum IpcCommand {
     DiscardIntakeSuggestion {
         id: String,
     },
+    /// Sets the noise suppression intensity (0–100). Mapped to `post_filter_beta` internally.
+    SetFilterIntensity {
+        intensity: u8,
+    },
+    /// Activates or deactivates the stored voice profile without deleting it.
+    SetVoiceIsolation {
+        enabled: bool,
+    },
+    /// Sets the voice auto-leveler intensity (0–100). 0 is disabled/bypass, 50 is balanced (-16 LUFS), 100 is firm/max (-12 LUFS).
+    #[serde(
+        alias = "set_voice_leveler",
+        alias = "SetAgcIntensity",
+        alias = "set_agc_intensity"
+    )]
+    SetVoiceLeveler {
+        intensity: u8,
+    },
 }
 
 impl IpcCommand {
@@ -144,6 +161,11 @@ impl IpcCommand {
     #[must_use]
     pub const fn get_preset() -> Self {
         Self::GetPreset
+    }
+
+    #[must_use]
+    pub const fn set_voice_leveler(intensity: u8) -> Self {
+        Self::SetVoiceLeveler { intensity }
     }
 }
 
@@ -199,6 +221,18 @@ impl std::fmt::Debug for IpcCommand {
             Self::DiscardIntakeSuggestion { id } => f
                 .debug_struct("DiscardIntakeSuggestion")
                 .field("id", id)
+                .finish(),
+            Self::SetFilterIntensity { intensity } => f
+                .debug_struct("SetFilterIntensity")
+                .field("intensity", intensity)
+                .finish(),
+            Self::SetVoiceIsolation { enabled } => f
+                .debug_struct("SetVoiceIsolation")
+                .field("enabled", enabled)
+                .finish(),
+            Self::SetVoiceLeveler { intensity } => f
+                .debug_struct("SetVoiceLeveler")
+                .field("intensity", intensity)
                 .finish(),
         }
     }

@@ -124,3 +124,21 @@ fn existing_v1_commands_keep_their_wire_form() {
         assert_eq!(IpcRequest::from_json(raw).unwrap().command, command);
     }
 }
+
+#[test]
+fn set_voice_leveler_roundtrips_through_wire_format() {
+    let req = IpcRequest::new(IpcCommand::set_voice_leveler(65), json!({}));
+    let wire = req.to_json().unwrap();
+    let parsed = IpcRequest::from_json(&wire).unwrap();
+    assert_eq!(
+        parsed.command,
+        IpcCommand::SetVoiceLeveler { intensity: 65 }
+    );
+
+    let raw_alias = r#"{"version":"realtime-noise.v1","request_id":"vl1","command":{"set_voice_leveler":{"intensity":80}},"payload":{}}"#;
+    let parsed_alias = IpcRequest::from_json(raw_alias).unwrap();
+    assert_eq!(
+        parsed_alias.command,
+        IpcCommand::SetVoiceLeveler { intensity: 80 }
+    );
+}

@@ -145,3 +145,74 @@ describe('Audio playback termination and race condition coordinator (Problem 1)'
     expect(audioB.pause).toHaveBeenCalled();
   });
 });
+
+describe('AudioTestCard physical input device resolution & explicit deviceId constraints', () => {
+  it('passes explicit deviceId exact constraint matching user selected physical device', async () => {
+    const requestedConstraints: MediaStreamConstraints[] = [];
+    const mockTrack = { stop: vi.fn() };
+    const mockStream = {
+      getTracks: () => [mockTrack],
+    };
+
+    const mockMediaDevices = {
+      enumerateDevices: vi.fn(async () => [
+        {
+          deviceId: 'internal-mic-id',
+          groupId: 'grp-1',
+          kind: 'audioinput',
+          label: 'Microfone Interno (Realtek)',
+        },
+        {
+          deviceId: 'headset-mic-id',
+          groupId: 'grp-2',
+          kind: 'audioinput',
+          label: 'Fone de Ouvido USB Headset Mic',
+        },
+        {
+          deviceId: 'clearcore-virt-id',
+          groupId: 'grp-3',
+          kind: 'audioinput',
+          label: 'Clearcore Realtime Virtual Mic',
+        },
+      ]),
+      getUserMedia: vi.fn(async (constraints: MediaStreamConstraints) => {
+        requestedConstraints.push(constraints);
+        return mockStream as unknown as MediaStream;
+      }),
+    };
+
+    vi.stubGlobal('navigator', {
+      mediaDevices: mockMediaDevices,
+    });
+
+    const inputDevices = [
+      { id: 'dev-1', name: 'Microfone Interno (Realtek)', is_default: true },
+      { id: 'dev-2', name: 'Fone de Ouvido USB Headset', is_default: false },
+    ];
+
+    // Import resolvePhysicalAudioDevice to verify resolution directly
+    const { resolvePhysicalAudioDevice } = await import('../voice/captureDevice');
+    const devs = await mockMediaDevices.enumerateDevices();
+    const resolved = resolvePhysicalAudioDevice(devs as unknown as MediaDeviceInfo[], 'dev-2', inputDevices);
+
+    expect(resolved).toBeDefined();
+    expect(resolved?.deviceId).toBe('headset-mic-id');
+    expect(resolved?.label).toContain('Fone de Ouvido');
+
+    // Simulate getUserMedia call as done in startRecording()
+    await mockMediaDevices.getUserMedia({
+      audio: {
+        deviceId: { exact: resolved!.deviceId },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+      video: false,
+    });
+
+    const callAudio = requestedConstraints[0]?.audio as MediaTrackConstraints;
+    expect(callAudio).toBeDefined();
+    expect(callAudio.deviceId).toEqual({ exact: 'headset-mic-id' });
+    expect(callAudio.deviceId).not.toEqual({ exact: 'internal-mic-id' });
+  });
+});

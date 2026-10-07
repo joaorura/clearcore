@@ -214,8 +214,10 @@ impl OpenVINOBackend {
         device: impl Into<String>,
     ) -> Self {
         let dev = device.into();
+        let mut descriptor = descriptor_for(&dev, asset_id.into(), asset_sha256.into());
+        descriptor.runtime_version = "mock";
         Self {
-            descriptor: descriptor_for(&dev, asset_id.into(), asset_sha256.into()),
+            descriptor,
             device: dev,
             engine: Engine::Passthrough,
             simulated_failure: false,
