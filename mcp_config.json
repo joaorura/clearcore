@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "serena": {
+      "command": "serena",
+      "args": [
+        "start-mcp-server",
+        "--context=antigravity",
+        "--project-from-cwd"
+      ]
+    },
+    "codegraph": {
+      "command": "codegraph",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
+    },
+    "enquire": {
+      "command": "enquire-mcp",
+      "args": [
+        "serve",
+        "--vault",
+        "."
+      ]
+    }
+  }
+}
