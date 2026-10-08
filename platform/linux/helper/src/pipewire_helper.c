@@ -146,6 +146,9 @@ static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
         if ((device_bus && strcmp(device_bus, "bluetooth") == 0) ||
             (device_name && strstr(device_name, "bluez_card") != NULL)) {
             ctx->bluetooth_card_id = id;
+            if (device_name) {
+                snprintf(ctx->bluetooth_card_name, sizeof(ctx->bluetooth_card_name), "%s", device_name);
+            }
             fprintf(stderr, "[pipewire_helper] Detected Bluetooth Audio Card: %s (Card ID: %u)\n",
                     device_name ? device_name : "bluez_card", id);
         }
@@ -352,9 +355,45 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
         if (!ctx->bluetooth_is_headset) return;
         ctx->bluetooth_is_headset = false;
         fprintf(stderr, "[pipewire_helper] Audio stream idle: releasing Bluetooth to high-fidelity A2DP on Card %u\n", ctx->bluetooth_card_id);
-        char cmd[256];
-        snprintf(cmd, sizeof(cmd), "wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
-                 ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+
+        /* Read preferred profile saved in WirePlumber state (e.g. a2dp-sink, a2dp-sink-sbc, etc.) */
+        char pref_profile[64] = {0};
+        const char *home = getenv("HOME");
+        if (home && ctx->bluetooth_card_name[0] != '\0') {
+            char path[512];
+            snprintf(path, sizeof(path), "%s/.local/state/wireplumber/default-profile", home);
+            FILE *f = fopen(path, "r");
+            if (f) {
+                char line[256];
+                while (fgets(line, sizeof(line), f)) {
+                    char *eq = strchr(line, '=');
+                    if (eq) {
+                        *eq = '\0';
+                        char *val = eq + 1;
+                        // trim trailing newline
+                        char *nl = strchr(val, '\n');
+                        if (nl) *nl = '\0';
+                        char *cr = strchr(val, '\r');
+                        if (cr) *cr = '\0';
+                        if (strcmp(line, ctx->bluetooth_card_name) == 0 && val[0] != '\0') {
+                            snprintf(pref_profile, sizeof(pref_profile), "%s", val);
+                            break;
+                        }
+                    }
+                }
+                fclose(f);
+            }
+        }
+
+        char cmd[512];
+        if (pref_profile[0] != '\0') {
+            fprintf(stderr, "[pipewire_helper] Restoring system preferred profile '%s' for %s\n", pref_profile, ctx->bluetooth_card_name);
+            snprintf(cmd, sizeof(cmd), "wpctl set-profile %u %s 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
+                     ctx->bluetooth_card_id, pref_profile, ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+        } else {
+            snprintf(cmd, sizeof(cmd), "wpctl set-profile %u a2dp-sink 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
+                     ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+        }
         int ret = system(cmd);
         (void)ret;
     }
@@ -369,6 +408,11 @@ static void on_bt_release_timer(void *data, uint64_t expirations) {
     if (ctx->bt_release_timer && ctx->loop) {
         struct timespec value = {0, 0};
         pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+    }
+
+    /* Pause physical capture stream so PipeWire knows the mic is completely dormant */
+    if (ctx->capture_stream) {
+        pw_stream_set_active(ctx->capture_stream, false);
     }
 
     bluetooth_switch_profile(ctx, false);
@@ -398,6 +442,12 @@ static void on_stream_state_changed(void *data, enum pw_stream_state old,
                 struct timespec value = {0, 0};
                 pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
             }
+
+            // Reactivate physical microphone capture stream
+            if (ctx->capture_stream) {
+                pw_stream_set_active(ctx->capture_stream, true);
+            }
+
             // Stream is actively recording: acquire Bluetooth headset profile
             bluetooth_switch_profile(ctx, true);
             break;
@@ -411,12 +461,18 @@ static void on_stream_state_changed(void *data, enum pw_stream_state old,
                 struct timespec value = {3, 500000000}; // 3.5 seconds
                 pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
             } else {
+                if (ctx->capture_stream) {
+                    pw_stream_set_active(ctx->capture_stream, false);
+                }
                 bluetooth_switch_profile(ctx, false);
             }
             break;
         case PW_STREAM_STATE_UNCONNECTED:
             atomic_store_explicit(&ctx->node_ready, false, memory_order_release);
             fprintf(stderr, "[pipewire_helper] Stream unconnected\n");
+            if (ctx->capture_stream) {
+                pw_stream_set_active(ctx->capture_stream, false);
+            }
             bluetooth_switch_profile(ctx, false);
             break;
         default:
