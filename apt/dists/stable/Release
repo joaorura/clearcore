@@ -1,0 +1,7 @@
+Origin: Clearcore
+Label: Clearcore
+Suite: stable
+Codename: stable
+Architectures: amd64 arm64
+Components: main
+Description: Official Clearcore Realtime AI Noise Suppression APT Repository

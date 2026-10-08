@@ -1,0 +1,17 @@
+Package: clearcore
+Version: 0.1.0-beta.1
+Architecture: amd64
+Maintainer: João Messias Lima Pereira <jmessiaslp856@gmail.com>
+Depends: pipewire (>= 0.3.0)
+Filename: pool/main/Clearcore-0.1.0-beta.1_amd64.deb
+Size: 148429770
+MD5sum: deba322c74f05cf48039c6291b7d1178
+SHA1: 679f9debb564f46ecdacde35c670c5e7bd7e8ede
+SHA256: 18bd830b6f511d135c8d67d3a1117da484310eba0d8f0389d962654313ae685f
+Section: sound
+Priority: optional
+Homepage: https://github.com/joaorura/clearcore
+Description: Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
+ Clearcore provides realtime voice isolation, neural EQ acoustic calibration,
+ and studio DSP for Linux desktops via PipeWire.
+

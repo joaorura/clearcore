@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: joaorura.Clearcore
+PackageVersion: 0.1.0-beta.1
+PackageLocale: en-US
+Publisher: João Rura
+PublisherUrl: https://github.com/joaorura
+PackageName: Clearcore
+PackageUrl: https://github.com/joaorura/clearcore
+License: PolyForm Noncommercial 1.0.0
+ShortDescription: Realtime AI noise-suppression virtual microphone powered by DeepFilterNet3.
+Tags:
+  - noise-suppression
+  - microphone
+  - deepfilternet
+  - audio
+  - ai
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

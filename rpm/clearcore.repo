@@ -1,0 +1,8 @@
+[clearcore]
+name=Clearcore Realtime AI Noise Suppression Virtual Mic
+baseurl=https://joaorura.github.io/clearcore/rpm/$basearch/
+enabled=1
+gpgcheck=0
+repo_gpgcheck=0
+metadata_expire=1d
+type=rpm-md
