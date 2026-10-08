@@ -171,4 +171,63 @@ final class EngineXpcTests: XCTestCase {
 
         XCTAssertEqual(client.mode, .active)
     }
+
+    func testBluetoothCaptureHysteresisAndA2DPRelease() {
+        let client = EngineXpcClient()
+
+        var captureStateChanges: [Bool] = []
+        client.onPhysicalCaptureStateChange = { running in
+            captureStateChanges.append(running)
+        }
+
+        // 1. Initial state
+        XCTAssertFalse(client.isBluetoothCapture)
+        XCTAssertFalse(client.isCaptureRunning)
+        XCTAssertFalse(client.isBluetoothReleaseTimerArmed)
+
+        // 2. Configure physical capture as Bluetooth
+        client.setPhysicalCaptureBluetooth(true)
+        let expBt = expectation(description: "Set Bluetooth")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { expBt.fulfill() }
+        wait(for: [expBt], timeout: 1.0)
+        XCTAssertTrue(client.isBluetoothCapture)
+
+        // 3. Virtual microphone client connects (e.g. Zoom starts recording)
+        client.syncVirtualClientCount(1)
+        let expStart = expectation(description: "Virtual Client Start")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { expStart.fulfill() }
+        wait(for: [expStart], timeout: 1.0)
+
+        XCTAssertTrue(client.isCaptureRunning)
+        XCTAssertFalse(client.isBluetoothReleaseTimerArmed)
+        XCTAssertEqual(captureStateChanges.last, true, "Physical capture must start immediately upon virtual mic demand")
+
+        // 4. Virtual microphone client disconnects (idle) -> arms 3.5s hysteresis timer
+        client.syncVirtualClientCount(0)
+        let expIdle = expectation(description: "Virtual Client Idle")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { expIdle.fulfill() }
+        wait(for: [expIdle], timeout: 1.0)
+
+        XCTAssertTrue(client.isCaptureRunning, "Capture must remain running during hysteresis hold")
+        XCTAssertTrue(client.isBluetoothReleaseTimerArmed, "3.5s release timer must be armed")
+
+        // 5. New client reconnects before timer expires -> timer cancelled, stream preserved
+        client.syncVirtualClientCount(1)
+        let expReopen = expectation(description: "Reopen before timer")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { expReopen.fulfill() }
+        wait(for: [expReopen], timeout: 1.0)
+
+        XCTAssertTrue(client.isCaptureRunning)
+        XCTAssertFalse(client.isBluetoothReleaseTimerArmed, "Timer must be cancelled when client reconnects")
+
+        // 6. Non-Bluetooth input does not arm timer
+        client.setPhysicalCaptureBluetooth(false)
+        client.syncVirtualClientCount(0)
+        let expNonBt = expectation(description: "Non-BT Idle")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { expNonBt.fulfill() }
+        wait(for: [expNonBt], timeout: 1.0)
+
+        XCTAssertFalse(client.isBluetoothReleaseTimerArmed, "Non-Bluetooth mic must not arm A2DP release timer")
+    }
 }
+

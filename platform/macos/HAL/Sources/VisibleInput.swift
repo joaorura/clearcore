@@ -140,24 +140,73 @@ public final class VisibleInputEndpoint {
         return volumePtr.pointee
     }
 
-    public func startIO() -> OSStatus {
+    public var activeClients: Int {
         os_unfair_lock_lock(controlLock)
         defer { os_unfair_lock_unlock(controlLock) }
+        return activeClientCount
+    }
+
+    /// Observer callback invoked outside audio thread whenever activeClientCount changes.
+    /// Parameters: (newActiveClientCount, isRunning)
+    public var onActiveClientCountChange: ((Int, Bool) -> Void)?
+
+    public func startIO(host: AudioServerPlugInHostRef? = nil) -> OSStatus {
+        os_unfair_lock_lock(controlLock)
+        let previousRunning = (activeClientCount > 0)
         activeClientCount += 1
-        memoryBarrier()
-        isRunningPtr.pointee = 1
+        let count = activeClientCount
+        let runningChanged = !previousRunning
+        if runningChanged {
+            memoryBarrier()
+            isRunningPtr.pointee = 1
+        }
+        let observer = onActiveClientCountChange
+        os_unfair_lock_unlock(controlLock)
+
+        observer?(count, true)
+
+        if runningChanged, let host = host {
+            notifyDeviceIsRunningChanged(host: host)
+        }
+
         return noErr
     }
 
-    public func stopIO() -> OSStatus {
+    public func stopIO(host: AudioServerPlugInHostRef? = nil) -> OSStatus {
         os_unfair_lock_lock(controlLock)
-        defer { os_unfair_lock_unlock(controlLock) }
+        let previousRunning = (activeClientCount > 0)
         activeClientCount = max(0, activeClientCount - 1)
-        if activeClientCount == 0 {
+        let count = activeClientCount
+        let runningChanged = previousRunning && (count == 0)
+        if runningChanged {
             memoryBarrier()
             isRunningPtr.pointee = 0
         }
+        let observer = onActiveClientCountChange
+        os_unfair_lock_unlock(controlLock)
+
+        observer?(count, count > 0)
+
+        if runningChanged, let host = host {
+            notifyDeviceIsRunningChanged(host: host)
+        }
+
         return noErr
+    }
+
+    /// Notifies CoreAudio HAL host that `kAudioDevicePropertyDeviceIsRunning` has changed.
+    public func notifyDeviceIsRunningChanged(host: AudioServerPlugInHostRef) {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunning,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster
+        )
+        #if canImport(Darwin)
+        let hostInterface = host.pointee.pointee
+        _ = withUnsafePointer(to: &address) { addrPtr in
+            hostInterface.PropertiesChanged?(host, Self.deviceObjectID, 1, addrPtr)
+        }
+        #endif
     }
 
     // MARK: - Realtime Audio Callback (Zero Allocation, Lock-Free, RPC-Free)

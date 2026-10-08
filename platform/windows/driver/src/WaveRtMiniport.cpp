@@ -388,6 +388,8 @@ STDMETHODIMP CMiniportWaveRTStream::SetState(
         return STATUS_SUCCESS;
     }
 
+    KSSTATE oldState = m_State;
+
     switch (State) {
     case KSSTATE_STOP:
         KeCancelTimer(&m_NotificationTimer);
@@ -396,13 +398,28 @@ STDMETHODIMP CMiniportWaveRTStream::SetState(
         if (m_DmaBuffer != nullptr && m_DmaBufferSize > 0) {
             RtlZeroMemory(m_DmaBuffer, m_DmaBufferSize);
         }
+        if (oldState == KSSTATE_RUN && m_Transport != nullptr) {
+            m_Transport->DecrementActiveStreams();
+        }
         break;
 
     case KSSTATE_ACQUIRE:
+        KeCancelTimer(&m_NotificationTimer);
+        if (m_DmaBuffer != nullptr && m_DmaBufferSize > 0) {
+            RtlZeroMemory(m_DmaBuffer, m_DmaBufferSize);
+        }
+        if (oldState == KSSTATE_RUN && m_Transport != nullptr) {
+            m_Transport->DecrementActiveStreams();
+        }
+        break;
+
     case KSSTATE_PAUSE:
         KeCancelTimer(&m_NotificationTimer);
         if (m_DmaBuffer != nullptr && m_DmaBufferSize > 0) {
             RtlZeroMemory(m_DmaBuffer, m_DmaBufferSize);
+        }
+        if (oldState == KSSTATE_RUN && m_Transport != nullptr) {
+            m_Transport->DecrementActiveStreams();
         }
         break;
 
@@ -418,6 +435,10 @@ STDMETHODIMP CMiniportWaveRTStream::SetState(
             LARGE_INTEGER dueTime;
             dueTime.QuadPart = -100000LL; // 10ms relative
             KeSetTimerEx(&m_NotificationTimer, dueTime, 10, &m_NotificationDpc);
+
+            if (oldState != KSSTATE_RUN && m_Transport != nullptr) {
+                m_Transport->IncrementActiveStreams();
+            }
         }
         break;
     }

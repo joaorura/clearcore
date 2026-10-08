@@ -39,7 +39,8 @@ struct TransportStats {
     ULONG  ActiveSessionId;
     ULONG  ActiveProcessId;
     BOOLEAN IsSessionActive;
-    UINT8  Reserved[7];
+    UINT8  Reserved[3];
+    ULONG  ActiveStreamsCount;
 };
 #pragma pack(pop)
 
@@ -68,12 +69,18 @@ private:
 
     // Metrics
     TransportStats      m_Stats;
+    volatile LONG       m_ActiveStreamsCount;
 
 public:
     CIoctlTransport();
     ~CIoctlTransport();
 
     NTSTATUS Initialize();
+
+    // Active streams tracking
+    LONG IncrementActiveStreams();
+    LONG DecrementActiveStreams();
+    LONG GetActiveStreamsCount() const;
 
     // Session Management
     NTSTATUS AcquireSession(

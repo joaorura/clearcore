@@ -55,6 +55,7 @@ pub struct TransportStats {
     pub active_session_id: u32,
     pub active_process_id: u32,
     pub is_session_active: bool,
+    pub active_streams_count: u32,
 }
 
 /// Production Windows PortCls/WaveRT virtual microphone adapter.
@@ -116,6 +117,11 @@ impl WindowsVirtualMicrophone {
     /// Returns the current transport statistics.
     pub const fn stats(&self) -> TransportStats {
         self.stats
+    }
+
+    /// Updates the active streams count in transport statistics (simulating driver status update).
+    pub fn set_active_streams_count(&mut self, count: u32) {
+        self.stats.active_streams_count = count;
     }
 
     /// Encodes a [`FrameEnvelope`] into [`WireFrameEnvelopeV1`], applying the
