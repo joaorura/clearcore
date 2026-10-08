@@ -174,6 +174,7 @@ export function applySetVoiceProfileResult(
     neural_eq_calibrated: svc.neural_eq_calibrated,
     dev_base_model: svc.dev_base_model,
     dev_base_model_error: svc.dev_base_model_error,
+    voice_isolation_enabled: svc.voice_isolation_enabled,
   };
 }
 
