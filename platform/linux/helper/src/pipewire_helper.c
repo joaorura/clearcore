@@ -169,9 +169,20 @@ static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
     }
 }
 
+static void registry_event_global_remove(void *data, uint32_t id) {
+    pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)data;
+    if (!ctx) return;
+    if (ctx->bluetooth_card_id == id) {
+        ctx->bluetooth_card_id = 0;
+        ctx->bluetooth_is_headset = false;
+        fprintf(stderr, "[pipewire_helper] Bluetooth Audio Card removed (ID: %u)\n", id);
+    }
+}
+
 static const struct pw_registry_events registry_events = {
     .version = PW_VERSION_REGISTRY_EVENTS,
     .global = registry_event_global,
+    .global_remove = registry_event_global_remove,
 };
 
 /**
@@ -346,9 +357,14 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
         if (ctx->bluetooth_is_headset) return;
         ctx->bluetooth_is_headset = true;
         fprintf(stderr, "[pipewire_helper] Audio stream active: activating Bluetooth Headset profile on Card %u\n", ctx->bluetooth_card_id);
-        char cmd[256];
-        snprintf(cmd, sizeof(cmd), "wpctl set-profile %u 196865 2>/dev/null || wpctl set-profile %u 196864 2>/dev/null",
-                 ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+        char cmd[512];
+        if (ctx->bluetooth_card_name[0] != '\0') {
+            snprintf(cmd, sizeof(cmd), "pactl set-card-profile %s headset-head-unit 2>/dev/null || wpctl set-profile %u 196865 2>/dev/null || wpctl set-profile %u 196864 2>/dev/null",
+                     ctx->bluetooth_card_name, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+        } else {
+            snprintf(cmd, sizeof(cmd), "wpctl set-profile %u 196865 2>/dev/null || wpctl set-profile %u 196864 2>/dev/null",
+                     ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+        }
         int ret = system(cmd);
         (void)ret;
     } else {
@@ -375,7 +391,7 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
                         if (nl) *nl = '\0';
                         char *cr = strchr(val, '\r');
                         if (cr) *cr = '\0';
-                        if (strcmp(line, ctx->bluetooth_card_name) == 0 && val[0] != '\0') {
+                        if (strcmp(line, ctx->bluetooth_card_name) == 0 && val[0] != '\0' && strcmp(val, "off") != 0) {
                             snprintf(pref_profile, sizeof(pref_profile), "%s", val);
                             break;
                         }
@@ -385,14 +401,15 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
             }
         }
 
+        const char *target_prof = (pref_profile[0] != '\0') ? pref_profile : "a2dp-sink";
         char cmd[512];
-        if (pref_profile[0] != '\0') {
-            fprintf(stderr, "[pipewire_helper] Restoring system preferred profile '%s' for %s\n", pref_profile, ctx->bluetooth_card_name);
-            snprintf(cmd, sizeof(cmd), "wpctl set-profile %u %s 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
-                     ctx->bluetooth_card_id, pref_profile, ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+        if (ctx->bluetooth_card_name[0] != '\0') {
+            fprintf(stderr, "[pipewire_helper] Restoring profile '%s' for %s (Card %u)\n", target_prof, ctx->bluetooth_card_name, ctx->bluetooth_card_id);
+            snprintf(cmd, sizeof(cmd), "pactl set-card-profile %s %s 2>/dev/null || wpctl set-profile %u %s 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null",
+                     ctx->bluetooth_card_name, target_prof, ctx->bluetooth_card_id, target_prof, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
         } else {
-            snprintf(cmd, sizeof(cmd), "wpctl set-profile %u a2dp-sink 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
-                     ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+            snprintf(cmd, sizeof(cmd), "wpctl set-profile %u %s 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
+                     ctx->bluetooth_card_id, target_prof, ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
         }
         int ret = system(cmd);
         (void)ret;
