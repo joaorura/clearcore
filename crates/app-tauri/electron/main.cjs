@@ -1109,14 +1109,27 @@ async function manageBluetoothProfile(isCapturing) {
       if (btDev) {
         const cardId = btDev.id;
         const enumProfiles = (btDev.info && btDev.info.params && btDev.info.params.EnumProfile) || [];
-        // Select reliable headset profile (CVSD works reliably with Baseus and standard SCO chips)
-        const hfpProf = enumProfiles.find((p) => p.name === 'headset-head-unit-cvsd') ||
-          enumProfiles.find((p) => p.name === 'headset-head-unit') ||
-          enumProfiles.find((p) => p.name && p.name.startsWith('headset-head-unit')) ||
-          enumProfiles.find((p) => p.name && p.name.includes('headset'));
+        // Respect OS / WirePlumber preference: check saved profile first, or pick highest priority headset profile
+        let preferredName = null;
+        try {
+          const wpState = require('fs').readFileSync(
+            require('path').join(require('os').homedir(), '.local', 'state', 'wireplumber', 'default-profile'),
+            'utf8'
+          );
+          const m = wpState.match(new RegExp(`${btDev.info.props['device.name']}=([^\\s]+)`));
+          if (m) preferredName = m[1].trim();
+        } catch {}
+
+        const hfpProfiles = enumProfiles.filter((p) => p.name && (p.name.includes('headset') || p.name.includes('hfp') || p.name.includes('hsp')));
+        // Sort by priority descending according to the OS / PipeWire kernel
+        hfpProfiles.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+        const hfpProf = (preferredName && hfpProfiles.find((p) => p.name === preferredName)) ||
+          hfpProfiles[0] ||
+          enumProfiles.find((p) => p.name && p.name.startsWith('headset'));
 
         if (hfpProf) {
-          appLogger.info('BLUETOOTH', `Activating Headset profile (HFP ${hfpProf.name}, index ${hfpProf.index}) on card ${cardId}`);
+          appLogger.info('BLUETOOTH', `Activating Headset profile (${hfpProf.name}, index ${hfpProf.index}, prio ${hfpProf.priority}) according to OS configuration on card ${cardId}`);
           require('child_process').execSync(`wpctl set-profile ${cardId} ${hfpProf.index}`, { timeout: 3000 });
           currentBtProfileMode = 'hfp';
 
