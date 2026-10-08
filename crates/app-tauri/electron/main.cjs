@@ -1109,8 +1109,9 @@ async function manageBluetoothProfile(isCapturing) {
       if (btDev) {
         const cardId = btDev.id;
         const enumProfiles = (btDev.info && btDev.info.params && btDev.info.params.EnumProfile) || [];
-        // Find best headset profile: mSBC preferred, then cvsd, then generic headset
-        const hfpProf = enumProfiles.find((p) => p.name === 'headset-head-unit') ||
+        // Select reliable headset profile (CVSD works reliably with Baseus and standard SCO chips)
+        const hfpProf = enumProfiles.find((p) => p.name === 'headset-head-unit-cvsd') ||
+          enumProfiles.find((p) => p.name === 'headset-head-unit') ||
           enumProfiles.find((p) => p.name && p.name.startsWith('headset-head-unit')) ||
           enumProfiles.find((p) => p.name && p.name.includes('headset'));
 
