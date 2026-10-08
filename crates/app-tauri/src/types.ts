@@ -35,6 +35,8 @@ export interface InputDeviceInfo {
   id: string;
   name: string;
   is_default?: boolean;
+  nodeName?: string;
+  idle?: boolean;
 }
 
 export type StudioPreset = 'Natural' | 'Podcast' | 'Broadcast' | 'Off';

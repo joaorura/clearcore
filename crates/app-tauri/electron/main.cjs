@@ -875,13 +875,15 @@ function createTray() {
 }
 
 let currentInputDevices = [];
+let cachedInputDevices = [];
 let selectedInputDeviceId = null;
+let selectedInputNodeName = null;
 
 // Enumerate physical/system audio input devices (excluding Clearcore virtual mics)
 function enumerateSystemInputDevices() {
   const isWin = process.platform === 'win32';
   const isMac = process.platform === 'darwin';
-  const devices = [];
+  let devices = [];
 
   if (isWin) {
     try {
@@ -923,43 +925,150 @@ function enumerateSystemInputDevices() {
     }
   } else {
     // Linux PipeWire / WirePlumber
+    let pwDumpWorked = false;
     try {
-      const out = require('child_process').execSync('wpctl status', { encoding: 'utf8', timeout: 3000 });
-      const lines = out.split('\n');
-      let inAudio = false;
-      let inSources = false;
-      for (const line of lines) {
-        if (line.trim().startsWith('Audio')) {
-          inAudio = true;
-          continue;
+      const dumpStr = require('child_process').execSync('pw-dump Node', { encoding: 'utf8', timeout: 3000 });
+      const dump = JSON.parse(dumpStr);
+      for (const n of dump) {
+        const nid = String(n.id);
+        const props = (n.info && n.info.props) || {};
+        const mc = props['media.class'] || '';
+        const nodeName = props['node.name'] || '';
+        const desc = props['node.description'] || props['node.nick'] || nodeName;
+        const isSource = mc === 'Audio/Source' || nodeName.startsWith('bluez_input.');
+        if (isSource && !nodeName.toLowerCase().includes('realtime') && !nodeName.toLowerCase().includes('clearcore')) {
+          devices.push({
+            id: nid,
+            name: desc,
+            nodeName: nodeName,
+            is_default: false,
+          });
         }
-        if (inAudio && (line.trim().startsWith('Video') || line.trim().startsWith('Settings'))) {
-          inAudio = false;
-          inSources = false;
-          continue;
+      }
+      if (devices.length > 0) {
+        pwDumpWorked = true;
+      }
+    } catch {}
+
+    if (!pwDumpWorked) {
+      try {
+        const out = require('child_process').execSync('wpctl status', { encoding: 'utf8', timeout: 3000 });
+        const lines = out.split('\n');
+        let inAudio = false;
+        let inSources = false;
+        for (const line of lines) {
+          if (line.trim().startsWith('Audio')) {
+            inAudio = true;
+            continue;
+          }
+          if (inAudio && (line.trim().startsWith('Video') || line.trim().startsWith('Settings'))) {
+            inAudio = false;
+            inSources = false;
+            continue;
+          }
+          if (inAudio && line.includes('Sources:')) {
+            inSources = true;
+            continue;
+          }
+          if (inSources && (line.includes('Filters:') || line.includes('Streams:') || line.includes('Sinks:'))) {
+            inSources = false;
+            continue;
+          }
+          if (inSources) {
+            const match = line.match(/(?:\*|\s)\s*(\d+)\.\s+([^\[]+)(?:\[.*\])?/);
+            if (match) {
+              const id = match[1].trim();
+              const name = match[2].trim();
+              const isDefault = line.includes('*');
+              if (!name.toLowerCase().includes('realtime') && !name.toLowerCase().includes('clearcore')) {
+                devices.push({ id, name, is_default: isDefault });
+              }
+            }
+          }
         }
-        if (inAudio && line.includes('Sources:')) {
-          inSources = true;
-          continue;
+      } catch {
+        // Fallback
+      }
+    } else {
+      try {
+        const out = require('child_process').execSync('wpctl status', { encoding: 'utf8', timeout: 3000 });
+        for (const dev of devices) {
+          if (out.includes(`*   ${dev.id}.`) || out.includes(`*  ${dev.id}.`) || out.includes(`* ${dev.id}.`)) {
+            dev.is_default = true;
+          }
         }
-        if (inSources && (line.includes('Filters:') || line.includes('Streams:') || line.includes('Sinks:'))) {
-          inSources = false;
-          continue;
-        }
-        if (inSources) {
-          const match = line.match(/(?:\*|\s)\s*(\d+)\.\s+([^\[]+)(?:\[.*\])?/);
-          if (match) {
-            const id = match[1].trim();
-            const name = match[2].trim();
-            const isDefault = line.includes('*');
-            if (!name.toLowerCase().includes('realtime') && !name.toLowerCase().includes('clearcore')) {
-              devices.push({ id, name, is_default: isDefault });
+      } catch {}
+    }
+
+    // Detect Bluetooth cards/devices even when dormant in A2DP mode (so user can always select them)
+    try {
+      const devDumpStr = require('child_process').execSync('pw-dump Device', { encoding: 'utf8', timeout: 3000 });
+      const devDump = JSON.parse(devDumpStr);
+      for (const d of devDump) {
+        const dProps = (d.info && d.info.props) || {};
+        const isBt = dProps['device.bus'] === 'bluetooth' || (dProps['device.name'] && dProps['device.name'].startsWith('bluez_card.'));
+        if (isBt) {
+          const cardId = d.id;
+          const addr = dProps['api.bluez5.address'] || dProps['device.string'] || '';
+          const alias = dProps['device.alias'] || dProps['device.description'] || dProps['device.name'] || 'Bluetooth Headset';
+          const nodeNameColons = addr ? `bluez_input.${addr}` : '';
+          const nodeNameUnderscores = addr ? `bluez_input.${addr.replace(/:/g, '_')}` : '';
+
+          // Check if already in devices list
+          const alreadyIn = devices.some((x) =>
+            (x.nodeName && (x.nodeName === nodeNameColons || x.nodeName === nodeNameUnderscores || (addr && x.nodeName.includes(addr)))) ||
+            (x.name && x.name.toLowerCase() === alias.toLowerCase())
+          );
+
+          if (!alreadyIn) {
+            devices.push({
+              id: String(cardId),
+              name: alias,
+              nodeName: nodeNameColons || nodeNameUnderscores || `bluez_card.${cardId}`,
+              is_default: false,
+              is_bluetooth_card: true,
+              cardId: cardId,
+              idle: true,
+            });
+          } else {
+            const devObj = devices.find((x) =>
+              (x.nodeName && (x.nodeName === nodeNameColons || x.nodeName === nodeNameUnderscores || (addr && x.nodeName.includes(addr)))) ||
+              (x.name && x.name.toLowerCase() === alias.toLowerCase())
+            );
+            if (devObj) {
+              devObj.is_bluetooth_card = true;
+              devObj.cardId = cardId;
             }
           }
         }
       }
-    } catch {
-      // Fallback
+    } catch {}
+
+    // Retain recently seen devices (especially Bluetooth headsets that temporarily suspend or sleep)
+    for (const cached of cachedInputDevices) {
+      const match = devices.find((d) => (d.nodeName && d.nodeName === cached.nodeName) || d.name === cached.name);
+      if (!match) {
+        devices.push({ ...cached, idle: true });
+      }
+    }
+  }
+
+  // Update device cache
+  for (const dev of devices) {
+    const existingIdx = cachedInputDevices.findIndex((c) => (dev.nodeName && c.nodeName === dev.nodeName) || c.name === dev.name);
+    if (existingIdx >= 0) {
+      cachedInputDevices[existingIdx] = { ...cachedInputDevices[existingIdx], ...dev };
+    } else {
+      cachedInputDevices.push(dev);
+    }
+  }
+
+  // Keep selected device synced with updated PipeWire IDs if nodeName matches
+  if (selectedInputNodeName) {
+    const activeMatch = devices.find((d) => d.nodeName === selectedInputNodeName);
+    if (activeMatch && activeMatch.id !== selectedInputDeviceId) {
+      selectedInputDeviceId = activeMatch.id;
+      writeClearcoreSharedState({ targetNodeId: activeMatch.id });
     }
   }
 
@@ -967,19 +1076,127 @@ function enumerateSystemInputDevices() {
   return devices;
 }
 
+// Bluetooth Headset Automatic Dynamic Profile Management (A2DP for high-fidelity playback, HFP for voice capture)
+let lastActiveCaptureTime = 0;
+let currentBtProfileMode = 'a2dp'; // 'a2dp' | 'hfp'
+let btSwitchingInProgress = false;
+
+async function manageBluetoothProfile(isCapturing) {
+  if (process.platform !== 'linux') return;
+  if (!selectedInputNodeName && !selectedInputDeviceId) return;
+
+  const isBtSelected = (selectedInputNodeName && (selectedInputNodeName.startsWith('bluez_') || selectedInputNodeName.includes(':'))) ||
+    currentInputDevices.some((d) => (d.id === selectedInputDeviceId || d.nodeName === selectedInputNodeName) && d.is_bluetooth_card);
+
+  if (!isBtSelected) return;
+
+  const now = Date.now();
+  if (isCapturing) {
+    lastActiveCaptureTime = now;
+  }
+
+  // If capturing and currently in A2DP, activate Headset mode (HFP/HSP)
+  if (isCapturing && currentBtProfileMode !== 'hfp' && !btSwitchingInProgress) {
+    btSwitchingInProgress = true;
+    try {
+      const devDumpStr = require('child_process').execSync('pw-dump Device', { encoding: 'utf8', timeout: 3000 });
+      const devDump = JSON.parse(devDumpStr);
+      const btDev = devDump.find((d) => {
+        const p = (d.info && d.info.props) || {};
+        return p['device.bus'] === 'bluetooth' || (p['device.name'] && p['device.name'].startsWith('bluez_card.'));
+      });
+
+      if (btDev) {
+        const cardId = btDev.id;
+        const enumProfiles = (btDev.info && btDev.info.params && btDev.info.params.EnumProfile) || [];
+        // Find best headset profile: mSBC preferred, then cvsd, then generic headset
+        const hfpProf = enumProfiles.find((p) => p.name === 'headset-head-unit') ||
+          enumProfiles.find((p) => p.name && p.name.startsWith('headset-head-unit')) ||
+          enumProfiles.find((p) => p.name && p.name.includes('headset'));
+
+        if (hfpProf) {
+          appLogger.info('BLUETOOTH', `Activating Headset profile (HFP ${hfpProf.name}, index ${hfpProf.index}) on card ${cardId}`);
+          require('child_process').execSync(`wpctl set-profile ${cardId} ${hfpProf.index}`, { timeout: 3000 });
+          currentBtProfileMode = 'hfp';
+
+          // Wait a short moment for PipeWire node to appear and link
+          setTimeout(() => {
+            try {
+              if (selectedInputDeviceId) {
+                setSystemInputDevice(selectedInputDeviceId);
+              }
+            } catch {}
+          }, 600);
+        }
+      }
+    } catch (err) {
+      appLogger.warn('BLUETOOTH', `Failed to activate Headset profile: ${err.message}`);
+    } finally {
+      btSwitchingInProgress = false;
+    }
+  } else if (!isCapturing && currentBtProfileMode === 'hfp' && !btSwitchingInProgress) {
+    // Release back to A2DP if idle for at least 3.5 seconds
+    const idleElapsed = now - lastActiveCaptureTime;
+    if (idleElapsed >= 3500) {
+      btSwitchingInProgress = true;
+      try {
+        const devDumpStr = require('child_process').execSync('pw-dump Device', { encoding: 'utf8', timeout: 3000 });
+        const devDump = JSON.parse(devDumpStr);
+        const btDev = devDump.find((d) => {
+          const p = (d.info && d.info.props) || {};
+          return p['device.bus'] === 'bluetooth' || (p['device.name'] && p['device.name'].startsWith('bluez_card.'));
+        });
+
+        if (btDev) {
+          const cardId = btDev.id;
+          const enumProfiles = (btDev.info && btDev.info.params && btDev.info.params.EnumProfile) || [];
+          // Find best A2DP profile: AAC -> SBC-XQ -> SBC -> generic a2dp-sink
+          const a2dpProf = enumProfiles.find((p) => p.name === 'a2dp-sink') ||
+            enumProfiles.find((p) => p.name === 'a2dp-sink-sbc_xq') ||
+            enumProfiles.find((p) => p.name === 'a2dp-sink-sbc') ||
+            enumProfiles.find((p) => p.name && p.name.startsWith('a2dp-sink'));
+
+          if (a2dpProf) {
+            appLogger.info('BLUETOOTH', `Releasing mic: restoring high-fidelity playback (A2DP ${a2dpProf.name}, index ${a2dpProf.index}) on card ${cardId}`);
+            require('child_process').execSync(`wpctl set-profile ${cardId} ${a2dpProf.index}`, { timeout: 3000 });
+            currentBtProfileMode = 'a2dp';
+          }
+        }
+      } catch (err) {
+        appLogger.warn('BLUETOOTH', `Failed to restore A2DP profile: ${err.message}`);
+      } finally {
+        btSwitchingInProgress = false;
+      }
+    }
+  }
+}
+
 function setSystemInputDevice(deviceId) {
   selectedInputDeviceId = deviceId;
+
+  // Find nodeName if known
+  let targetNodeName = '';
+  const dev = currentInputDevices.find((d) => d.id === deviceId || d.nodeName === deviceId);
+  if (dev && dev.nodeName) {
+    targetNodeName = dev.nodeName;
+    selectedInputNodeName = dev.nodeName;
+  }
+
   writeClearcoreSharedState({ targetNodeId: deviceId });
 
-  if (process.platform === 'linux' && /^\d+$/.test(deviceId)) {
+  if (process.platform === 'linux') {
     try {
-      const targetId = deviceId;
-      let nodeName = '';
-      try {
-        const nodeInfo = require('child_process').execSync(`pw-cli info ${targetId}`, { encoding: 'utf8', timeout: 2000 });
-        const nameMatch = nodeInfo.match(/node\.name = "([^"]+)"/);
-        if (nameMatch) nodeName = nameMatch[1];
-      } catch {}
+      let nodeName = targetNodeName;
+      if (!nodeName && /^\d+$/.test(deviceId)) {
+        try {
+          const nodeInfo = require('child_process').execSync(`pw-cli info ${deviceId}`, { encoding: 'utf8', timeout: 2000 });
+          const nameMatch = nodeInfo.match(/node\.name = "([^"]+)"/);
+          if (nameMatch) {
+            nodeName = nameMatch[1];
+            selectedInputNodeName = nodeName;
+          }
+        } catch {}
+      }
 
       const pwOut = require('child_process').execSync('pw-link -o', { encoding: 'utf8', timeout: 2000 });
       const devLinks = require('child_process').execSync('pw-link -l', { encoding: 'utf8', timeout: 2000 });
@@ -1155,6 +1372,25 @@ async function pollDaemonStatus() {
     }
   } catch {
     // Ignore error
+  }
+
+  // Check if any application or recorder is actively consuming the virtual microphone
+  if (process.platform === 'linux' && isServiceRunning && currentVirtualMicStatus.present) {
+    try {
+      let isCapturingActive = false;
+      const nodeDumpStr = require('child_process').execSync('pw-dump Node', { encoding: 'utf8', timeout: 2000 });
+      const nodeDump = JSON.parse(nodeDumpStr);
+      const vSource = nodeDump.find((n) => (n.info && n.info.props && n.info.props['node.name'] === 'realtime-noise-source'));
+      if (vSource) {
+        const state = (vSource.info && vSource.info.state) || '';
+        // If node is streaming, active or running, clients are recording audio!
+        if (state === 'running' || state === 'active' || state === 'streaming') {
+          isCapturingActive = true;
+        }
+      }
+
+      await manageBluetoothProfile(isCapturingActive);
+    } catch {}
   }
 }
 

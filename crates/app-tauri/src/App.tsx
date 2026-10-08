@@ -94,15 +94,25 @@ export const App: React.FC = () => {
 
     setInputDevices(filtered);
 
-    // Restore selected device from localStorage or pick the default
+    // Restore selected device from localStorage (by ID, nodeName, or name) or pick the default
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_selected_input_device') : null;
-    if (saved && filtered.some((d) => d.id === saved)) {
-      setSelectedDeviceId(saved);
+    const savedName = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_selected_input_device_name') : null;
+    const matched = saved
+      ? filtered.find((d) => d.id === saved || (d.nodeName && d.nodeName === saved) || (savedName && d.name === savedName))
+      : null;
+
+    if (matched) {
+      setSelectedDeviceId(matched.id);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('clearcore_selected_input_device', matched.nodeName || matched.id);
+        localStorage.setItem('clearcore_selected_input_device_name', matched.name);
+      }
     } else if (filtered.length > 0) {
       const defaultDev = filtered.find((d) => d.is_default) || filtered[0];
       setSelectedDeviceId(defaultDev.id);
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('clearcore_selected_input_device', defaultDev.id);
+        localStorage.setItem('clearcore_selected_input_device', defaultDev.nodeName || defaultDev.id);
+        localStorage.setItem('clearcore_selected_input_device_name', defaultDev.name);
       }
     }
     setIsLoadingDevices(false);
@@ -110,12 +120,15 @@ export const App: React.FC = () => {
 
   const handleDeviceChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newId = e.target.value;
-    logger.info('UI', `Microphone selection changed: '${newId}'`);
+    const dev = inputDevices.find((d) => d.id === newId);
+    logger.info('UI', `Microphone selection changed: '${newId}' (${dev?.name || ''})`);
     setSelectedDeviceId(newId);
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('clearcore_selected_input_device', newId);
+      localStorage.setItem('clearcore_selected_input_device', dev?.nodeName || newId);
+      if (dev?.name) {
+        localStorage.setItem('clearcore_selected_input_device_name', dev.name);
+      }
     }
-    const dev = inputDevices.find((d) => d.id === newId);
     try {
       await invokeBridge('set_input_device', { deviceId: newId });
       logger.info('UI', `Device '${dev ? dev.name : newId}' applied successfully`);
@@ -585,7 +598,7 @@ export const App: React.FC = () => {
             >
               {inputDevices.map((dev) => (
                 <option key={dev.id} value={dev.id}>
-                  🎙 {dev.name} {dev.is_default ? t('inputDevice.defaultSuffix') : ''}
+                  🎙 {dev.name} {dev.is_default ? t('inputDevice.defaultSuffix') : ''}{dev.idle ? ' (Standby)' : ''}
                 </option>
               ))}
             </select>

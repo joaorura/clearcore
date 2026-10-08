@@ -663,7 +663,7 @@ int pipewire_helper_start(pipewire_helper_context_t *ctx) {
         PW_KEY_AUDIO_CHANNELS, "1",
         PW_KEY_AUDIO_FORMAT, "F32LE",
         PW_KEY_NODE_LATENCY, "480/48000",
-        PW_KEY_NODE_ALWAYS_PROCESS, "true",
+        PW_KEY_NODE_PAUSE_ON_IDLE, "true",
         NULL
     );
 
@@ -717,7 +717,7 @@ int pipewire_helper_start(pipewire_helper_context_t *ctx) {
         PW_KEY_AUDIO_CHANNELS, "1",
         PW_KEY_AUDIO_FORMAT, "F32LE",
         PW_KEY_NODE_LATENCY, "480/48000",
-        PW_KEY_NODE_ALWAYS_PROCESS, "true",
+        PW_KEY_NODE_PASSIVE, "true",
         PW_KEY_NODE_AUTOCONNECT, "true",
         PW_KEY_NODE_DONT_RECONNECT, "true",
         NULL
