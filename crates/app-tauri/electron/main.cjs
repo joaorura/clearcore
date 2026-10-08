@@ -1095,86 +1095,83 @@ async function manageBluetoothProfile(isCapturing) {
     lastActiveCaptureTime = now;
   }
 
+  // Query current live active profile directly from device
+  let activeProfileName = '';
+  let btDev = null;
+  try {
+    const devDumpStr = require('child_process').execSync('pw-dump Device', { encoding: 'utf8', timeout: 3000 });
+    const devDump = JSON.parse(devDumpStr);
+    btDev = devDump.find((d) => {
+      const p = (d.info && d.info.props) || {};
+      return p['device.bus'] === 'bluetooth' || (p['device.name'] && p['device.name'].startsWith('bluez_card.'));
+    });
+    if (btDev && btDev.info && btDev.info.params && btDev.info.params.Profile && btDev.info.params.Profile[0]) {
+      activeProfileName = btDev.info.params.Profile[0].name || '';
+    }
+  } catch {}
+
+  const isLiveHeadset = activeProfileName.includes('headset') || activeProfileName.includes('hfp') || activeProfileName.includes('hsp');
+
   // If capturing and currently in A2DP, activate Headset mode (HFP/HSP)
-  if (isCapturing && currentBtProfileMode !== 'hfp' && !btSwitchingInProgress) {
+  if (isCapturing && !isLiveHeadset && !btSwitchingInProgress && btDev) {
     btSwitchingInProgress = true;
     try {
-      const devDumpStr = require('child_process').execSync('pw-dump Device', { encoding: 'utf8', timeout: 3000 });
-      const devDump = JSON.parse(devDumpStr);
-      const btDev = devDump.find((d) => {
-        const p = (d.info && d.info.props) || {};
-        return p['device.bus'] === 'bluetooth' || (p['device.name'] && p['device.name'].startsWith('bluez_card.'));
-      });
+      const cardId = btDev.id;
+      const enumProfiles = (btDev.info && btDev.info.params && btDev.info.params.EnumProfile) || [];
+      // Respect OS / WirePlumber preference: check saved profile first, or pick highest priority headset profile
+      let preferredName = null;
+      try {
+        const wpState = require('fs').readFileSync(
+          require('path').join(require('os').homedir(), '.local', 'state', 'wireplumber', 'default-profile'),
+          'utf8'
+        );
+        const m = wpState.match(new RegExp(`${btDev.info.props['device.name']}=([^\\s]+)`));
+        if (m) preferredName = m[1].trim();
+      } catch {}
 
-      if (btDev) {
-        const cardId = btDev.id;
-        const enumProfiles = (btDev.info && btDev.info.params && btDev.info.params.EnumProfile) || [];
-        // Respect OS / WirePlumber preference: check saved profile first, or pick highest priority headset profile
-        let preferredName = null;
-        try {
-          const wpState = require('fs').readFileSync(
-            require('path').join(require('os').homedir(), '.local', 'state', 'wireplumber', 'default-profile'),
-            'utf8'
-          );
-          const m = wpState.match(new RegExp(`${btDev.info.props['device.name']}=([^\\s]+)`));
-          if (m) preferredName = m[1].trim();
-        } catch {}
+      const hfpProfiles = enumProfiles.filter((p) => p.name && (p.name.includes('headset') || p.name.includes('hfp') || p.name.includes('hsp')));
+      hfpProfiles.sort((a, b) => (b.priority || 0) - (a.priority || 0));
 
-        const hfpProfiles = enumProfiles.filter((p) => p.name && (p.name.includes('headset') || p.name.includes('hfp') || p.name.includes('hsp')));
-        // Sort by priority descending according to the OS / PipeWire kernel
-        hfpProfiles.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+      const hfpProf = (preferredName && hfpProfiles.find((p) => p.name === preferredName)) ||
+        hfpProfiles[0] ||
+        enumProfiles.find((p) => p.name && p.name.startsWith('headset'));
 
-        const hfpProf = (preferredName && hfpProfiles.find((p) => p.name === preferredName)) ||
-          hfpProfiles[0] ||
-          enumProfiles.find((p) => p.name && p.name.startsWith('headset'));
+      if (hfpProf) {
+        appLogger.info('BLUETOOTH', `Activating Headset profile (${hfpProf.name}, index ${hfpProf.index}, prio ${hfpProf.priority}) according to OS configuration on card ${cardId}`);
+        require('child_process').execSync(`wpctl set-profile ${cardId} ${hfpProf.index}`, { timeout: 3000 });
+        currentBtProfileMode = 'hfp';
 
-        if (hfpProf) {
-          appLogger.info('BLUETOOTH', `Activating Headset profile (${hfpProf.name}, index ${hfpProf.index}, prio ${hfpProf.priority}) according to OS configuration on card ${cardId}`);
-          require('child_process').execSync(`wpctl set-profile ${cardId} ${hfpProf.index}`, { timeout: 3000 });
-          currentBtProfileMode = 'hfp';
-
-          // Wait a short moment for PipeWire node to appear and link
-          setTimeout(() => {
-            try {
-              if (selectedInputDeviceId) {
-                setSystemInputDevice(selectedInputDeviceId);
-              }
-            } catch {}
-          }, 600);
-        }
+        setTimeout(() => {
+          try {
+            if (selectedInputDeviceId) {
+              setSystemInputDevice(selectedInputDeviceId);
+            }
+          } catch {}
+        }, 600);
       }
     } catch (err) {
       appLogger.warn('BLUETOOTH', `Failed to activate Headset profile: ${err.message}`);
     } finally {
       btSwitchingInProgress = false;
     }
-  } else if (!isCapturing && currentBtProfileMode === 'hfp' && !btSwitchingInProgress) {
+  } else if (!isCapturing && isLiveHeadset && !btSwitchingInProgress && btDev) {
     // Release back to A2DP if idle for at least 3.5 seconds
     const idleElapsed = now - lastActiveCaptureTime;
     if (idleElapsed >= 3500) {
       btSwitchingInProgress = true;
       try {
-        const devDumpStr = require('child_process').execSync('pw-dump Device', { encoding: 'utf8', timeout: 3000 });
-        const devDump = JSON.parse(devDumpStr);
-        const btDev = devDump.find((d) => {
-          const p = (d.info && d.info.props) || {};
-          return p['device.bus'] === 'bluetooth' || (p['device.name'] && p['device.name'].startsWith('bluez_card.'));
-        });
+        const cardId = btDev.id;
+        const enumProfiles = (btDev.info && btDev.info.params && btDev.info.params.EnumProfile) || [];
+        // Find best A2DP profile: AAC -> SBC-XQ -> SBC -> generic a2dp-sink
+        const a2dpProf = enumProfiles.find((p) => p.name === 'a2dp-sink') ||
+          enumProfiles.find((p) => p.name === 'a2dp-sink-sbc_xq') ||
+          enumProfiles.find((p) => p.name === 'a2dp-sink-sbc') ||
+          enumProfiles.find((p) => p.name && p.name.startsWith('a2dp-sink'));
 
-        if (btDev) {
-          const cardId = btDev.id;
-          const enumProfiles = (btDev.info && btDev.info.params && btDev.info.params.EnumProfile) || [];
-          // Find best A2DP profile: AAC -> SBC-XQ -> SBC -> generic a2dp-sink
-          const a2dpProf = enumProfiles.find((p) => p.name === 'a2dp-sink') ||
-            enumProfiles.find((p) => p.name === 'a2dp-sink-sbc_xq') ||
-            enumProfiles.find((p) => p.name === 'a2dp-sink-sbc') ||
-            enumProfiles.find((p) => p.name && p.name.startsWith('a2dp-sink'));
-
-          if (a2dpProf) {
-            appLogger.info('BLUETOOTH', `Releasing mic: restoring high-fidelity playback (A2DP ${a2dpProf.name}, index ${a2dpProf.index}) on card ${cardId}`);
-            require('child_process').execSync(`wpctl set-profile ${cardId} ${a2dpProf.index}`, { timeout: 3000 });
-            currentBtProfileMode = 'a2dp';
-          }
+        if (a2dpProf) {
+          appLogger.info('BLUETOOTH', `Releasing mic: restoring high-fidelity playback (A2DP ${a2dpProf.name}, index ${a2dpProf.index}) on card ${cardId}`);
+          require('child_process').execSync(`wpctl set-profile ${cardId} ${a2dpProf.index}`, { timeout: 3000 });
+          currentBtProfileMode = 'a2dp';
         }
       } catch (err) {
         appLogger.warn('BLUETOOTH', `Failed to restore A2DP profile: ${err.message}`);
