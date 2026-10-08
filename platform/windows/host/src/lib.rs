@@ -14,4 +14,6 @@ pub use formats::{
     canonical_f32_to_pcm16, f32_bytes_to_audio_frame, pcm16_bytes_to_audio_frame,
     pcm16_to_canonical_f32, validate_format,
 };
-pub use wasapi::{WasapiAudioBackend, WasapiDeviceInfo};
+pub use wasapi::{
+    BLUETOOTH_RELEASE_HYSTERESIS_DURATION, WasapiAudioBackend, WasapiDeviceInfo,
+};

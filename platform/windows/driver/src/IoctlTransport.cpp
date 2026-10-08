@@ -10,7 +10,8 @@ CIoctlTransport::CIoctlTransport()
       m_HasFirstSequence(FALSE),
       m_QueueReadIndex(0),
       m_QueueWriteIndex(0),
-      m_QueueCount(0)
+      m_QueueCount(0),
+      m_ActiveStreamsCount(0)
 {
     RtlZeroMemory(&m_Lock, sizeof(m_Lock));
     RtlZeroMemory(&m_Stats, sizeof(m_Stats));
@@ -48,6 +49,9 @@ VOID CIoctlTransport::Reset()
     m_Stats.IsSessionActive = FALSE;
     m_Stats.ActiveSessionId = 0;
     m_Stats.ActiveProcessId = 0;
+    m_Stats.ActiveStreamsCount = 0;
+
+    InterlockedExchange(&m_ActiveStreamsCount, 0);
 
     RtlZeroMemory(m_Queue, sizeof(m_Queue));
 
@@ -309,6 +313,27 @@ BOOLEAN CIoctlTransport::ConsumeSamples(
     return TRUE;
 }
 
+LONG CIoctlTransport::IncrementActiveStreams()
+{
+    return InterlockedIncrement(&m_ActiveStreamsCount);
+}
+
+LONG CIoctlTransport::DecrementActiveStreams()
+{
+    LONG val = InterlockedDecrement(&m_ActiveStreamsCount);
+    if (val < 0) {
+        // Clamp to prevent underflow below zero
+        InterlockedCompareExchange(&m_ActiveStreamsCount, 0, val);
+        return 0;
+    }
+    return val;
+}
+
+LONG CIoctlTransport::GetActiveStreamsCount() const
+{
+    return InterlockedCompareExchange(const_cast<volatile LONG*>(&m_ActiveStreamsCount), 0, 0);
+}
+
 VOID CIoctlTransport::GetStats(
     _Out_ TransportStats* stats
 )
@@ -319,6 +344,7 @@ VOID CIoctlTransport::GetStats(
 
     KIRQL oldIrql;
     KeAcquireSpinLock(&m_Lock, &oldIrql);
+    m_Stats.ActiveStreamsCount = (ULONG)max(0, m_ActiveStreamsCount);
     RtlCopyMemory(stats, &m_Stats, sizeof(TransportStats));
     KeReleaseSpinLock(&m_Lock, oldIrql);
 }

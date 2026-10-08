@@ -106,11 +106,21 @@ public final class EngineXpcClient: @unchecked Sendable {
     private var activeOwnerToken: String?
     private var activeOwnerPID: pid_t?
 
+    // Bluetooth Capture Lifecycle & Hysteresis
+    public static let bluetoothReleaseHysteresisDuration: TimeInterval = 3.5
+    private var isPhysicalCaptureBluetooth: Bool = false
+    private var isPhysicalCaptureRunning: Bool = false
+    private var virtualClientCount: Int = 0
+    private var btReleaseTimerWorkItem: DispatchWorkItem?
+
     public weak var delegate: RealtimeNoiseBridgeDelegate?
 
     /// Optional closures for external HAL synchronization
     public var onHalModeChange: (@Sendable (DenoiseMode) -> Void)?
     public var onHalOwnerLockChange: (@Sendable (pid_t?, Bool) -> Void)?
+
+    /// Closure invoked to control the physical hardware capture AudioUnit (AudioOutputUnitStart / AudioOutputUnitStop)
+    public var onPhysicalCaptureStateChange: (@Sendable (Bool) -> Void)?
 
     public init(
         queue: DispatchQueue = DispatchQueue(label: "com.clearcore.RealtimeNoiseBridge.xpc", qos: .userInitiated)
@@ -142,6 +152,97 @@ public final class EngineXpcClient: @unchecked Sendable {
 
     public var isOwnerSessionActive: Bool {
         queue.sync { activeOwnerToken != nil }
+    }
+
+    public var isBluetoothCapture: Bool {
+        queue.sync { isPhysicalCaptureBluetooth }
+    }
+
+    public var isCaptureRunning: Bool {
+        queue.sync { isPhysicalCaptureRunning }
+    }
+
+    public var activeVirtualClientCount: Int {
+        queue.sync { virtualClientCount }
+    }
+
+    public var isBluetoothReleaseTimerArmed: Bool {
+        queue.sync { btReleaseTimerWorkItem != nil }
+    }
+
+    // MARK: - Bluetooth Capture Lifecycle & 3.5s Hysteresis Synchronization
+
+    /// Configures whether the physical hardware microphone is a Bluetooth headset/device.
+    public func setPhysicalCaptureBluetooth(_ isBluetooth: Bool) {
+        queue.async {
+            self.isPhysicalCaptureBluetooth = isBluetooth
+            if !isBluetooth {
+                // If switching to non-Bluetooth device, cancel any active timer
+                self.btReleaseTimerWorkItem?.cancel()
+                self.btReleaseTimerWorkItem = nil
+            }
+        }
+    }
+
+    /// Sets the underlying physical capture state directly.
+    public func setPhysicalCaptureRunning(_ running: Bool) {
+        queue.async {
+            self.isPhysicalCaptureRunning = running
+            self.onPhysicalCaptureStateChange?(running)
+        }
+    }
+
+    /// Synchronizes bridge and physical capture lifecycle with the virtual microphone's activeClientCount.
+    ///
+    /// When the virtual microphone is idle (`activeClientCount == 0`) and physical input is Bluetooth:
+    /// - Schedules a 3.5s timer before calling `AudioOutputUnitStop()` on the physical capture unit.
+    /// - If a client re-attaches before 3.5s expire, cancels the timer and keeps the stream alive.
+    /// - When the 3.5s timer fires, suspends capture (`AudioOutputUnitStop()`), allowing macOS CoreAudio
+    ///   and the Bluetooth subsystem to transition the headset back to the high-fidelity A2DP profile.
+    public func syncVirtualClientCount(_ count: Int) {
+        queue.async {
+            self.virtualClientCount = max(0, count)
+
+            if self.virtualClientCount > 0 {
+                // Demand is active: cancel release timer immediately
+                if let timer = self.btReleaseTimerWorkItem {
+                    timer.cancel()
+                    self.btReleaseTimerWorkItem = nil
+                }
+
+                // Immediately re-activate physical capture (AudioOutputUnitStart)
+                if !self.isPhysicalCaptureRunning {
+                    self.isPhysicalCaptureRunning = true
+                    self.onPhysicalCaptureStateChange?(true)
+                }
+            } else {
+                // Virtual microphone is idle (0 clients)
+                if self.isPhysicalCaptureBluetooth {
+                    if self.isPhysicalCaptureRunning && self.btReleaseTimerWorkItem == nil {
+                        // Arm 3.5-second hysteresis timer
+                        let workItem = DispatchWorkItem { [weak self] in
+                            guard let self = self else { return }
+                            self.queue.async {
+                                guard self.virtualClientCount == 0 && self.isPhysicalCaptureBluetooth else {
+                                    return
+                                }
+                                // Hysteresis window elapsed: suspend physical capture to restore A2DP
+                                self.isPhysicalCaptureRunning = false
+                                self.btReleaseTimerWorkItem = nil
+                                self.onPhysicalCaptureStateChange?(false)
+                            }
+                        }
+                        self.btReleaseTimerWorkItem = workItem
+                        self.queue.asyncAfter(
+                            deadline: .now() + Self.bluetoothReleaseHysteresisDuration,
+                            execute: workItem
+                        )
+                    }
+                } else {
+                    // Non-Bluetooth device does not require A2DP hysteresis release
+                }
+            }
+        }
     }
 
     // MARK: - Connection Lifecycle

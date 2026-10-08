@@ -66,6 +66,10 @@ public final class RealtimeNoiseDriver {
         self.hostRef = host
     }
 
+    public var host: AudioServerPlugInHostRef? {
+        return self.hostRef
+    }
+
     public func retain() -> UInt32 {
         refCount += 1
         return refCount
@@ -451,7 +455,7 @@ private func Driver_StartIO(
     inClientID: UInt32
 ) -> OSStatus {
     if inDeviceObjectID == VisibleInputEndpoint.deviceObjectID {
-        return RealtimeNoiseDriver.shared.visibleInput.startIO()
+        return RealtimeNoiseDriver.shared.visibleInput.startIO(host: RealtimeNoiseDriver.shared.host)
     } else if inDeviceObjectID == HiddenOutputEndpoint.deviceObjectID {
         return RealtimeNoiseDriver.shared.hiddenOutput.startIO(clientPID: pid_t(inClientID))
     }
@@ -464,7 +468,7 @@ private func Driver_StopIO(
     inClientID: UInt32
 ) -> OSStatus {
     if inDeviceObjectID == VisibleInputEndpoint.deviceObjectID {
-        return RealtimeNoiseDriver.shared.visibleInput.stopIO()
+        return RealtimeNoiseDriver.shared.visibleInput.stopIO(host: RealtimeNoiseDriver.shared.host)
     } else if inDeviceObjectID == HiddenOutputEndpoint.deviceObjectID {
         return RealtimeNoiseDriver.shared.hiddenOutput.stopIO(clientPID: pid_t(inClientID))
     }
