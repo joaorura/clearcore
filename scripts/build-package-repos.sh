@@ -300,4 +300,13 @@ sudo apt update && sudo apt install -y clearcore</code></pre>
 EOF
 
 chmod +x "${OUT_DIR}/index.html" || true
+
+# ----------------------------------------------------
+# 4. REMOVE LARGE FILES (GITHUB's 100MB LIMIT FOR GIT)
+# ----------------------------------------------------
+# GitHub Pages operates on a standard Git branch (gh-pages) which strictly
+# rejects files >= 100MB. Full binary packages are distributed via GitHub Releases.
+echo "🧹 Removing files exceeding 90MB to adhere to GitHub's file size limits..."
+find "${OUT_DIR}" -type f -size +90M -print -delete || true
+
 echo "✅ Static repository metadata and landing page generated in ${OUT_DIR}!"
