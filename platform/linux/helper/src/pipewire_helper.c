@@ -354,9 +354,13 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
     if (!ctx || ctx->bluetooth_card_id == 0) return;
 
     if (enable_headset) {
-        if (ctx->bluetooth_is_headset) return;
+        if (ctx->bluetooth_is_headset) {
+            fprintf(stderr, "[pipewire_helper] bluetooth_switch_profile: Already in headset mode, skipping.\n");
+            return;
+        }
         ctx->bluetooth_is_headset = true;
-        fprintf(stderr, "[pipewire_helper] Audio stream active: activating Bluetooth Headset profile on Card %u\n", ctx->bluetooth_card_id);
+        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Mic active -> Switching Bluetooth to Headset profile (Card ID: %u, Name: %s)\n",
+                ctx->bluetooth_card_id, ctx->bluetooth_card_name);
         char cmd[512];
         if (ctx->bluetooth_card_name[0] != '\0') {
             snprintf(cmd, sizeof(cmd), "pactl set-card-profile %s headset-head-unit 2>/dev/null || wpctl set-profile %u 196865 2>/dev/null || wpctl set-profile %u 196864 2>/dev/null",
@@ -365,14 +369,19 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
             snprintf(cmd, sizeof(cmd), "wpctl set-profile %u 196865 2>/dev/null || wpctl set-profile %u 196864 2>/dev/null",
                      ctx->bluetooth_card_id, ctx->bluetooth_card_id);
         }
+        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Executing command: %s\n", cmd);
         int ret = system(cmd);
-        (void)ret;
+        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Command completed with status %d\n", ret);
     } else {
-        if (!ctx->bluetooth_is_headset) return;
+        if (!ctx->bluetooth_is_headset) {
+            fprintf(stderr, "[pipewire_helper] bluetooth_switch_profile: Already released (not in headset mode), skipping.\n");
+            return;
+        }
         ctx->bluetooth_is_headset = false;
-        fprintf(stderr, "[pipewire_helper] Audio stream idle: releasing Bluetooth to high-fidelity A2DP on Card %u\n", ctx->bluetooth_card_id);
+        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Mic idle -> Releasing Bluetooth to High-Fidelity A2DP (Card ID: %u, Name: %s)\n",
+                ctx->bluetooth_card_id, ctx->bluetooth_card_name);
 
-        /* Read preferred profile saved in WirePlumber state (e.g. a2dp-sink, a2dp-sink-sbc, etc.) */
+        /* Read preferred profile saved in WirePlumber state (only accept a2dp* profiles, NOT headset or off) */
         char pref_profile[64] = {0};
         const char *home = getenv("HOME");
         if (home && ctx->bluetooth_card_name[0] != '\0') {
@@ -386,14 +395,19 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
                     if (eq) {
                         *eq = '\0';
                         char *val = eq + 1;
-                        // trim trailing newline
+                        // trim trailing whitespace/newline
                         char *nl = strchr(val, '\n');
                         if (nl) *nl = '\0';
                         char *cr = strchr(val, '\r');
                         if (cr) *cr = '\0';
-                        if (strcmp(line, ctx->bluetooth_card_name) == 0 && val[0] != '\0' && strcmp(val, "off") != 0) {
-                            snprintf(pref_profile, sizeof(pref_profile), "%s", val);
-                            break;
+                        if (strcmp(line, ctx->bluetooth_card_name) == 0 && val[0] != '\0') {
+                            fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Found WirePlumber profile in state file: '%s'\n", val);
+                            if (strncmp(val, "a2dp", 4) == 0) {
+                                snprintf(pref_profile, sizeof(pref_profile), "%s", val);
+                                break;
+                            } else {
+                                fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Profile '%s' is not high-fidelity A2DP; ignoring and using a2dp-sink\n", val);
+                            }
                         }
                     }
                 }
@@ -404,15 +418,17 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
         const char *target_prof = (pref_profile[0] != '\0') ? pref_profile : "a2dp-sink";
         char cmd[512];
         if (ctx->bluetooth_card_name[0] != '\0') {
-            fprintf(stderr, "[pipewire_helper] Restoring profile '%s' for %s (Card %u)\n", target_prof, ctx->bluetooth_card_name, ctx->bluetooth_card_id);
+            fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Restoring High-Fidelity A2DP profile '%s' for %s (Card %u)\n",
+                    target_prof, ctx->bluetooth_card_name, ctx->bluetooth_card_id);
             snprintf(cmd, sizeof(cmd), "pactl set-card-profile %s %s 2>/dev/null || wpctl set-profile %u %s 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null",
                      ctx->bluetooth_card_name, target_prof, ctx->bluetooth_card_id, target_prof, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
         } else {
             snprintf(cmd, sizeof(cmd), "wpctl set-profile %u %s 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
                      ctx->bluetooth_card_id, target_prof, ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
         }
+        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Executing command: %s\n", cmd);
         int ret = system(cmd);
-        (void)ret;
+        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Command completed with status %d\n", ret);
     }
 }
 
@@ -420,6 +436,8 @@ static void on_bt_release_timer(void *data, uint64_t expirations) {
     (void)expirations;
     pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)data;
     if (!ctx) return;
+
+    fprintf(stderr, "[pipewire_helper] [BT-TIMER] Idle timer expired (3.5s without mic usage). Triggering release.\n");
 
     // Disarm timer
     if (ctx->bt_release_timer && ctx->loop) {
@@ -429,6 +447,7 @@ static void on_bt_release_timer(void *data, uint64_t expirations) {
 
     /* Pause physical capture stream so PipeWire knows the mic is completely dormant */
     if (ctx->capture_stream) {
+        fprintf(stderr, "[pipewire_helper] [BT-TIMER] Pausing physical capture stream\n");
         pw_stream_set_active(ctx->capture_stream, false);
     }
 
