@@ -15,9 +15,16 @@ if [[ ! -d "${BUNDLE_DIR}" ]]; then
     exit 1
 fi
 
-VERSION="0.1.0"
-if [[ -f "${REPO_ROOT}/crates/app-tauri/package.json" ]]; then
-    VERSION=$(grep '"version"' "${REPO_ROOT}/crates/app-tauri/package.json" | head -1 | awk -F'"' '{print $4}')
+VERSION="${2:-${CLEARCORE_VERSION:-${RELEASE_TAG:-${GITHUB_REF_NAME:-}}}}"
+if [[ "${VERSION}" == v* ]]; then
+    VERSION="${VERSION#v}"
+fi
+if [[ -z "${VERSION}" || "${VERSION}" == "master" || "${VERSION}" == "main" ]]; then
+    if [[ -f "${REPO_ROOT}/crates/app-tauri/package.json" ]]; then
+        VERSION=$(grep '"version"' "${REPO_ROOT}/crates/app-tauri/package.json" | head -1 | awk -F'"' '{print $4}')
+    else
+        VERSION="0.1.0"
+    fi
 fi
 CLEAN_VERSION="${VERSION//-/_}" # RPM versions cannot contain hyphens in release version tag
 

@@ -607,6 +607,14 @@ jobs:
           draft: false
           prerelease: ${{ github.event.inputs.prerelease != 'false' }}
 
+      - name: Trigger Fedora Copr Rebuild
+        if: env.COPR_WEBHOOK_URL != ''
+        env:
+          COPR_WEBHOOK_URL: ${{ secrets.COPR_WEBHOOK_URL }}
+        run: |
+          echo "Triggering automated build on Fedora Copr..."
+          curl -s -X POST "${COPR_WEBHOOK_URL}" || echo "Warning: Copr webhook call failed"
+
       - name: Build DNF and APT Repository Metadata
         run: |
           set -euo pipefail

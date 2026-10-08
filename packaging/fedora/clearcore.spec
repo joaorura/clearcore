@@ -1,7 +1,7 @@
-%global tag_version v0.1.0-beta.1
+%global tag_version v0.1.0-beta.4
 
 Name:           clearcore
-Version:        0.1.0_beta.1
+Version:        0.1.0_beta.4
 Release:        1%{?dist}
 Summary:        Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
 License:        PolyForm Noncommercial 1.0.0
@@ -63,5 +63,8 @@ gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database /usr/share/applications 2>/dev/null || true
 
 %changelog
+* Thu Oct 08 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.4-1
+- Release v0.1.0-beta.4: pDFNet3 Pro integration, Dual-Conditioning, Voice Isolation & Dynamic AGC Leveler.
+
 * Mon Oct 05 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.1-1
 - Official Clearcore multi-platform beta release.
