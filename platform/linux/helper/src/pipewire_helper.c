@@ -117,6 +117,8 @@ static const struct pw_core_events core_events = {
     .done = core_event_done,
 };
 
+static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable_headset);
+
 /* Registry Listener for Auto-detecting Physical Microphone and Severing Self-Loops */
 static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
                                   const char *type, uint32_t version,
@@ -153,9 +155,10 @@ static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
                     device_name ? device_name : "bluez_card", id);
         }
     } else if (strcmp(type, PW_TYPE_INTERFACE_Link) == 0) {
-        /* Fail-safe: Detect and sever any self-referential loop created by WirePlumber */
         const char *out_node = spa_dict_lookup(props, PW_KEY_LINK_OUTPUT_NODE);
         const char *in_node = spa_dict_lookup(props, PW_KEY_LINK_INPUT_NODE);
+
+        /* Fail-safe: Detect and sever any self-referential loop created by WirePlumber */
         if (out_node && in_node && ctx->node_id > 0 && ctx->capture_node_id > 0) {
             uint32_t out_id = (uint32_t)strtoul(out_node, NULL, 10);
             uint32_t in_id = (uint32_t)strtoul(in_node, NULL, 10);
@@ -163,6 +166,40 @@ static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
                 fprintf(stderr, "[pipewire_helper] Severed self-loop link %u -> %u (Link ID: %u)\n", out_id, in_id, id);
                 if (ctx->registry) {
                     pw_registry_destroy(ctx->registry, id);
+                }
+                return;
+            }
+        }
+
+        /* Track active consumer links reading from the virtual microphone */
+        if (out_node && ctx->node_id > 0) {
+            uint32_t out_id = (uint32_t)strtoul(out_node, NULL, 10);
+            if (out_id == ctx->node_id) {
+                /* New consumer connected to virtual microphone */
+                bool exists = false;
+                for (size_t i = 0; i < ctx->consumer_link_count; i++) {
+                    if (ctx->consumer_link_ids[i] == id) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists && ctx->consumer_link_count < sizeof(ctx->consumer_link_ids) / sizeof(ctx->consumer_link_ids[0])) {
+                    ctx->consumer_link_ids[ctx->consumer_link_count++] = id;
+                    ctx->active_consumer_links++;
+                    fprintf(stderr, "[pipewire_helper] [LINK] Consumer attached to virtual mic (Link ID: %u, Total active: %u)\n",
+                            id, ctx->active_consumer_links);
+
+                    /* Disarm idle timer */
+                    if (ctx->bt_release_timer && ctx->loop) {
+                        struct timespec value = {0, 0};
+                        pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+                    }
+
+                    /* Ensure physical capture stream is active */
+                    if (ctx->capture_stream) {
+                        pw_stream_set_active(ctx->capture_stream, true);
+                    }
+                    bluetooth_switch_profile(ctx, true);
                 }
             }
         }
@@ -176,6 +213,30 @@ static void registry_event_global_remove(void *data, uint32_t id) {
         ctx->bluetooth_card_id = 0;
         ctx->bluetooth_is_headset = false;
         fprintf(stderr, "[pipewire_helper] Bluetooth Audio Card removed (ID: %u)\n", id);
+    }
+
+    /* Check if a tracked consumer link was removed */
+    for (size_t i = 0; i < ctx->consumer_link_count; i++) {
+        if (ctx->consumer_link_ids[i] == id) {
+            ctx->consumer_link_ids[i] = ctx->consumer_link_ids[ctx->consumer_link_count - 1];
+            ctx->consumer_link_count--;
+            if (ctx->active_consumer_links > 0) {
+                ctx->active_consumer_links--;
+            }
+            fprintf(stderr, "[pipewire_helper] [LINK] Consumer disconnected from virtual mic (Link ID: %u, Remaining active: %u)\n",
+                    id, ctx->active_consumer_links);
+
+            if (ctx->active_consumer_links == 0) {
+                fprintf(stderr, "[pipewire_helper] [LINK] No active consumers left on virtual mic. Arming 3.5s release timer.\n");
+                if (ctx->bt_release_timer && ctx->loop) {
+                    struct timespec value = {3, 500000000}; /* 3.5 seconds */
+                    pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+                } else {
+                    bluetooth_switch_profile(ctx, false);
+                }
+            }
+            break;
+        }
     }
 }
 
@@ -354,81 +415,24 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
     if (!ctx || ctx->bluetooth_card_id == 0) return;
 
     if (enable_headset) {
-        if (ctx->bluetooth_is_headset) {
-            fprintf(stderr, "[pipewire_helper] bluetooth_switch_profile: Already in headset mode, skipping.\n");
-            return;
-        }
+        if (ctx->bluetooth_is_headset) return;
         ctx->bluetooth_is_headset = true;
-        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Mic active -> Switching Bluetooth to Headset profile (Card ID: %u, Name: %s)\n",
+        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Microphone in use: activating headset capture on Card %u (%s)\n",
                 ctx->bluetooth_card_id, ctx->bluetooth_card_name);
-        char cmd[512];
-        if (ctx->bluetooth_card_name[0] != '\0') {
-            snprintf(cmd, sizeof(cmd), "pactl set-card-profile %s headset-head-unit 2>/dev/null || wpctl set-profile %u 196865 2>/dev/null || wpctl set-profile %u 196864 2>/dev/null",
-                     ctx->bluetooth_card_name, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
-        } else {
-            snprintf(cmd, sizeof(cmd), "wpctl set-profile %u 196865 2>/dev/null || wpctl set-profile %u 196864 2>/dev/null",
-                     ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+
+        /* Connect and activate capture stream */
+        if (ctx->capture_stream) {
+            pw_stream_set_active(ctx->capture_stream, true);
         }
-        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Executing command: %s\n", cmd);
-        int ret = system(cmd);
-        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Command completed with status %d\n", ret);
     } else {
-        if (!ctx->bluetooth_is_headset) {
-            fprintf(stderr, "[pipewire_helper] bluetooth_switch_profile: Already released (not in headset mode), skipping.\n");
-            return;
-        }
+        if (!ctx->bluetooth_is_headset) return;
         ctx->bluetooth_is_headset = false;
-        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Mic idle -> Releasing Bluetooth to High-Fidelity A2DP (Card ID: %u, Name: %s)\n",
-                ctx->bluetooth_card_id, ctx->bluetooth_card_name);
+        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Microphone idle: releasing Bluetooth capture stream. OS / WirePlumber will restore high-fidelity A2DP automatically.\n");
 
-        /* Read preferred profile saved in WirePlumber state (only accept a2dp* profiles, NOT headset or off) */
-        char pref_profile[64] = {0};
-        const char *home = getenv("HOME");
-        if (home && ctx->bluetooth_card_name[0] != '\0') {
-            char path[512];
-            snprintf(path, sizeof(path), "%s/.local/state/wireplumber/default-profile", home);
-            FILE *f = fopen(path, "r");
-            if (f) {
-                char line[256];
-                while (fgets(line, sizeof(line), f)) {
-                    char *eq = strchr(line, '=');
-                    if (eq) {
-                        *eq = '\0';
-                        char *val = eq + 1;
-                        // trim trailing whitespace/newline
-                        char *nl = strchr(val, '\n');
-                        if (nl) *nl = '\0';
-                        char *cr = strchr(val, '\r');
-                        if (cr) *cr = '\0';
-                        if (strcmp(line, ctx->bluetooth_card_name) == 0 && val[0] != '\0') {
-                            fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Found WirePlumber profile in state file: '%s'\n", val);
-                            if (strncmp(val, "a2dp", 4) == 0) {
-                                snprintf(pref_profile, sizeof(pref_profile), "%s", val);
-                                break;
-                            } else {
-                                fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Profile '%s' is not high-fidelity A2DP; ignoring and using a2dp-sink\n", val);
-                            }
-                        }
-                    }
-                }
-                fclose(f);
-            }
+        /* Deactivate capture stream completely so BlueZ knows microphone is not in use */
+        if (ctx->capture_stream) {
+            pw_stream_set_active(ctx->capture_stream, false);
         }
-
-        const char *target_prof = (pref_profile[0] != '\0') ? pref_profile : "a2dp-sink";
-        char cmd[512];
-        if (ctx->bluetooth_card_name[0] != '\0') {
-            fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Restoring High-Fidelity A2DP profile '%s' for %s (Card %u)\n",
-                    target_prof, ctx->bluetooth_card_name, ctx->bluetooth_card_id);
-            snprintf(cmd, sizeof(cmd), "pactl set-card-profile %s %s 2>/dev/null || wpctl set-profile %u %s 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null",
-                     ctx->bluetooth_card_name, target_prof, ctx->bluetooth_card_id, target_prof, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
-        } else {
-            snprintf(cmd, sizeof(cmd), "wpctl set-profile %u %s 2>/dev/null || wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
-                     ctx->bluetooth_card_id, target_prof, ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
-        }
-        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Executing command: %s\n", cmd);
-        int ret = system(cmd);
-        fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Command completed with status %d\n", ret);
     }
 }
 
@@ -876,7 +880,7 @@ int pipewire_helper_start(pipewire_helper_context_t *ctx) {
         PW_KEY_AUDIO_CHANNELS, "1",
         PW_KEY_AUDIO_FORMAT, "F32LE",
         PW_KEY_NODE_LATENCY, "480/48000",
-        PW_KEY_NODE_ALWAYS_PROCESS, "true",
+        PW_KEY_NODE_PAUSE_ON_IDLE, "true",
         PW_KEY_NODE_AUTOCONNECT, "true",
         PW_KEY_NODE_DONT_RECONNECT, "true",
         NULL

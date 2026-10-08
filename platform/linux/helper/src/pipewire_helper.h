@@ -124,6 +124,9 @@ typedef struct pipewire_helper_context {
     char bluetooth_card_name[128];
     bool bluetooth_is_headset;
     struct spa_source *bt_release_timer;
+    uint32_t active_consumer_links;            /* Count of active consumer links attached to virtual mic */
+    uint32_t consumer_link_ids[64];            /* Registered Link IDs originating from ctx->node_id */
+    size_t consumer_link_count;
     _Atomic bool running;
     _Atomic bool node_ready;
     _Atomic bool capture_ready;
