@@ -14,12 +14,14 @@ fi
 
 # 2. Build Linux PipeWire helper
 if [[ "$(uname -s)" == "Linux" ]]; then
-    if command -v ninja >/dev/null 2>&1 && command -v meson >/dev/null 2>&1; then
+    if [[ -f "${SCRIPT_DIR}/platform/linux/helper/build/pipewire_helper" ]]; then
+        echo "✅ PipeWire helper already present, using existing build."
+    elif command -v ninja >/dev/null 2>&1 && command -v meson >/dev/null 2>&1; then
         echo "🔨 Building PipeWire helper..."
         if [[ ! -d "${SCRIPT_DIR}/platform/linux/helper/build" ]]; then
-            meson setup "${SCRIPT_DIR}/platform/linux/helper/build" "${SCRIPT_DIR}/platform/linux/helper"
+            meson setup "${SCRIPT_DIR}/platform/linux/helper/build" "${SCRIPT_DIR}/platform/linux/helper" || true
         fi
-        ninja -C "${SCRIPT_DIR}/platform/linux/helper/build"
+        ninja -C "${SCRIPT_DIR}/platform/linux/helper/build" || true
     fi
 fi
 
