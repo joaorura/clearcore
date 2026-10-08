@@ -140,6 +140,15 @@ static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
                 }
             }
         }
+    } else if (strcmp(type, PW_TYPE_INTERFACE_Device) == 0) {
+        const char *device_bus = spa_dict_lookup(props, PW_KEY_DEVICE_BUS);
+        const char *device_name = spa_dict_lookup(props, PW_KEY_DEVICE_NAME);
+        if ((device_bus && strcmp(device_bus, "bluetooth") == 0) ||
+            (device_name && strstr(device_name, "bluez_card") != NULL)) {
+            ctx->bluetooth_card_id = id;
+            fprintf(stderr, "[pipewire_helper] Detected Bluetooth Audio Card: %s (Card ID: %u)\n",
+                    device_name ? device_name : "bluez_card", id);
+        }
     } else if (strcmp(type, PW_TYPE_INTERFACE_Link) == 0) {
         /* Fail-safe: Detect and sever any self-referential loop created by WirePlumber */
         const char *out_node = spa_dict_lookup(props, PW_KEY_LINK_OUTPUT_NODE);
@@ -327,6 +336,44 @@ void transfer_bounded_buffers(void *userdata) {
     atomic_fetch_add_explicit(&ctx->process_count, 1, memory_order_relaxed);
 }
 
+static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable_headset) {
+    if (!ctx || ctx->bluetooth_card_id == 0) return;
+
+    if (enable_headset) {
+        if (ctx->bluetooth_is_headset) return;
+        ctx->bluetooth_is_headset = true;
+        fprintf(stderr, "[pipewire_helper] Audio stream active: activating Bluetooth Headset profile on Card %u\n", ctx->bluetooth_card_id);
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "wpctl set-profile %u 196865 2>/dev/null || wpctl set-profile %u 196864 2>/dev/null",
+                 ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+        int ret = system(cmd);
+        (void)ret;
+    } else {
+        if (!ctx->bluetooth_is_headset) return;
+        ctx->bluetooth_is_headset = false;
+        fprintf(stderr, "[pipewire_helper] Audio stream idle: releasing Bluetooth to high-fidelity A2DP on Card %u\n", ctx->bluetooth_card_id);
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "wpctl set-profile %u 131076 2>/dev/null || wpctl set-profile %u 131074 2>/dev/null || wpctl set-profile %u 131073 2>/dev/null",
+                 ctx->bluetooth_card_id, ctx->bluetooth_card_id, ctx->bluetooth_card_id);
+        int ret = system(cmd);
+        (void)ret;
+    }
+}
+
+static void on_bt_release_timer(void *data, uint64_t expirations) {
+    (void)expirations;
+    pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)data;
+    if (!ctx) return;
+
+    // Disarm timer
+    if (ctx->bt_release_timer && ctx->loop) {
+        struct timespec value = {0, 0};
+        pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+    }
+
+    bluetooth_switch_profile(ctx, false);
+}
+
 static void on_process(void *userdata) {
     transfer_bounded_buffers(userdata);
 }
@@ -345,15 +392,32 @@ static void on_stream_state_changed(void *data, enum pw_stream_state old,
             ctx->node_id = pw_stream_get_node_id(ctx->stream);
             atomic_store_explicit(&ctx->node_ready, true, memory_order_release);
             fprintf(stderr, "[pipewire_helper] Stream streaming (Node ID: %u)\n", ctx->node_id);
+
+            // Disarm idle release timer if active
+            if (ctx->bt_release_timer && ctx->loop) {
+                struct timespec value = {0, 0};
+                pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+            }
+            // Stream is actively recording: acquire Bluetooth headset profile
+            bluetooth_switch_profile(ctx, true);
             break;
         case PW_STREAM_STATE_PAUSED:
             ctx->node_id = pw_stream_get_node_id(ctx->stream);
             atomic_store_explicit(&ctx->node_ready, true, memory_order_release);
             fprintf(stderr, "[pipewire_helper] Stream paused (Node ID: %u)\n", ctx->node_id);
+
+            // Arm 3.5s release timer to return to A2DP cleanly without thrashing
+            if (ctx->bt_release_timer && ctx->loop) {
+                struct timespec value = {3, 500000000}; // 3.5 seconds
+                pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+            } else {
+                bluetooth_switch_profile(ctx, false);
+            }
             break;
         case PW_STREAM_STATE_UNCONNECTED:
             atomic_store_explicit(&ctx->node_ready, false, memory_order_release);
             fprintf(stderr, "[pipewire_helper] Stream unconnected\n");
+            bluetooth_switch_profile(ctx, false);
             break;
         default:
             break;
@@ -631,6 +695,9 @@ int pipewire_helper_init(pipewire_helper_context_t *ctx) {
 
     pw_core_add_listener(ctx->core, &ctx->core_events_listener, &core_events, ctx);
 
+    /* Timer for releasing Bluetooth headset mode back to high-fidelity A2DP */
+    ctx->bt_release_timer = pw_loop_add_timer(pw_main_loop_get_loop(ctx->loop), on_bt_release_timer, ctx);
+
     /* Listen for available physical microphones via registry */
     ctx->registry = pw_core_get_registry(ctx->core, PW_VERSION_REGISTRY, 0);
     if (ctx->registry) {
@@ -793,6 +860,10 @@ void pipewire_helper_stop(pipewire_helper_context_t *ctx) {
 void pipewire_helper_destroy(pipewire_helper_context_t *ctx) {
     if (!ctx) return;
     pipewire_helper_stop(ctx);
+    if (ctx->bt_release_timer && ctx->loop) {
+        pw_loop_destroy_source(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer);
+        ctx->bt_release_timer = NULL;
+    }
     if (ctx->registry) {
         spa_hook_remove(&ctx->core_listener);
         pw_proxy_destroy((struct pw_proxy *)ctx->registry);

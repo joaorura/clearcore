@@ -1385,25 +1385,7 @@ async function pollDaemonStatus() {
     // Ignore error
   }
 
-  // Check if any application or recorder is actively consuming the virtual microphone
-  if (process.platform === 'linux' && isServiceRunning && currentVirtualMicStatus.present) {
-    try {
-      let isCapturingActive = false;
-      const nodeDumpStr = require('child_process').execSync('pw-dump Node', { encoding: 'utf8', timeout: 2000 });
-      const nodeDump = JSON.parse(nodeDumpStr);
-      const vSource = nodeDump.find((n) => (n.info && n.info.props && n.info.props['node.name'] === 'realtime-noise-source'));
-      if (vSource) {
-        const state = (vSource.info && vSource.info.state) || '';
-        // If node is streaming, active or running, clients are recording audio!
-        if (state === 'running' || state === 'active' || state === 'streaming') {
-          isCapturingActive = true;
-        }
-      }
 
-      await manageBluetoothProfile(isCapturingActive);
-    } catch {}
-  }
-}
 
 app.whenReady().then(async () => {
   // The tray is optional: GNOME shows no tray icon without the AppIndicator extension,

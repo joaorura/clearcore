@@ -120,6 +120,9 @@ typedef struct pipewire_helper_context {
     uint32_t target_device_id;
     char target_device_name[128];
     known_source_table_t known_sources;        /* Audio/Source node id -> node.name (registry) */
+    uint32_t bluetooth_card_id;
+    bool bluetooth_is_headset;
+    struct spa_source *bt_release_timer;
     _Atomic bool running;
     _Atomic bool node_ready;
     _Atomic bool capture_ready;
