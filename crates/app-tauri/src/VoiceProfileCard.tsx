@@ -209,6 +209,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     if (await profile.buildProfile(origin)) {
       setIsReenrolling(false);
       flash(t('voiceProfile.profileActivatedSuccess'), 6000);
+      changeTab({ by: 'user', id: 'profile' });
       await refreshSamples();
     }
   };

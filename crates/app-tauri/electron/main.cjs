@@ -1384,8 +1384,7 @@ async function pollDaemonStatus() {
   } catch {
     // Ignore error
   }
-
-
+}
 
 app.whenReady().then(async () => {
   // The tray is optional: GNOME shows no tray icon without the AppIndicator extension,
