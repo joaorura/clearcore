@@ -444,12 +444,12 @@ describe('voiceProfileErrorKey (M5)', () => {
   });
 });
 
-describe('relabel (I2/T7)', () => {
-  it('active is applied-in-service with a note; the local-only "enrolled" label is gone', () => {
-    expect(ptBR.voiceProfile.statusActive).toBe('🟢 Aplicado no serviço (desenvolvimento)');
-    expect(enUS.voiceProfile.statusActive).toBe('🟢 Applied in service (development)');
-    expect(ptBR.voiceProfile.appliedInServiceNote).toBe('O microfone virtual empacotado ainda não usa este perfil.');
-    expect(enUS.voiceProfile.appliedInServiceNote).toBe('The packaged virtual microphone does not use this profile yet.');
+describe('relabel (I2/T7 - Stage 2)', () => {
+  it('active is applied on virtual microphone with stage 2 note; the local-only "enrolled" label is gone', () => {
+    expect(ptBR.voiceProfile.statusActive).toBe('🟢 Ativo no Microfone Virtual (pDFNet3 Pro)');
+    expect(enUS.voiceProfile.statusActive).toBe('🟢 Active on Virtual Microphone (pDFNet3 Pro)');
+    expect(ptBR.voiceProfile.appliedInServiceNote).toBe('O microfone virtual do sistema está aplicando o seu perfil de voz em tempo real.');
+    expect(enUS.voiceProfile.appliedInServiceNote).toBe('The system virtual microphone is applying your voice profile in real time.');
     expect('enrolledUnconfirmed' in ptBR.voiceProfile).toBe(false);
   });
 });

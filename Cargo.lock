@@ -927,6 +927,7 @@ dependencies = [
  "realtime-noise-contracts",
  "realtime-noise-model",
  "studio-dsp",
+ "tempfile",
 ]
 
 [[package]]

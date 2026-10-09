@@ -14,5 +14,8 @@ realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-model = { path = "../model", features = ["tract"] }
 studio-dsp = { path = "../studio-dsp" }
 
+[dev-dependencies]
+tempfile = { version = "=3.23.0", default-features = false }
+
 [lints.rust]
 unsafe_code = "allow"

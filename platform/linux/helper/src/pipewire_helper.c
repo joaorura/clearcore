@@ -599,6 +599,12 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_free_fn = NULL;
     ctx->neural_set_preset_fn = NULL;
     ctx->applied_preset = CLEARCORE_PRESET_OFF;
+    ctx->neural_set_voice_profile_fn = NULL;
+    ctx->neural_clear_voice_profile_fn = NULL;
+    ctx->neural_reload_active_profile_fn = NULL;
+    ctx->neural_supports_voice_profile_fn = NULL;
+    ctx->neural_is_voice_profile_active_fn = NULL;
+    atomic_store_explicit(&ctx->applied_generation, 0, memory_order_relaxed);
 
     char exe_buf[PATH_MAX] = {0};
     char exe_dir[PATH_MAX] = {0};
@@ -677,6 +683,22 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
         fprintf(stderr, "[pipewire_helper] clearcore_filter_set_preset not found; studio presets disabled (Off).\n");
     }
 
+    /* Optional: libraries built before voice-profile support have none of these symbols. Left NULL
+     * so older libclearcore_filter.so builds keep working; the reload hooks below no-op on NULL. */
+    clearcore_set_voice_profile_fn_t set_voice_profile_fn =
+        (clearcore_set_voice_profile_fn_t)dlsym(lib, "clearcore_filter_set_voice_profile");
+    clearcore_clear_voice_profile_fn_t clear_voice_profile_fn =
+        (clearcore_clear_voice_profile_fn_t)dlsym(lib, "clearcore_filter_clear_voice_profile");
+    clearcore_reload_active_profile_fn_t reload_active_profile_fn =
+        (clearcore_reload_active_profile_fn_t)dlsym(lib, "clearcore_filter_reload_active_profile");
+    clearcore_supports_voice_profile_fn_t supports_voice_profile_fn =
+        (clearcore_supports_voice_profile_fn_t)dlsym(lib, "clearcore_filter_supports_voice_profile");
+    clearcore_is_voice_profile_active_fn_t is_voice_profile_active_fn =
+        (clearcore_is_voice_profile_active_fn_t)dlsym(lib, "clearcore_filter_is_voice_profile_active");
+    if (!reload_active_profile_fn || !supports_voice_profile_fn || !is_voice_profile_active_fn) {
+        fprintf(stderr, "[pipewire_helper] Voice-profile C-ABI absent; running unconditioned denoiser.\n");
+    }
+
     if (!create_fn || !process_fn || !free_fn) {
         fprintf(stderr, "[pipewire_helper] Failed to resolve clearcore_filter symbols: %s\n", dlerror());
         dlclose(lib);
@@ -716,7 +738,18 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
         return;
     }
 
-    /* Pre-heat neural inference kernels with 5 frames */
+    /* Reload persisted active profile from disk BEFORE warmup so the warmup hops exercise the
+     * personalized conditioning path (rc: 1 loaded, 0 none/neutral, <0 error). Never on the audio
+     * thread — this runs in neural_filter_init on the control thread. */
+    int profile_rc = 0;
+    bool profile_loaded = false;
+    if (reload_active_profile_fn && ctx->neural_filter) {
+        ctx->neural_reload_active_profile_fn = reload_active_profile_fn;
+        profile_rc = reload_active_profile_fn(filter);
+        profile_loaded = (profile_rc >= 0);
+    }
+
+    /* Pre-heat neural inference kernels with 5 frames. */
     float warmup_in[HOP_SAMPLES] = {0};
     float warmup_out[HOP_SAMPLES] = {0};
     for (int i = 0; i < 5; i++) {
@@ -728,6 +761,36 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_process_fn = process_fn;
     ctx->neural_free_fn = free_fn;
     ctx->neural_set_preset_fn = set_preset_fn;
+    ctx->neural_set_voice_profile_fn = set_voice_profile_fn;
+    ctx->neural_clear_voice_profile_fn = clear_voice_profile_fn;
+    ctx->neural_supports_voice_profile_fn = supports_voice_profile_fn;
+    ctx->neural_is_voice_profile_active_fn = is_voice_profile_active_fn;
+
+    int supports_profile = 0;
+    if (supports_voice_profile_fn) {
+        supports_profile = supports_voice_profile_fn(filter);
+    }
+    int profile_active = 0;
+    if (is_voice_profile_active_fn && profile_loaded) {
+        profile_active = is_voice_profile_active_fn(filter);
+    }
+    if (supports_profile) {
+        fprintf(stderr, "[pipewire_helper] Neural model supports voice profiles (pDFNet3 Pro). "
+                        "Active profile at startup: %s (rc=%d)\n",
+                profile_active ? "YES" : "no", profile_rc);
+    } else {
+        fprintf(stderr, "[pipewire_helper] Neural model is unconditioned base DFNet3 (no voice-profile support). "
+                        "Active profile at startup: %s (rc=%d)\n",
+                profile_active ? "YES" : "no", profile_rc);
+    }
+
+    /* Seed the generation poller from the current shared-state generation: only later *increments*
+     * by the writer should trigger a reload. shared_state may be NULL (no daemon/UI yet). */
+    if (ctx->shared_state) {
+        atomic_store_explicit(&ctx->applied_generation,
+                              atomic_load_explicit(&ctx->shared_state->generation, memory_order_relaxed),
+                              memory_order_relaxed);
+    }
     fprintf(stderr, "[pipewire_helper] ClearCore DeepFilterNet3 neural suppressor ACTIVE!\n");
 }
 
@@ -744,7 +807,58 @@ static void neural_filter_free(pipewire_helper_context_t *ctx) {
     ctx->neural_process_fn = NULL;
     ctx->neural_free_fn = NULL;
     ctx->neural_set_preset_fn = NULL;
+    ctx->neural_set_voice_profile_fn = NULL;
+    ctx->neural_clear_voice_profile_fn = NULL;
+    ctx->neural_reload_active_profile_fn = NULL;
+    ctx->neural_supports_voice_profile_fn = NULL;
+    ctx->neural_is_voice_profile_active_fn = NULL;
     ctx->applied_preset = CLEARCORE_PRESET_OFF;
+}
+
+/**
+ * Main-loop hook: reload the active voice profile if the shared-state `generation` changed since
+ * the last reload. Invoked from the 250 ms poll timer and the SIGUSR1 signal callback, i.e. only
+ * from the PipeWire main thread — never from on_capture_process. The reload C-ABI itself performs
+ * disk I/O on this control thread and is a no-op when the library lacks voice-profile support.
+ */
+static void profile_check_and_reload(pipewire_helper_context_t *ctx) {
+    if (!ctx || !ctx->shared_state) {
+        return;
+    }
+    uint32_t current_gen = atomic_load_explicit(&ctx->shared_state->generation, memory_order_relaxed);
+    uint32_t applied_gen = atomic_load_explicit(&ctx->applied_generation, memory_order_relaxed);
+    if (current_gen == applied_gen) {
+        return;
+    }
+
+    if (ctx->neural_filter && ctx->neural_reload_active_profile_fn) {
+        int rc = ctx->neural_reload_active_profile_fn(ctx->neural_filter);
+        const char *kind = "profile";
+        if (rc == 0) {
+            kind = "cleared to neutral";
+        } else if (rc == 1) {
+            kind = "loaded";
+        } else if (rc < 0) {
+            kind = "reload error";
+        }
+        fprintf(stderr, "[pipewire_helper] [PROFILE] generation %u -> %u: %s (rc=%d)\n",
+                applied_gen, current_gen, kind, rc);
+    }
+    /* Accept the generation regardless of reload outcome: a failed reload (e.g. a profile still
+     * being written) is retried on the next increment rather than re-attempted forever. */
+    atomic_store_explicit(&ctx->applied_generation, current_gen, memory_order_relaxed);
+}
+
+/** 250 ms poll timer on the PipeWire main loop: detects shared-state generation increments. */
+static void on_profile_poll_timer(void *data, uint64_t expirations) {
+    (void)expirations;
+    profile_check_and_reload((pipewire_helper_context_t *)data);
+}
+
+/** SIGUSR1 handler on the PipeWire main loop: reloads the voice profile immediately. */
+static void on_profile_signal(void *data, int signal_number) {
+    (void)signal_number;
+    profile_check_and_reload((pipewire_helper_context_t *)data);
 }
 
 int pipewire_helper_init(pipewire_helper_context_t *ctx) {
@@ -794,6 +908,24 @@ int pipewire_helper_init(pipewire_helper_context_t *ctx) {
     /* Timer for releasing Bluetooth headset mode back to high-fidelity A2DP */
     ctx->bt_release_timer = pw_loop_add_timer(pw_main_loop_get_loop(ctx->loop), on_bt_release_timer, ctx);
 
+    /* 250 ms poll timer (main thread only) for shared-state `generation` changes. Reloads the voice
+     * profile between hops; never touches the realtime on_capture_process path. */
+    if (ctx->neural_reload_active_profile_fn) {
+        ctx->profile_timer_source = pw_loop_add_timer(pw_main_loop_get_loop(ctx->loop),
+                                                      on_profile_poll_timer, ctx);
+        if (ctx->profile_timer_source) {
+            struct timespec interval = {0, 250 * 1000000L};
+            pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->profile_timer_source,
+                                 &interval, NULL, false);
+        }
+
+        /* SIGUSR1: instantaneous reload trigger on the main loop thread (the Electron app signals
+         * this PID after writing active_profile.json). Registered via pw_loop_add_signal so the
+         * async signal is marshalled onto the main loop, never onto the audio thread. */
+        ctx->profile_signal_source = pw_loop_add_signal(pw_main_loop_get_loop(ctx->loop),
+                                                        SIGUSR1, on_profile_signal, ctx);
+    }
+
     /* Listen for available physical microphones via registry */
     ctx->registry = pw_core_get_registry(ctx->core, PW_VERSION_REGISTRY, 0);
     if (ctx->registry) {
@@ -805,6 +937,10 @@ int pipewire_helper_init(pipewire_helper_context_t *ctx) {
     ctx->sync_seq = pw_core_sync(ctx->core, PW_ID_CORE, 0);
     for (int iter = 0; iter < 100 && !ctx->sync_done; iter++) {
         pw_loop_iterate(pw_main_loop_get_loop(ctx->loop), 10);
+    }
+
+    if (!ctx->shared_state) {
+        atomic_store_explicit(&ctx->applied_generation, 0, memory_order_relaxed);
     }
 
     return 0;
@@ -959,6 +1095,14 @@ void pipewire_helper_destroy(pipewire_helper_context_t *ctx) {
     if (ctx->bt_release_timer && ctx->loop) {
         pw_loop_destroy_source(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer);
         ctx->bt_release_timer = NULL;
+    }
+    if (ctx->profile_timer_source && ctx->loop) {
+        pw_loop_destroy_source(pw_main_loop_get_loop(ctx->loop), ctx->profile_timer_source);
+        ctx->profile_timer_source = NULL;
+    }
+    if (ctx->profile_signal_source && ctx->loop) {
+        pw_loop_destroy_source(pw_main_loop_get_loop(ctx->loop), ctx->profile_signal_source);
+        ctx->profile_signal_source = NULL;
     }
     if (ctx->registry) {
         spa_hook_remove(&ctx->core_listener);

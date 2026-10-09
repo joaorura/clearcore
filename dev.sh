@@ -24,6 +24,11 @@ export CLEARCORE_DEV_OWN_DAEMON=1
 # Modelo de cadastro de voz e modelos de inferência nativos embutidos no Clearcore.
 echo "🎙️  Utilizando modelos nativos embutidos: models/enrollment/ e models/stateful/"
 
+export CLEARCORE_DEV_PDFNET3_ASSET="${CLEARCORE_DEV_PDFNET3_ASSET:-/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v2_20261009/pdfnet3-release-asset-v1.tar.gz}"
+export CLEARCORE_DEV_PDFNET3_SHA256="${CLEARCORE_DEV_PDFNET3_SHA256:-a3db32ae85a1c9dc81d97a548cc1d5c0c411186ff95fab8591d91d553453bdb2}"
+
+export CLEARCORE_DEV_ENROLLMENT_ASSET="${CLEARCORE_DEV_ENROLLMENT_ASSET:-/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v2_20261009/voice-enrollment-asset-v1.tar.gz}"
+export CLEARCORE_DEV_ENROLLMENT_SHA256="${CLEARCORE_DEV_ENROLLMENT_SHA256:-d1d4c9d113db12ef4dd3266d2a46960e954c4a45a52943782409f04d4489c581}"
 
 # Core dump desligado neste shell e em tudo que ele inicia (Electron e o daemon, que
 # segura PCM cru em memória durante o cadastro de voz). O Electron também aplica

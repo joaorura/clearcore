@@ -90,6 +90,15 @@ typedef struct bounded_transport {
     _Atomic bool active;
 } bounded_transport_t;
 
+/* Optional voice-profile C-ABI signatures exported by crates/filter-capi. They are resolved with
+ * dlsym at runtime and left NULL when the loaded library predates them (backward compatibility).
+ * Every one of them must be called from a control thread, never inside on_capture_process. */
+typedef int (*clearcore_set_voice_profile_fn_t)(void *filter, const char *profile_json);
+typedef int (*clearcore_clear_voice_profile_fn_t)(void *filter);
+typedef int (*clearcore_reload_active_profile_fn_t)(void *filter);
+typedef int (*clearcore_supports_voice_profile_fn_t)(const void *filter);
+typedef int (*clearcore_is_voice_profile_active_fn_t)(const void *filter);
+
 /**
  * PipeWire Native Helper Context.
  */
@@ -115,6 +124,23 @@ typedef struct pipewire_helper_context {
     void (*neural_free_fn)(void *filter);
     int (*neural_set_preset_fn)(void *filter, uint8_t preset); /* optional: NULL on an old library */
     int applied_preset;                                        /* CLEARCORE_PRESET_* last applied */
+
+    /* Voice profile control (optional: NULL when the loaded library predates them, so older
+     * libclearcore_filter.so builds keep working without relinking the helper). */
+    clearcore_set_voice_profile_fn_t neural_set_voice_profile_fn;
+    clearcore_clear_voice_profile_fn_t neural_clear_voice_profile_fn;
+    clearcore_reload_active_profile_fn_t neural_reload_active_profile_fn;
+    clearcore_supports_voice_profile_fn_t neural_supports_voice_profile_fn;
+    clearcore_is_voice_profile_active_fn_t neural_is_voice_profile_active_fn;
+
+    /* Profile reload synchronization.
+     * `applied_generation` is the shared-state `generation` value the last reload was driven by;
+     * the 250 ms poll timer compares it against `shared_state->generation` to decide if a reload
+     * is due. `profile_timer_source` owns the PipeWire loop timer that performs that poll. */
+    _Atomic uint32_t applied_generation;
+    struct spa_source *profile_timer_source;
+    struct spa_source *profile_signal_source;
+
     clearcore_shared_state_t *shared_state;
     int shared_state_fd;
     uint32_t target_device_id;
