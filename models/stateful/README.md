@@ -15,9 +15,9 @@ assinatura nem registro de governança.
 
 | Arquivo | Bytes | SHA-256 |
 |---|---:|---|
-| `enc.onnx` | 1954508 | `c061d8a021d060f00a01a3191bf5a253247f359987b2a13043ef0ad46931191e` |
-| `erb_dec.onnx` | 3292490 | `0c84ecc2841445c0a4eee5486f43212bf41241a4459a887bf067a79cdeb057b4` |
-| `df_dec.onnx` | 3341123 | `a65a3dd9b763add2cfa7e822e7e910d0d70297426dff1b3863336a970b4ea655` |
+| `enc.onnx` | 1956817 | `aead48ee9a7995785780841a1346fe3e43404d55ce1e30417966be192eb5841e` |
+| `erb_dec.onnx` | 3292490 | `346266ad7ff31adfe472c669558ffd8ca4bd362c6514405c429d790bb77c46d1` |
+| `df_dec.onnx` | 3343468 | `1d95ed8864eed3c1d5870f7602881bb51a2a43a75abb34342ff6806197e09209` |
 | `config.ini` | 2067 | `415eb925d44990d938fb739f514aa3662c1ec0ea836cff044fa1291b82cb4290` (cópia byte a byte do `config.ini` do asset aprovado) |
 
 Conferir: `sha256sum models/stateful/*` (os três `.onnx` e o `config.ini` devem bater com a tabela; a dos `.onnx` espelha `APPROVED_STATEFUL_DIGESTS`; ao regenerar os arquivos, atualize as duas).

@@ -60,9 +60,9 @@ pub struct StatefulDigests {
 /// Changing a graph means regenerating it, updating `models/stateful/README.md` and these
 /// constants together; a stale constant makes loading fail closed.
 pub const APPROVED_STATEFUL_DIGESTS: StatefulDigests = StatefulDigests {
-    enc: "c061d8a021d060f00a01a3191bf5a253247f359987b2a13043ef0ad46931191e",
-    erb_dec: "0c84ecc2841445c0a4eee5486f43212bf41241a4459a887bf067a79cdeb057b4",
-    df_dec: "a65a3dd9b763add2cfa7e822e7e910d0d70297426dff1b3863336a970b4ea655",
+    enc: "aead48ee9a7995785780841a1346fe3e43404d55ce1e30417966be192eb5841e",
+    erb_dec: "346266ad7ff31adfe472c669558ffd8ca4bd362c6514405c429d790bb77c46d1",
+    df_dec: "1d95ed8864eed3c1d5870f7602881bb51a2a43a75abb34342ff6806197e09209",
 };
 
 /// Lowercase hex SHA-256 of `bytes`.
