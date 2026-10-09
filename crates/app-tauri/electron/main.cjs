@@ -175,15 +175,24 @@ async function isDaemonResponsive() {
 
 // Auto-detect native embedded model for voice enrollment
 function detectDevModels() {
-  if (process.env.CLEARCORE_DEV_ENROLLMENT_ASSET || process.env.CLEARCORE_ENROLLMENT_MODEL) {
-    return;
-  }
-  const root = path.resolve(__dirname, '..', '..', '..');
-  const nativeModel = path.join(root, 'models', 'enrollment', 'enrollment.onnx');
-  if (fs.existsSync(nativeModel)) {
-    process.env.CLEARCORE_ENROLLMENT_MODEL = nativeModel;
-    console.log(`[Clearcore Daemon] Using embedded enrollment model: ${nativeModel}`);
-    return;
+  if (process.env.CLEARCORE_DEV_ENROLLMENT_ASSET || process.env.CLEARCORE_ENROLLMENT_MODEL) return;
+
+  const candidates = [
+    path.join(path.resolve(__dirname, '..', '..', '..'), 'models', 'enrollment', 'enrollment.onnx'),
+    process.resourcesPath ? path.join(process.resourcesPath, 'models', 'enrollment', 'enrollment.onnx') : null,
+    path.join(path.resolve(__dirname, '..', '..', '..'), 'resources', 'models', 'enrollment', 'enrollment.onnx'),
+    '/opt/clearcore/models/enrollment/enrollment.onnx',
+    '/opt/clearcore/resources/models/enrollment/enrollment.onnx',
+    '/usr/share/clearcore/models/enrollment/enrollment.onnx',
+    path.join(os.homedir(), '.local', 'share', 'clearcore', 'models', 'enrollment', 'enrollment.onnx'),
+  ].filter(Boolean);
+
+  for (const nativeModel of candidates) {
+    if (fs.existsSync(nativeModel)) {
+      process.env.CLEARCORE_ENROLLMENT_MODEL = nativeModel;
+      console.log(`[Clearcore Daemon] Using embedded enrollment model: ${nativeModel}`);
+      return;
+    }
   }
 }
 

@@ -177,6 +177,7 @@ if (platform === 'linux') {
 // Bundles:
 // - models/stateful/ (ONNX for OpenVINO/DirectML/Vulkan, plus tensorrt/ compiled engines for NVIDIA GPU)
 //   into both resources/models/stateful/ and bundle root models/stateful/
+// - models/enrollment/ (Voice enrollment neural models) into both resources/models/enrollment/ and bundle root models/enrollment/
 // - vendor/approved/ (Tract approved neural models) into both resources/vendor/approved/ and bundle root vendor/approved/
 // - governance/model-assets/ (model trust policy and cryptographic manifests) into bundle root and resources
 console.log('🧠 Bundling neural models and multi-runtime assets for all platforms...');
@@ -194,6 +195,21 @@ if (fs.existsSync(modelsStatefulSrc)) {
   console.log('✓ Bundled models/stateful (ONNX stateful & TensorRT engines) into resources/models/stateful and bundle root');
 } else {
   console.warn(`⚠️ models/stateful directory not found at ${modelsStatefulSrc}`);
+}
+
+const modelsEnrollmentSrc = path.join(repoRoot, 'models', 'enrollment');
+if (fs.existsSync(modelsEnrollmentSrc)) {
+  const destResourcesEnrollment = path.join(resourcesDir, 'models', 'enrollment');
+  const destBundleEnrollment = path.join(bundleDir, 'models', 'enrollment');
+
+  fs.mkdirSync(destResourcesEnrollment, { recursive: true });
+  fs.mkdirSync(destBundleEnrollment, { recursive: true });
+
+  fs.cpSync(modelsEnrollmentSrc, destResourcesEnrollment, { recursive: true });
+  fs.cpSync(modelsEnrollmentSrc, destBundleEnrollment, { recursive: true });
+  console.log('✓ Bundled models/enrollment (Voice enrollment model) into resources/models/enrollment and bundle root');
+} else {
+  console.warn(`⚠️ models/enrollment directory not found at ${modelsEnrollmentSrc}`);
 }
 
 const vendorApproved = path.join(repoRoot, 'vendor', 'approved');

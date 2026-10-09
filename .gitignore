@@ -31,3 +31,7 @@ build/
 
 repo-site/
 release-assets/
+
+# Orca IDE runtime markers e logs
+.orca/
+orca.yaml

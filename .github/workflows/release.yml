@@ -74,8 +74,10 @@ jobs:
             "Clearcore-linux-x64/resources/scripts/check-virtual-mic.sh" \
             "Clearcore-linux-x64/resources/models/stateful/enc.onnx" \
             "Clearcore-linux-x64/resources/models/stateful/tensorrt/enc.engine" \
+            "Clearcore-linux-x64/resources/models/enrollment/enrollment.onnx" \
             "Clearcore-linux-x64/models/stateful/enc.onnx" \
             "Clearcore-linux-x64/models/stateful/tensorrt/enc.engine" \
+            "Clearcore-linux-x64/models/enrollment/enrollment.onnx" \
             "Clearcore-linux-x64/vendor/approved/df-compatible-release-asset-v1.bin"; do
             if ! grep -qx "./${entry}\|${entry}" "${RUNNER_TEMP}/linux-package-listing.txt"; then
               echo "::error::${entry} ausente em ${TARBALL}"
