@@ -555,6 +555,8 @@ jobs:
     needs: [build-linux-x64, build-linux-arm64, build-windows, build-windows-arm64, build-macos-x64, build-macos-arm64]
     runs-on: ubuntu-latest
     if: always() && !cancelled() && (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag_name != '' || github.event_name == 'workflow_dispatch')
+    env:
+      COPR_WEBHOOK_URL: ${{ secrets.COPR_WEBHOOK_URL }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -622,12 +624,13 @@ jobs:
           prerelease: ${{ github.event.inputs.prerelease != 'false' }}
 
       - name: Trigger Fedora Copr Rebuild
-        if: env.COPR_WEBHOOK_URL != ''
+        if: ${{ secrets.COPR_WEBHOOK_URL != '' }}
         env:
           COPR_WEBHOOK_URL: ${{ secrets.COPR_WEBHOOK_URL }}
         run: |
           echo "Triggering automated build on Fedora Copr..."
-          curl -s -X POST "${COPR_WEBHOOK_URL}" || echo "Warning: Copr webhook call failed"
+          BUILD_RESP="$(curl -s -X POST "${COPR_WEBHOOK_URL}")"
+          echo "Copr response: ${BUILD_RESP}"
 
       - name: Build DNF and APT Repository Metadata
         run: |
