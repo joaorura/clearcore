@@ -124,6 +124,15 @@ jobs:
           chmod +x scripts/package-linux-packages.sh
           QA_RPATHS=0x0002 ./scripts/package-linux-packages.sh Clearcore-linux-x64
 
+      - name: Package Standalone Neural Models
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          tar -czf release/Clearcore-models-stateful-v2.tar.gz -C models stateful
+          if [ -d "vendor/approved" ]; then
+            tar -czf release/Clearcore-models-approved-dfnet3.tar.gz -C vendor approved
+          fi
+
       - name: Upload Linux Package Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -133,6 +142,8 @@ jobs:
             release/Clearcore-linux-x64.AppImage
             release/Clearcore-*.rpm
             release/Clearcore-*.deb
+            release/Clearcore-models-stateful-v2.tar.gz
+            release/Clearcore-models-approved-dfnet3.tar.gz
 
   build-linux-arm64:
     name: Build Linux ARM64 Package
@@ -576,7 +587,8 @@ jobs:
                 "- **Linux Universal (x64 & ARM64)**: Standalone archive (\`.tar.gz\`) and AppImage (\`.AppImage\`) with PipeWire C-API bridge." \
                 "- **Windows x64**: Single-click installer (\`Clearcore-Setup.exe\`, \`Clearcore-Inno-Setup.exe\`) with WaveRT virtual audio driver and portable zip (\`.zip\`)." \
                 "- **Windows ARM64 (Snapdragon X Elite / Copilot+)**: Standalone ARM64 package (\`.zip\`)." \
-                "- **macOS (Intel x64 & Apple Silicon ARM64)**: Application bundle with CoreAudio HAL driver (\`.tar.gz\` and \`.dmg\`)." > "${NOTES_FILE}"
+                "- **macOS (Intel x64 & Apple Silicon ARM64)**: Application bundle with CoreAudio HAL driver (\`.tar.gz\` and \`.dmg\`)." \
+                "- **Neural Acceleration Models**: Standalone archives (\`Clearcore-models-stateful-v2.tar.gz\`) containing stateful ONNX graphs and pre-compiled TensorRT engines." > "${NOTES_FILE}"
             fi
           fi
 
