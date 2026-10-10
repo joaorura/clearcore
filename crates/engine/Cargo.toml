@@ -13,6 +13,7 @@ studio-dsp = { path = "../studio-dsp" }
 
 [features]
 tract = ["realtime-noise-model/tract"]
+ort = ["realtime-noise-model/ort"]
 
 [lints]
 workspace = true

@@ -16,14 +16,17 @@ tract = [
     "dep:tract-hir",
     "dep:tract-onnx",
     "dep:tract-pulse",
+    "deep_filter/tract",
 ]
+ort = ["dep:ort", "dep:ndarray"]
 
 [dependencies]
 base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }
-deep_filter = { path = "../../vendor/crates/deep_filter", package = "deep_filter_fork", default-features = false, features = ["tract"], optional = true }
+deep_filter = { path = "../../vendor/crates/deep_filter", package = "deep_filter_fork", default-features = false, features = ["transforms"], optional = true }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std"] }
 flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 ndarray = { version = "=0.15.6", default-features = false, features = ["std"], optional = true }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls"], optional = true }
 realtime-noise-contracts = { path = "../contracts" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }

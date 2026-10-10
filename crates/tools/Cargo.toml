@@ -9,10 +9,11 @@ publish = false
 [features]
 default = []
 tract = ["realtime-noise-model/tract"]
+ort = ["realtime-noise-model/ort"]
 
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
-realtime-noise-model = { path = "../model", default-features = false, features = ["tract"] }
+realtime-noise-model = { path = "../model", default-features = false, features = ["ort", "tract"] }
 realtime-noise-accelerators = { path = "../accelerators" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }

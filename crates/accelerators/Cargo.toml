@@ -8,8 +8,8 @@ publish = false
 
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
-deep_filter = { path = "../../vendor/crates/deep_filter", package = "deep_filter_fork", default-features = false, features = ["tract"] }
-realtime-noise-model = { path = "../model", features = ["tract"] }
+deep_filter = { path = "../../vendor/crates/deep_filter", package = "deep_filter_fork", default-features = false, features = ["transforms"] }
+realtime-noise-model = { path = "../model", features = ["ort", "tract"] }
 realtime-noise-runtime-coreml = { path = "../runtime-coreml" }
 realtime-noise-runtime-gpu-compute = { path = "../runtime-gpu-compute" }
 realtime-noise-runtime-openvino = { path = "../runtime-openvino" }
@@ -20,6 +20,7 @@ sha2 = { version = "=0.10.9", default-features = false, features = ["std"] }
 
 [features]
 tract = ["realtime-noise-model/tract"]
+ort = ["realtime-noise-model/ort"]
 
 [lints]
 workspace = true
