@@ -8,33 +8,33 @@ use std::sync::Arc;
 
 use realtime_noise_contracts::AudioFrame;
 use realtime_noise_model::{
-    CpuProfile, InferenceBackend, InferenceError, PdfNet3DevArchive, ProfileStore, StudioBackend,
-    TractBackend, VoiceProfile,
+    CpuProfile, InferenceError, InferenceBackend, OrtBackend, PdfNet3DevArchive, ProfileStore,
+    StudioBackend, VoiceProfile,
 };
 use studio_dsp::{Preset, StudioControl};
 
-/// Default deployment path of the pDFNet3 Pro v2 archive (Stage 2, M3 run). Used as the tier-1
-/// candidate when the `CLEARCORE_DEV_PDFNET3_ASSET` / `CLEARCORE_DEV_PDFNET3_SHA256` environment
-/// variables are not set.
+/// Default deployment path of the pDFNet3 Pro v2 stateful archive (V2 M3 run). Used as the
+/// tier-1 candidate when the `CLEARCORE_DEV_PDFNET3_ASSET` / `CLEARCORE_DEV_PDFNET3_SHA256`
+/// environment variables are not set. Points at the *stateful* graphs (with recurrent state ports)
+/// that `OrtBackend` consumes.
 pub const PDFNET3_PRO_V2_DEFAULT_ASSET: &str =
-    "/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v2_20261009/pdfnet3-release-asset-v1.tar.gz";
+    "/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v2_20261009/pdfnet3-stateful-asset-v1.tar.gz";
 /// SHA-256 of [`PDFNET3_PRO_V2_DEFAULT_ASSET`] (the whole archive, lowercase hex).
 pub const PDFNET3_PRO_V2_DEFAULT_SHA256: &str =
-    "a3db32ae85a1c9dc81d97a548cc1d5c0c411186ff95fab8591d91d553453bdb2";
+    "a14a97c57159d2d1b5fc28b76755da9dd98ef83b0051651a38f7fa5032b362c2";
 
 pub struct ClearcoreFilter {
-    backend: StudioBackend<TractBackend>,
+    backend: StudioBackend<OrtBackend>,
     control: Arc<StudioControl>,
     supports_film: bool,
     active_profile_id: Option<String>,
 }
 
-/// Candidate for the (unsigned, development) pDFNet3 Pro v2 archive, resolved the same way the
-/// service daemon reads it: both `CLEARCORE_DEV_PDFNET3_ASSET` and `CLEARCORE_DEV_PDFNET3_SHA256`
-/// must be set together (both valid). If neither is set, the machine-default archive
-/// ([`PDFNET3_PRO_V2_DEFAULT_ASSET`] with [`PDFNET3_PRO_V2_DEFAULT_SHA256`]) is used. A partial or
-/// malformed env configuration is treated as "not configured" (the caller then falls through to
-/// the base manifest) rather than silently loading a different asset.
+/// Candidate for the (unsigned, development) pDFNet3 Pro v2 stateful archive, resolved the same
+/// way the service daemon reads it: both `CLEARCORE_DEV_PDFNET3_ASSET` and
+/// `CLEARCORE_DEV_PDFNET3_SHA256` must be set together (both valid). If neither is set, the
+/// machine-default archive ([`PDFNET3_PRO_V2_DEFAULT_ASSET`] with [`PDFNET3_PRO_V2_DEFAULT_SHA256`])
+/// is used. A partial or malformed env configuration is treated as "not configured".
 fn dev_pdfnet3_candidate() -> Option<(PathBuf, String)> {
     const ENV_ASSET: &str = "CLEARCORE_DEV_PDFNET3_ASSET";
     const ENV_SHA: &str = "CLEARCORE_DEV_PDFNET3_SHA256";
@@ -62,23 +62,25 @@ fn dev_pdfnet3_candidate() -> Option<(PathBuf, String)> {
     }
 }
 
-/// Tier-1 -> tier-2 model resolution.
+/// Tier-1 model resolution (fail-closed, no base-model fallback).
 ///
-/// Tier 1: when the pDFNet3 Pro v2 archive is available (env vars or machine default) and its
+/// When the pDFNet3 Pro v2 stateful archive is available (env vars or machine default) and its
 /// whole-file SHA-256 matches, it is verified (allowlisted members, no symlinks/exec bits) and
-/// instantiated as a `TractBackend`. The loaded graphs must declare the `FiLM` inputs; if they do
-/// not, the archive is rejected and we fall through to tier 2.
-///
-/// Tier 2: the approved base DeepFilterNet3 manifest from `repo_root` (`vendor/approved/`).
-fn resolve_tract_backend(_repo_root: &Path) -> Option<TractBackend> {
+/// instantiated as an [`OrtBackend`]. The loaded graphs must declare the `FiLM` inputs; if they
+/// do not, the archive is rejected. Returns `None` on any failure — there is no lower-tier
+/// fallback, so a machine without the Pro archive simply has no filter (R1: fail-closed).
+fn resolve_ort_backend(_repo_root: &Path) -> Option<OrtBackend> {
     let (path, sha) = dev_pdfnet3_candidate()?;
     let archive = PdfNet3DevArchive::read(&path, &sha).ok()?;
-    archive.instantiate(CpuProfile::Avx2Minimum).ok()
+    archive.instantiate_ort(CpuProfile::Avx2Minimum).ok()
 }
 
 /// Clears the active voice profile and restores neutral (identity) conditioning. `Ok(())` on
 /// success, an [`InferenceError`] otherwise.
-fn clear_to_neutral(backend: &mut StudioBackend<TractBackend>, active_id: &mut Option<String>) {
+fn clear_to_neutral(
+    backend: &mut StudioBackend<OrtBackend>,
+    active_id: &mut Option<String>,
+) {
     let _ = backend.set_voice_profile(None);
     *active_id = None;
 }
@@ -86,7 +88,7 @@ fn clear_to_neutral(backend: &mut StudioBackend<TractBackend>, active_id: &mut O
 /// Applies `profile` to the backend. A non-identity profile on a model without `FiLM` inputs is
 /// rejected up front ([`InferenceError::UnsupportedFeature`]); the previous profile stays active.
 fn apply_profile(
-    backend: &mut StudioBackend<TractBackend>,
+    backend: &mut StudioBackend<OrtBackend>,
     supports_film: bool,
     active_id: &mut Option<String>,
     profile: &VoiceProfile,
@@ -117,12 +119,13 @@ fn try_load_active_profile(filter: &mut ClearcoreFilter) {
 
 /// Create a new neural filter instance.
 ///
-/// The model asset is resolved through a two-tier policy: first the pDFNet3 Pro v2 development
-/// archive (env vars `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256`, or the machine-default archive at
-/// [`PDFNET3_PRO_V2_DEFAULT_ASSET`] — verified against [`PDFNET3_PRO_V2_DEFAULT_SHA256`]); on any
-/// failure it falls back to the approved base DeepFilterNet3 manifest under `repo_root`. When the
-/// Pro v2 archive is loaded, its `FiLM` inputs are detected and a persisted
-/// `active_profile.json` (if any) is applied atomically as part of construction.
+/// The model asset is resolved fail-closed (R1): the pDFNet3 Pro v2 stateful archive (env vars
+/// `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256`, or the machine-default archive at
+/// [`PDFNET3_PRO_V2_DEFAULT_ASSET`] — verified against [`PDFNET3_PRO_V2_DEFAULT_SHA256`]) is the
+/// only candidate. When it loads, its `FiLM` inputs are detected and a persisted
+/// `active_profile.json` (if any) is applied atomically as part of construction. On any failure
+/// (archive missing, hash mismatch, missing `FiLM` inputs, CPU gate) this returns `NULL` — there
+/// is no base-model fallback.
 ///
 /// After construction the studio preset starts at `Off` (bit-exact passthrough of the neural
 /// output); select another one with `clearcore_filter_set_preset`.
@@ -145,7 +148,7 @@ pub unsafe extern "C" fn clearcore_filter_create(
         }
     };
 
-    let backend = match resolve_tract_backend(repo_root) {
+    let backend = match resolve_ort_backend(repo_root) {
         Some(backend) => backend,
         None => return std::ptr::null_mut(),
     };
@@ -561,7 +564,7 @@ mod tests {
         // Match `clearcore_filter_create`'s exact model-resolution so the reference and the FFI
         // filter use the same (tier-1 or tier-2) graphs — otherwise the bit-exact comparison
         // below is meaningless on machines that ship the pro archive.
-        let reference = resolve_tract_backend(root_path);
+        let reference = resolve_ort_backend(root_path);
         assert!(reference.is_some());
         let Some(mut reference) = reference else { return };
 

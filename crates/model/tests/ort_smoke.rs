@@ -1,4 +1,5 @@
 #![cfg(feature = "ort")]
+#![allow(clippy::expect_used)]
 
 //! Smoke gate for the ONNX Runtime (`ort` rc.13) streaming backend.
 //!

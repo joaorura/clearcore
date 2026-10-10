@@ -19,7 +19,11 @@ use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 use tar::Archive;
 
-use crate::{BackendDescriptor, CpuProfile, TractBackend};
+#[cfg(feature = "tract")]
+use crate::TractBackend;
+#[cfg(feature = "ort")]
+use crate::OrtBackend;
+use crate::{BackendDescriptor, CpuProfile};
 
 /// Asset id reported by the backend descriptor. Deliberately says "unapproved".
 pub const PDFNET3_DEV_ASSET_ID: &str = "pdfnet3-dev-unapproved";
@@ -147,6 +151,7 @@ impl PdfNet3DevArchive {
     /// Builds a tract backend with this model. Fails with [`PdfNet3DevError::FilmMissing`] if the
     /// graphs do not declare the `FiLM` inputs: a backend that cannot apply a profile is useless
     /// as the development profile backend and must not be reported as `pdfnet3-dev`.
+    #[cfg(feature = "tract")]
     pub fn instantiate(&self, profile: CpuProfile) -> Result<TractBackend, PdfNet3DevError> {
         profile
             .ensure_supported()
@@ -161,6 +166,33 @@ impl PdfNet3DevArchive {
             cpu_profile: profile.name(),
         };
         let backend = TractBackend::from_archive(Arc::clone(&self.bytes), descriptor)
+            .map_err(|_| PdfNet3DevError::LoadFailed)?;
+        if !backend.supports_speaker_conditioning() {
+            return Err(PdfNet3DevError::FilmMissing);
+        }
+        Ok(backend)
+    }
+
+    /// Builds an ONNX Runtime backend with this model. The loaded graphs must declare the `FiLM`
+    /// inputs (the stateful Pro graphs do); otherwise this fails with [`PdfNet3DevError::FilmMissing`].
+    #[cfg(feature = "ort")]
+    pub fn instantiate_ort(
+        &self,
+        profile: CpuProfile,
+    ) -> Result<OrtBackend, PdfNet3DevError> {
+        profile
+            .ensure_supported()
+            .map_err(|_| PdfNet3DevError::LoadFailed)?;
+        let descriptor = BackendDescriptor {
+            backend: "ort",
+            backend_version: "deep_filter-v0.5.6",
+            runtime: "onnxruntime",
+            runtime_version: "2.0.0-rc.13",
+            asset_id: PDFNET3_DEV_ASSET_ID.to_owned(),
+            asset_sha256: self.sha256.clone(),
+            cpu_profile: profile.name(),
+        };
+        let backend = OrtBackend::from_archive_bytes(&self.bytes, descriptor)
             .map_err(|_| PdfNet3DevError::LoadFailed)?;
         if !backend.supports_speaker_conditioning() {
             return Err(PdfNet3DevError::FilmMissing);
@@ -230,7 +262,7 @@ fn validate_members(bytes: &[u8]) -> Result<(), PdfNet3DevError> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "tract"))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use std::{

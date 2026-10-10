@@ -82,6 +82,19 @@ pub const APPROVED_STATEFUL_DIGESTS: StatefulDigests = StatefulDigests {
     df_dec: "26470a38540042085608fc4d57beb6bd02152706bdcfbd583fe292d7e9874181",
 };
 
+/// Digests of the graphs in the pDFNet3 Pro v2 stateful archive
+/// (`pdfnet3-stateful-asset-v1.tar.gz`; whole-archive SHA-256
+/// `a14a97c57159d2d1b5fc28b76755da9dd98ef83b0051651a38f7fa5032b362c2`). These graphs carry the
+/// `FiLM` (`gamma`/`beta`) ports, so [`InferenceBackend::supports_voice_profile`] is `true` when
+/// they are loaded. Exported for directory-based Pro loads; the archive-based path
+/// ([`OrtBackend::from_archive_bytes`]) trusts the caller's whole-archive verification instead of
+/// re-checking these digests.
+pub const APPROVED_PRO_STATEFUL_DIGESTS: StatefulDigests = StatefulDigests {
+    enc: "d54681c1ba4c3363b8b768f3d5437a1a30b105001b5c6609576f5b33917a594b",
+    erb_dec: "fca0f1a8eadb80aae276574c91508b14e7007b4b4845de57bb75d9192b041a49",
+    df_dec: "2db6b5b16414d3b558898073815b0b51e0f00aa27def7b9cb704fa6ceee8284d",
+};
+
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(bytes);
@@ -122,6 +135,58 @@ fn read_verified_file(
     }
 }
 
+/// The three stateful graphs as raw ONNX bytes: `(enc, erb_dec, df_dec)`.
+type StatefulGraphs = (Vec<u8>, Vec<u8>, Vec<u8>);
+
+/// Extracts the three stateful graphs from an in-memory `.tar.gz` archive. Members that are not
+/// one of the three graph files (e.g. `config.ini`) are skipped; the three graphs must each be
+/// present exactly once and within [`MAX_GRAPH_BYTES`]. The caller must have verified the archive
+/// (e.g. [`crate::PdfNet3DevArchive::verify`] pins the whole-archive SHA-256); this helper does
+/// not re-check digests.
+fn extract_stateful_onnx(
+    archive_bytes: &[u8],
+) -> Result<StatefulGraphs, InferenceError> {
+    use std::io::Read as _;
+    let corruption = |reason: &str| InferenceError::ModelCorruption(reason.to_owned());
+    let mut enc: Option<Vec<u8>> = None;
+    let mut erb_dec: Option<Vec<u8>> = None;
+    let mut df_dec: Option<Vec<u8>> = None;
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(archive_bytes));
+    let entries = archive.entries().map_err(|_| corruption("unreadable archive"))?;
+    for entry in entries {
+        let entry = entry.map_err(|_| corruption("unreadable archive"))?;
+        let name = {
+            let path = entry.path().map_err(|_| corruption("invalid member path"))?;
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| corruption("non-UTF-8 member name"))?
+                .to_owned()
+        };
+        let slot = match name.as_str() {
+            ENC_FILE => &mut enc,
+            ERB_DEC_FILE => &mut erb_dec,
+            DF_DEC_FILE => &mut df_dec,
+            _ => continue,
+        };
+        if slot.is_some() {
+            return Err(corruption("duplicate graph member"));
+        }
+        let mut bytes = Vec::new();
+        entry
+            .take(MAX_GRAPH_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| corruption("unreadable graph member"))?;
+        if bytes.len() as u64 > MAX_GRAPH_BYTES {
+            return Err(corruption("graph member exceeds size limit"));
+        }
+        *slot = Some(bytes);
+    }
+    match (enc, erb_dec, df_dec) {
+        (Some(e), Some(r), Some(d)) => Ok((e, r, d)),
+        _ => Err(corruption("missing stateful graph member")),
+    }
+}
+
 fn ort_error<R>(error: ort::Error<R>) -> InferenceError {
     InferenceError::InferenceExecution(error.to_string())
 }
@@ -144,6 +209,12 @@ fn zeros(shape: &[i64]) -> Result<Tensor<f32>, InferenceError> {
     let len = usize::try_from(shape.iter().product::<i64>())
         .map_err(|_| InferenceError::InputContract("invalid tensor shape".to_owned()))?;
     Tensor::from_array((shape.to_vec(), vec![0.0f32; len])).map_err(ort_error)
+}
+
+fn ones(shape: &[i64]) -> Result<Tensor<f32>, InferenceError> {
+    let len = usize::try_from(shape.iter().product::<i64>())
+        .map_err(|_| InferenceError::InputContract("invalid tensor shape".to_owned()))?;
+    Tensor::from_array((shape.to_vec(), vec![1.0f32; len])).map_err(ort_error)
 }
 
 fn copy_into(dst: &mut Tensor<f32>, src: &[f32]) -> Result<(), InferenceError> {
@@ -206,9 +277,11 @@ fn declares_film(session: &Session) -> bool {
 }
 
 /// `FiLM` conditioning tensors, present only when both `enc` and `df_dec` declare
-/// `gamma`/`beta` inputs. Layout `[1, FILM_HIDDEN_DIM]`; the exact port layout of a
-/// `FiLM`-capable ONNX export must be confirmed when the first such fixture lands — the
-/// approved base graphs never reach this path.
+/// `gamma`/`beta` inputs. The pDFNet3 Pro stateful graphs declare these ports with shape
+/// `[1, S, FILM_HIDDEN_DIM]` (`S = 1` per streaming hop), i.e. **rank 3** — confirmed against
+/// `APPROVED_PRO_STATEFUL_DIGESTS`. In identity mode `gamma = 1.0` (multiplicative) and
+/// `beta = 0.0` (additive), so conditioning is a true pass-through; the approved base graphs
+/// never reach this path.
 struct FilmConditioning {
     enc_gamma: Tensor<f32>,
     enc_beta: Tensor<f32>,
@@ -218,11 +291,11 @@ struct FilmConditioning {
 
 impl FilmConditioning {
     fn new() -> Result<Self, InferenceError> {
-        let shape = [1, FILM_HIDDEN_DIM as i64];
+        let shape = [1, 1, FILM_HIDDEN_DIM as i64];
         Ok(Self {
-            enc_gamma: zeros(&shape)?,
+            enc_gamma: ones(&shape)?,
             enc_beta: zeros(&shape)?,
-            df_gamma: zeros(&shape)?,
+            df_gamma: ones(&shape)?,
             df_beta: zeros(&shape)?,
         })
     }
@@ -468,8 +541,9 @@ impl SpectralModelBackend for OrtSpectralModel {
     }
 }
 
-/// ONNX Runtime backend streaming the explicit-state DeepFilterNet3 graphs at one hop per
-/// frame. Drop-in replacement for [`crate::TractBackend`]: same [`DspPipeline`], same
+/// ONNX Runtime backend for the explicit-state DeepFilterNet3 graphs (one hop per frame).
+///
+/// Drop-in replacement for [`crate::TractBackend`]: same [`DspPipeline`], same
 /// [`InferenceBackend`] contract, same algorithmic latency.
 pub struct OrtBackend {
     descriptor: BackendDescriptor,
@@ -502,11 +576,30 @@ impl OrtBackend {
         asset_sha256: impl Into<String>,
         cpu_profile: CpuProfile,
     ) -> Result<Self, InferenceError> {
+        Self::new_with_digests(
+            model_dir,
+            asset_id,
+            asset_sha256,
+            cpu_profile,
+            APPROVED_STATEFUL_DIGESTS,
+        )
+    }
+
+    /// Like [`Self::new`], but verifies each graph against `digests` instead of
+    /// [`APPROVED_STATEFUL_DIGESTS`]. Use this to load an alternate pinned set (e.g.
+    /// [`APPROVED_PRO_STATEFUL_DIGESTS`] for a directory of Pro graphs).
+    pub fn new_with_digests(
+        model_dir: impl AsRef<Path>,
+        asset_id: impl Into<String>,
+        asset_sha256: impl Into<String>,
+        cpu_profile: CpuProfile,
+        digests: StatefulDigests,
+    ) -> Result<Self, InferenceError> {
         cpu_profile.ensure_supported()?;
         let model_dir = model_dir.as_ref();
-        let enc = read_verified_file(model_dir, ENC_FILE, APPROVED_STATEFUL_DIGESTS.enc)?;
-        let erb_dec = read_verified_file(model_dir, ERB_DEC_FILE, APPROVED_STATEFUL_DIGESTS.erb_dec)?;
-        let df_dec = read_verified_file(model_dir, DF_DEC_FILE, APPROVED_STATEFUL_DIGESTS.df_dec)?;
+        let enc = read_verified_file(model_dir, ENC_FILE, digests.enc)?;
+        let erb_dec = read_verified_file(model_dir, ERB_DEC_FILE, digests.erb_dec)?;
+        let df_dec = read_verified_file(model_dir, DF_DEC_FILE, digests.df_dec)?;
         let descriptor = BackendDescriptor {
             backend: "ort",
             backend_version: "deep_filter-v0.5.6",
@@ -516,7 +609,17 @@ impl OrtBackend {
             asset_sha256: asset_sha256.into(),
             cpu_profile: cpu_profile.name(),
         };
-        let model = OrtSpectralModel::new(&enc, &erb_dec, &df_dec, descriptor.clone())?;
+        Self::from_graphs(&enc, &erb_dec, &df_dec, descriptor)
+    }
+
+    /// Builds the backend from three already-extracted, already-verified stateful graphs.
+    fn from_graphs(
+        enc_graph: &[u8],
+        erb_graph: &[u8],
+        df_graph: &[u8],
+        descriptor: BackendDescriptor,
+    ) -> Result<Self, InferenceError> {
+        let model = OrtSpectralModel::new(enc_graph, erb_graph, df_graph, descriptor.clone())?;
         let film_supported = model.film.is_some();
         Ok(Self {
             descriptor,
@@ -525,6 +628,19 @@ impl OrtBackend {
             film_supported,
             active_profile: None,
         })
+    }
+
+    /// Loads the backend from an in-memory `.tar.gz` archive containing the three stateful
+    /// graphs (`enc.onnx`, `erb_dec.onnx`, `df_dec.onnx`; other members such as `config.ini` are
+    /// ignored). The caller must have verified the archive (e.g. [`crate::PdfNet3DevArchive`]
+    /// pins the whole-archive SHA-256 before decompression); this constructor does not re-check
+    /// digests. `descriptor` records provenance (backend/runtime/asset id/hash/cpu profile).
+    pub fn from_archive_bytes(
+        archive_bytes: &[u8],
+        descriptor: BackendDescriptor,
+    ) -> Result<Self, InferenceError> {
+        let (enc, erb_dec, df_dec) = extract_stateful_onnx(archive_bytes)?;
+        Self::from_graphs(&enc, &erb_dec, &df_dec, descriptor)
     }
 
     /// Whether the loaded graphs declare `gamma`/`beta` `FiLM` inputs (pDFNet3-style models).
