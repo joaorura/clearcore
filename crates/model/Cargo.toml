@@ -18,7 +18,7 @@ tract = [
     "dep:tract-pulse",
     "deep_filter/tract",
 ]
-ort = ["dep:ort", "dep:ndarray"]
+ort = ["dep:ort", "dep:ndarray", "dep:deep_filter"]
 
 [dependencies]
 base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }

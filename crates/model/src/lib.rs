@@ -4,7 +4,7 @@ mod archive;
 #[cfg(test)]
 mod archive_adversarial_tests;
 mod asset_manifest;
-#[cfg(feature = "tract")]
+#[cfg(any(feature = "tract", feature = "ort"))]
 pub mod dsp_pipeline;
 pub mod enrollment;
 pub mod enrollment_builder;
@@ -14,6 +14,8 @@ mod json;
 mod m0_records;
 pub mod microphone_eq;
 pub mod model_registry;
+#[cfg(feature = "ort")]
+mod ort_backend;
 #[cfg(feature = "tract")]
 pub mod pdfnet3_dev;
 pub mod profile_store;
@@ -29,7 +31,7 @@ pub mod wav;
 use realtime_noise_contracts::AudioFrame;
 
 pub use asset_manifest::{APPROVED_ASSET_SHA256, ApprovedAssetManifest};
-#[cfg(feature = "tract")]
+#[cfg(any(feature = "tract", feature = "ort"))]
 pub use dsp_pipeline::{
     AgnosticDspBackend, DspPipeline, DspPipelineConfig, ExtractedFeatures, ModelFrameOutput,
     SpectralModelBackend,
@@ -43,6 +45,8 @@ pub use microphone_eq::{
 pub use model_registry::{
     AssetDescriptor, DEV_KEY_ID, ModelAssetRegistry, ModelRole, VerifiedAsset,
 };
+#[cfg(feature = "ort")]
+pub use ort_backend::{APPROVED_STATEFUL_DIGESTS, OrtBackend};
 #[cfg(feature = "tract")]
 pub use pdfnet3_dev::{PDFNET3_DEV_ASSET_ID, PdfNet3DevArchive, PdfNet3DevError};
 pub use profile_store::{ACTIVE_PROFILE_FILE_NAME, ProfileStore};
