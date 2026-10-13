@@ -150,7 +150,7 @@ ClearCore offers three installation pathways on each platform:
 | **Fedora / RHEL** (DNF) | `sudo dnf copr enable joaorura/clearcore && sudo dnf install clearcore` | `./release/Clearcore-linux-x64/clearcore` | `./package.sh` |
 | **Ubuntu / Debian** (APT) | `curl -fsSL https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-0.1.0-beta.1_amd64.deb -o /tmp/clearcore.deb && sudo apt install -y /tmp/clearcore.deb` | `./release/Clearcore-linux-x64/clearcore` | `./package.sh` |
 | **Windows** (WinGet / WaveRT) | `winget install joaorura.Clearcore` (or run `Clearcore-Setup.exe`) | `.\release\Clearcore-win32-x64\Clearcore.exe` | `.\package.ps1` |
-| **macOS** (CoreAudio) | `cd release/Clearcore-darwin-x64 && ./install.sh` | `open ./release/Clearcore-darwin-x64/Clearcore.app` | `./package.sh` |
+| **macOS** (CoreAudio) | `cd release/Clearcore-darwin-arm64 && ./install.sh` | `open ./release/Clearcore-darwin-arm64/Clearcore.app` | `./package.sh` |
 
 👉 **For comprehensive step-by-step instructions, system prerequisites, and desktop setup, see [INSTALL.md](INSTALL.md).**
 
