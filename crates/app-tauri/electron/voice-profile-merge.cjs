@@ -47,11 +47,28 @@ function pickServiceVoiceProfileFields(serviceStatus) {
   return out;
 }
 
+function isCorruptedProfileError(error) {
+  if (!error) return false;
+  if (typeof error !== 'string') return false;
+  const lower = error.toLowerCase();
+  return (
+    lower === 'errorloadfailed' ||
+    lower === 'errorinvalidprofile' ||
+    lower === 'errorpersistfailed' ||
+    lower.includes('invalid') ||
+    lower.includes('corrupt') ||
+    lower.includes('failed validation') ||
+    lower.includes('persist failed') ||
+    lower.includes('load failed')
+  );
+}
+
 // "A profile exists" is the service's answer (GetStatus), never the local file: the enrollment
 // pipeline builds the profile in the service and does not write is_enrolled locally, and a local
 // is_enrolled:true left by the old flow must not claim a profile the service does not hold.
 function serviceHasVoiceProfile(serviceStatus) {
   if (!isObject(serviceStatus)) return false;
+  if (isCorruptedProfileError(serviceStatus.voice_profile_error)) return false;
   const storedId = serviceStatus.stored_voice_profile_id;
   const activeId = serviceStatus.active_voice_profile_id;
   return (typeof storedId === 'string' && storedId.length > 0)

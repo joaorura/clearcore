@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from './i18n';
+import { invokeBridge } from './bridge';
 import { logger } from './utils/logger';
 import type { CallSuggestionTake, InputDeviceInfo } from './types';
 import { errorLabel } from './voice/enrollmentErrors';
@@ -10,6 +11,7 @@ import { useVoiceSamples } from './voice/hooks/useVoiceSamples';
 import { useEnrollmentRecorder } from './voice/hooks/useEnrollmentRecorder';
 import { useAudioPlayback } from './voice/hooks/useAudioPlayback';
 import { useProfileBuild } from './voice/hooks/useProfileBuild';
+import { getSampleAudio } from './voice/enrollmentClient';
 import { useCallTakes } from './voice/hooks/useCallTakes';
 import { useGuidedSteps } from './voice/hooks/useGuidedSteps';
 import { useVoluntarySample } from './voice/hooks/useVoluntarySample';
@@ -48,6 +50,7 @@ export { isVirtualOrLoopbackAudioDevice, resolvePhysicalAudioDevice } from './vo
 // Pure card logic lives in ./voice/hooks/voiceProfileLogic; re-exported for the same reason.
 export {
   hasServiceVoiceProfile,
+  isVoiceProfileCorrupted,
   normalizeVoiceProfileStatus,
   voiceProfileStatusLabelKey,
   voiceProfileActivationState,
@@ -144,7 +147,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
         const initialProfile = await profile.loadInitialStatus(list?.samples?.length ?? 0);
         if (cancelled) return;
 
-        const enrolled = hasServiceVoiceProfile(initialProfile) || initialProfile.is_enrolled === true;
+        const enrolled = hasServiceVoiceProfile(initialProfile);
         if (list?.samples && list.samples.length > 0) {
           steps.syncFromSamples(list.samples, true, enrolled);
         } else if (enrolled) {
@@ -183,7 +186,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
       if (samples.length === 0) {
         void refreshSamples().then((list) => {
           if (list?.samples && list.samples.length > 0) {
-            const enrolled = hasServiceVoiceProfile(profileStatus) || profileStatus.is_enrolled === true;
+            const enrolled = hasServiceVoiceProfile(profileStatus);
             steps.syncFromSamples(list.samples, true, enrolled);
           }
         });
@@ -198,10 +201,22 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     };
   }, [samples.length, refreshSamples, profileStatus, steps]);
 
-  const handleResetEnrollment = () => {
-    setIsReenrolling(true);
-    steps.resetSteps();
-    changeTab({ by: 'user', id: 'enroll' });
+  const handleResetEnrollment = async () => {
+    try {
+      await invokeBridge('set_voice_profile', { is_enrolled: false, active_samples_count: 0 });
+      if (samples.length > 0) {
+        for (const s of samples) {
+          await removeSample(s.id);
+        }
+      }
+      await refreshSamples();
+      steps.resetSteps();
+      setIsReenrolling(false);
+      changeTab({ by: 'user', id: 'enroll' });
+      flash(t('voiceProfile.reEnrollFeedback'), 4000);
+    } catch (err) {
+      logger.error('VoiceProfileCard: failed to reset enrollment', err);
+    }
   };
 
   const handleBuildProfile = async (origin: 'enroll' | 'profile') => {
@@ -236,6 +251,21 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     flash(t('voiceProfile.takeDismissedFeedback'), 3000);
   };
 
+  const handlePlayAudio = async (id: string, audioUrl?: string) => {
+    if (playback.playingAudioId === id) {
+      playback.stopPlayback();
+      return;
+    }
+    if (audioUrl) {
+      playback.playUrl(id, audioUrl);
+    } else {
+      const url = await getSampleAudio(id);
+      if (url) {
+        playback.playUrl(id, url);
+      }
+    }
+  };
+
   const status = profileStatusLabel(profileStatus, t);
   const feedbackView = { jobBusy, currentJob, enrollErrorText };
   const feedbackFor = (tab: VoiceTabId) => jobFeedbackFor(tab, jobs.source, feedbackView);
@@ -249,7 +279,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   ].map((tab) => ({ ...tab, disabled: (isRecording || isSubmitting || profile.isBuilding) && tab.id !== activeTab }));
 
   const isVoiceIsolationActive = profileStatus.is_voice_profile_active === true;
-  const hasProfile = hasServiceVoiceProfile(profileStatus) || profileStatus.is_enrolled === true;
+  const hasProfile = hasServiceVoiceProfile(profileStatus);
 
   const handleToggleVoiceIsolation = async (enabled: boolean) => {
     logger.info('VoiceProfileCard: toggling voice isolation', { enabled });
@@ -280,6 +310,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             feedback={isModalOpen ? null : feedbackFor('gallery')}
             onDelete={(sampleId) => void handleDeleteSample(sampleId)}
             onAddSample={modal.openModal}
+            onPlay={handlePlayAudio}
+            playingAudioId={playback.playingAudioId}
           />
         );
       case 'calls':
@@ -291,7 +323,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             playingAudioId={playingAudioId}
             errorText={feedbackFor('calls')?.enrollErrorText ?? null}
             approvingIds={takes.approvingIds}
-            onPlay={playback.playUrl}
+            onPlay={(id, url) => void handlePlayAudio(id, url)}
             onApprove={(take) => void handleApproveCallTake(take)}
             onDismiss={(takeId) => void handleDismissCallTake(takeId)}
           />
@@ -309,7 +341,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             isBuilding={profile.isBuilding}
             feedback={feedbackFor('profile')}
             onBuildProfile={() => void handleBuildProfile('profile')}
-            onResetEnrollment={handleResetEnrollment}
+            onResetEnrollment={() => void handleResetEnrollment()}
             onToggleVoiceIsolation={(enabled) => void handleToggleVoiceIsolation(enabled)}
             stale={showStaleProfileNotice(profileStatus, sampleList ? profileSampleIds(samples) : null, profile.idsAtBuild)}
           />
@@ -320,7 +352,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             t={t}
             locale={locale}
             labels={labels}
-            isEnrolled={(hasServiceVoiceProfile(profileStatus) || profileStatus.is_enrolled === true) && !isReenrolling}
+            isEnrolled={hasServiceVoiceProfile(profileStatus) && !isReenrolling}
             currentStep={currentStep}
             isReadingMode={isReadingMode}
             completedSteps={completedSteps}
@@ -340,7 +372,9 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             onRedoStep={steps.redoStep}
             onNextStep={steps.nextStep}
             onBuildProfile={() => void handleBuildProfile('enroll')}
-            onResetEnrollment={handleResetEnrollment}
+            onResetEnrollment={() => void handleResetEnrollment()}
+            onPlayTake={handlePlayAudio}
+            playingAudioId={playback.playingAudioId}
           />
         );
     }

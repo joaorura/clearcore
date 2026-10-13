@@ -140,6 +140,17 @@ describe('syncCompletedStepsFromSamples', () => {
     const synced = syncCompletedStepsFromSamples(samples, {});
     expect(synced[1]).toEqual({ duration: 6.0, sampleId: 's-curr-mic' });
   });
+
+  it('fills all steps if enrolled and samples exist, but does not fabricate if samples are empty', () => {
+    const samples = [makeSample('s1', 'Início de Reunião', 5.2, '1000')];
+    const syncedWithSamples = syncCompletedStepsFromSamples(samples, {}, undefined, true);
+    expect(Object.keys(syncedWithSamples)).toHaveLength(5);
+    expect(syncedWithSamples[1]).toEqual({ duration: 5.2, sampleId: 's1' });
+    expect(syncedWithSamples[2]).toEqual({ duration: 5 });
+
+    const syncedEmpty = syncCompletedStepsFromSamples([], {}, undefined, true);
+    expect(Object.keys(syncedEmpty)).toHaveLength(0);
+  });
 });
 
 describe('initialStepFromCompleted', () => {

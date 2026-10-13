@@ -33,6 +33,8 @@ export interface EnrollPanelProps {
   onNextStep: () => void;
   onBuildProfile: () => void;
   onResetEnrollment: () => void;
+  onPlayTake?: (sampleId: string) => void;
+  playingAudioId?: string | null;
 }
 
 /** Guided 5-step enrollment: question, live level, record/stop, take preview and job feedback. */
@@ -195,6 +197,18 @@ export function EnrollPanel(p: EnrollPanelProps) {
               </div>
             ) : currentTake ? (
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                {p.onPlayTake && currentTake.sampleId && (
+                  <button
+                    type="button"
+                    className="action-btn play-take-btn"
+                    data-testid="play-current-take"
+                    disabled={isProcessing}
+                    onClick={() => p.onPlayTake?.(currentTake.sampleId!)}
+                    style={p.playingAudioId === currentTake.sampleId ? { borderColor: '#f87171', color: '#f87171' } : undefined}
+                  >
+                    {p.playingAudioId === currentTake.sampleId ? t('voiceProfile.stopSample') : t('voiceProfile.playSample')}
+                  </button>
+                )}
                 <button className="action-btn" disabled={isProcessing || p.isStarting} onClick={() => p.onRedoStep(currentStep)}>
                   {t('voiceProfile.redoSample')}
                 </button>

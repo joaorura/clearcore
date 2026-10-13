@@ -37,6 +37,11 @@ export async function deleteSample(id: string): Promise<boolean> {
   return (res as { success?: boolean })?.success === true;
 }
 
+export async function getSampleAudio(id: string): Promise<string | null> {
+  const res = await invokeBridge<{ success?: boolean; audioUrl?: string | null; errorCode?: string }>(CMD.getSampleAudio, { id });
+  return res?.audioUrl ?? null;
+}
+
 const defaultGetJob: GetJob = (jobId) => invokeBridge(CMD.getJob, { jobId });
 const MAX_TRANSIENT_FAILURES = 3;
 

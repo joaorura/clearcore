@@ -5,6 +5,22 @@
 
 const os = require('node:os');
 const fs = require('node:fs');
+const path = require('node:path');
+
+function getProfilesDir() {
+  if (process.env.CLEARCORE_PROFILES_DIR) {
+    return process.env.CLEARCORE_PROFILES_DIR;
+  }
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(appData, 'clearcore', 'profiles');
+  }
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'clearcore', 'profiles');
+  }
+  const xdgDataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  return path.join(xdgDataHome, 'clearcore', 'profiles');
+}
 
 const DEBUG_LOG_PATH = '/tmp/clearcore-voice-debug.log';
 
@@ -290,9 +306,25 @@ function registerEnrollmentHandlers(ipcMain, { sendIpcRequest }) {
     await sendIpcRequest({ DeleteVoiceSample: { id: a.id } }, {}, 5000);
     return { success: true };
   });
+
+  wrap('enrollment_get_sample_audio', async (a) => {
+    const id = a && typeof a.id === 'string' ? a.id : '';
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+      return { success: false, audioUrl: null, errorCode: 'SAMPLE_NOT_FOUND' };
+    }
+    const profilesDir = getProfilesDir();
+    const filePath = path.join(profilesDir, 'samples', `${id}.wav`);
+    if (!fs.existsSync(filePath)) {
+      return { success: false, audioUrl: null, errorCode: 'SAMPLE_NOT_FOUND' };
+    }
+    const buffer = fs.readFileSync(filePath);
+    const base64 = buffer.toString('base64');
+    return { success: true, audioUrl: `data:audio/wav;base64,${base64}` };
+  });
 }
 
 module.exports = {
+  getProfilesDir,
   MAX_SPEECH_SECONDS,
   RATE,
   buildAddVoiceSampleCommand,

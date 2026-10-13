@@ -17,10 +17,10 @@ pub const TARGET_LUFS: f64 = -16.0;
 pub const MAX_GAIN_DB: f64 = 12.0;
 pub const MIN_GAIN_DB: f64 = -12.0;
 /// Momentary loudness below which the gain is frozen, in LUFS.
-pub const FREEZE_BELOW_LUFS: f64 = -50.0;
+pub const FREEZE_BELOW_LUFS: f64 = -41.0;
 /// Time constants of the gain, in seconds.
-pub const TAU_UP_S: f64 = 3.0;
-pub const TAU_DOWN_S: f64 = 1.0;
+pub const TAU_UP_S: f64 = 4.0;
+pub const TAU_DOWN_S: f64 = 3.5;
 
 /// Per-hop smoothing coefficient for a time constant in seconds.
 #[allow(clippy::cast_precision_loss)]

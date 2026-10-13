@@ -63,6 +63,7 @@ export interface ClearcoreApi {
   setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean; profile?: VoiceProfileStatus }>;
   setVoiceIsolation?: (enabled: boolean) => Promise<{ success: boolean; voice_isolation_enabled?: boolean; profile?: VoiceProfileStatus }>;
   getCallTakes?: () => Promise<{ success: boolean; takes: CallSuggestionTake[] } | CallSuggestionTake[]>;
+  getSampleAudio?: (id: string) => Promise<{ success: boolean; audioUrl?: string | null; errorCode?: string }>;
   listVoiceSamples?: () => Promise<unknown>;
   listSamples?: () => Promise<unknown>;
   approveCallTake?: (id: string, name?: string, take?: unknown) => Promise<{ success: boolean; id: string; sample?: VoiceSample }>;
@@ -213,6 +214,11 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     if (cmd === 'get_call_takes') {
       if (typeof api.getCallTakes === 'function') {
         return (await api.getCallTakes()) as unknown as T;
+      }
+    }
+    if (cmd === 'enrollment_get_sample_audio') {
+      if (typeof api.getSampleAudio === 'function') {
+        return (await api.getSampleAudio(String(args?.id ?? ''))) as unknown as T;
       }
     }
     if (cmd === 'enrollment_list_samples' || cmd === 'list_voice_samples') {

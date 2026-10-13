@@ -17,7 +17,8 @@ const t = (path: string, params?: Record<string, string | number>) =>
 const LABEL_KEYS = ['budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', 'budgetExceededTitle', 'budgetExceededBody',
   'deleteAction', 'deleting', 'otherMicrophone', 'needsReenroll', 'usedInProfile', 'notUsed',
   'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply', 'jobDone', 'jobFailed',
-  'devModelNotice', 'devIsolationModelNotice', 'devIsolationModelError', 'qualityPeak', 'qualityLevel', 'qualitySpeech'];
+  'devModelNotice', 'devIsolationModelNotice', 'devIsolationModelError', 'qualityPeak', 'qualityLevel', 'qualitySpeech',
+  'playSample', 'stopSample'];
 const ERROR_CODES = ['ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE', 'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED',
   'SERVICE_UNAVAILABLE', 'ENROLL_BACKEND_UNSUPPORTED', 'UNKNOWN'];
@@ -97,6 +98,18 @@ describe('EnrollPanel', () => {
     expect(m).toContain('voiceProfile.profileCompletedDesc');
     expect(m).toContain('voiceProfile.reEnrollBtn');
   });
+  it('renders play button when onPlayTake is provided and take has sampleId', () => {
+    const playFn = vi.fn();
+    const doneWithId = { 1: { duration: 3, sampleId: 'sample-abc' } };
+    const m = html(<EnrollPanel {...enrollProps({ completedSteps: doneWithId, currentStep: 1, onPlayTake: playFn, playingAudioId: null })} />);
+    expect(m).toContain('data-testid="play-current-take"');
+    expect(m).toContain('voiceProfile.playSample');
+    expect(m).not.toContain('#f87171');
+
+    const mPlaying = html(<EnrollPanel {...enrollProps({ completedSteps: doneWithId, currentStep: 1, onPlayTake: playFn, playingAudioId: 'sample-abc' })} />);
+    expect(mPlaying).toContain('voiceProfile.stopSample');
+    expect(mPlaying).toContain('#f87171');
+  });
 });
 
 const list: SampleList = {
@@ -122,6 +135,17 @@ describe('GalleryPanel', () => {
   it('empty and failed states', () => {
     expect(html(<GalleryPanel {...galleryProps({ sampleList: null })} />)).toContain('voiceProfile.emptyGallery');
     expect(html(<GalleryPanel {...galleryProps({ sampleList: null, samplesLoadFailed: true })} />)).toContain('voiceProfile.samplesLoadFailed');
+  });
+  it('renders play button next to each sample when onPlay is provided', () => {
+    const playFn = vi.fn();
+    const m = html(<GalleryPanel {...galleryProps({ onPlay: playFn, playingAudioId: null })} />);
+    expect(m).toContain('data-testid="play-s1"');
+    expect(m).toContain('playSample');
+    expect(m).not.toContain('#f87171');
+
+    const mPlaying = html(<GalleryPanel {...galleryProps({ onPlay: playFn, playingAudioId: 's1' })} />);
+    expect(mPlaying).toContain('stopSample');
+    expect(mPlaying).toContain('#f87171');
   });
 });
 
@@ -184,6 +208,23 @@ describe('ProfilePanel', () => {
     expect(m).toContain('voiceProfile.profileCompletedTitle');
     expect(m).toContain('voiceProfile.reEnrollBtn');
   });
+  it('shows clean empty-state banner when no profile is present and no error', () => {
+    const empty: VoiceProfileStatus = { is_enrolled: false, active_samples_count: 0 };
+    const m = html(<ProfilePanel {...profileProps({ profileStatus: empty, onResetEnrollment: noop })} />);
+    expect(m).toContain('profile-empty-banner');
+    expect(m).toContain('voiceProfile.noProfileTitle');
+    expect(m).toContain('voiceProfile.noProfileDesc');
+    expect(m).toContain('voiceProfile.startEnrollBtn');
+  });
+  it('shows corrupted/invalid profile alert banner when profile has error and is not active', () => {
+    const corrupted: VoiceProfileStatus = { is_enrolled: false, active_samples_count: 0, voice_profile_error: 'Invalid voice profile' };
+    const m = html(<ProfilePanel {...profileProps({ profileStatus: corrupted, onResetEnrollment: noop })} />);
+    expect(m).toContain('profile-corrupted-banner');
+    expect(m).toContain('voiceProfile.profileCorruptedTitle');
+    expect(m).toContain('voiceProfile.profileCorruptedDesc');
+    expect(m).toContain('voiceProfile.reEnrollBtn');
+    expect(m).toContain('voiceProfile.errorInvalidProfile');
+  });
   it('shows voice isolation toggle switch in active and paused states', () => {
     const onToggle = vi.fn();
     const active: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, is_voice_profile_active: true };
@@ -235,10 +276,12 @@ describe('ProfilePanel', () => {
 
 describe('profileStatusLabel', () => {
   it('maps the status to its label and activity', () => {
-    expect(profileStatusLabel({ is_enrolled: false, active_samples_count: 0 }, t)).toEqual({ text: 'voiceProfile.statusPending', active: false });
-    expect(profileStatusLabel({ is_enrolled: true, active_samples_count: 0 }, t)).toEqual({ text: 'voiceProfile.statusPending', active: false });
-    expect(profileStatusLabel({ is_enrolled: false, active_samples_count: 0, has_voice_profile: true }, t)).toEqual({ text: 'voiceProfile.storedNotApplied', active: false });
-    expect(profileStatusLabel({ is_enrolled: true, active_samples_count: 0, is_voice_profile_active: true }, t)).toEqual({ text: 'voiceProfile.statusActive', active: true });
+    expect(profileStatusLabel({ is_enrolled: false, active_samples_count: 0 }, t)).toEqual({ text: 'voiceProfile.statusNone', active: false, corrupted: false });
+    expect(profileStatusLabel({ is_enrolled: true, active_samples_count: 0 }, t)).toEqual({ text: 'voiceProfile.statusNone', active: false, corrupted: false });
+    expect(profileStatusLabel({ is_enrolled: false, active_samples_count: 0, has_voice_profile: true }, t)).toEqual({ text: 'voiceProfile.storedNotApplied', active: false, corrupted: false });
+    expect(profileStatusLabel({ is_enrolled: true, active_samples_count: 0, is_voice_profile_active: true }, t)).toEqual({ text: 'voiceProfile.statusActive', active: true, corrupted: false });
+    expect(profileStatusLabel({ is_enrolled: false, active_samples_count: 0, voice_profile_error: 'Invalid voice profile' }, t)).toEqual({ text: 'voiceProfile.statusCorrupted', active: false, corrupted: true });
+    expect(profileStatusLabel({ is_enrolled: false, active_samples_count: 0, voice_profile_error: 'The stored voice profile failed validation or has insecure permissions' }, t)).toEqual({ text: 'voiceProfile.statusCorrupted', active: false, corrupted: true });
   });
 });
 

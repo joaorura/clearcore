@@ -45,11 +45,11 @@ pub const NATURAL: PresetParams = PresetParams {
         max_reduction_db: 3.0,
     },
     compressor: CompressorParams {
-        threshold_db: -24.0,
-        ratio: 2.0,
+        threshold_db: -20.0,
+        ratio: 1.8,
         attack_ms: 15.0,
         release_ms: 150.0,
-        makeup_db: 1.0,
+        makeup_db: 3.0,
     },
 };
 
@@ -71,11 +71,11 @@ pub const PODCAST: PresetParams = PresetParams {
         max_reduction_db: 6.0,
     },
     compressor: CompressorParams {
-        threshold_db: -24.0,
+        threshold_db: -20.0,
         ratio: 3.0,
         attack_ms: 10.0,
         release_ms: 120.0,
-        makeup_db: 2.0,
+        makeup_db: 4.0,
     },
 };
 
@@ -97,11 +97,11 @@ pub const BROADCAST: PresetParams = PresetParams {
         max_reduction_db: 9.0,
     },
     compressor: CompressorParams {
-        threshold_db: -26.0,
+        threshold_db: -22.0,
         ratio: 4.0,
         attack_ms: 8.0,
         release_ms: 100.0,
-        makeup_db: 3.0,
+        makeup_db: 5.0,
     },
 };
 

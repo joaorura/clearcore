@@ -8,6 +8,60 @@ import { formatDecimalLocale, formatSecondsLocale } from '../format';
  * existing imports keep working.
  */
 
+export type VoiceProfileErrorKey =
+  | 'errorServiceUnavailable' | 'errorServiceError' | 'errorServiceRejected' | 'errorNotApplicable'
+  | 'errorClearFailed' | 'errorNoProfileStore' | 'errorInvalidProfile' | 'errorPersistFailed'
+  | 'errorNotApplied' | 'errorLoadFailed' | 'errorRestoreFailed' | 'errorUnknown';
+
+const VOICE_PROFILE_ERROR_KEYS: Record<string, VoiceProfileErrorKey> = {
+  service_unavailable: 'errorServiceUnavailable',
+  service_error: 'errorServiceError',
+  service_rejected: 'errorServiceRejected',
+  VOICE_PROFILE_NOT_APPLICABLE: 'errorNotApplicable',
+  VOICE_PROFILE_CLEAR_FAILED: 'errorClearFailed',
+  NO_PROFILE_STORE: 'errorNoProfileStore',
+  'Invalid voice profile': 'errorInvalidProfile',
+  'Failed to persist voice profile': 'errorPersistFailed',
+  'The backend could not apply the stored voice profile': 'errorNotApplied',
+  'The stored voice profile failed validation or has insecure permissions': 'errorLoadFailed',
+  'The previous voice profile could not be restored on the backend': 'errorRestoreFailed',
+  'The active backend could not return to the neutral voice': 'errorClearFailed',
+  'The active backend cannot apply this voice profile': 'errorNotApplicable',
+  'Voice profile storage is not configured': 'errorNoProfileStore',
+};
+
+/** Never returns service free text: unknown input maps to errorUnknown. */
+export function voiceProfileErrorKey(code: unknown): VoiceProfileErrorKey {
+  if (typeof code !== 'string') return 'errorUnknown';
+  return Object.prototype.hasOwnProperty.call(VOICE_PROFILE_ERROR_KEYS, code)
+    ? VOICE_PROFILE_ERROR_KEYS[code]
+    : 'errorUnknown';
+}
+
+export function isVoiceProfileCorrupted(error: unknown): boolean {
+  if (!error) return false;
+  if (error === 'errorLoadFailed' || error === 'errorInvalidProfile' || error === 'errorPersistFailed') {
+    return true;
+  }
+  const key = voiceProfileErrorKey(error);
+  if (key === 'errorLoadFailed' || key === 'errorInvalidProfile' || key === 'errorPersistFailed') {
+    return true;
+  }
+  if (typeof error === 'string') {
+    const lower = error.toLowerCase();
+    if (
+      lower.includes('invalid') ||
+      lower.includes('corrupt') ||
+      lower.includes('failed validation') ||
+      lower.includes('persist failed') ||
+      lower.includes('load failed')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * A profile exists when the SERVICE says so (GetStatus `stored_voice_profile_id` not empty or
  * `has_voice_profile`). A local `is_enrolled` is never trusted: the enrollment pipeline builds the
@@ -16,6 +70,7 @@ import { formatDecimalLocale, formatSecondsLocale } from '../format';
  */
 export function hasServiceVoiceProfile(status: Partial<VoiceProfileStatus> | null | undefined): boolean {
   if (!status || typeof status !== 'object') return false;
+  if (isVoiceProfileCorrupted(status.voice_profile_error)) return false;
   const storedId = status.stored_voice_profile_id;
   const activeId = status.active_voice_profile_id;
   return (typeof storedId === 'string' && storedId.length > 0)
@@ -65,20 +120,22 @@ export function voiceProfileUnsupported(status: Partial<VoiceProfileStatus> | nu
   return status?.voice_profile_supported === false;
 }
 
-export type VoiceProfileActivationState = 'active' | 'stored_not_applied' | 'none';
+export type VoiceProfileActivationState = 'active' | 'stored_not_applied' | 'corrupted' | 'none';
 
-export type VoiceProfileStatusLabelKey = 'active' | 'storedNotApplied' | 'none';
+export type VoiceProfileStatusLabelKey = 'active' | 'storedNotApplied' | 'corrupted' | 'none';
 
 /** Only 'active' may be shown as active; a profile the service holds but did not apply is neutral. */
 export function voiceProfileStatusLabelKey(status: VoiceProfileStatus): VoiceProfileStatusLabelKey {
   const state = voiceProfileActivationState(status);
   if (state === 'active') return 'active';
   if (state === 'stored_not_applied') return 'storedNotApplied';
+  if (state === 'corrupted') return 'corrupted';
   return 'none';
 }
 
 /** Stored must never be presented as applied: 'active' needs explicit confirmation. */
 export function voiceProfileActivationState(status: VoiceProfileStatus): VoiceProfileActivationState {
+  if (isVoiceProfileCorrupted(status.voice_profile_error)) return 'corrupted';
   if (status.is_voice_profile_active === true) return 'active';
   return hasServiceVoiceProfile(status) ? 'stored_not_applied' : 'none';
 }
@@ -178,42 +235,12 @@ export function applySetVoiceProfileResult(
   };
 }
 
-export type VoiceProfileErrorKey =
-  | 'errorServiceUnavailable' | 'errorServiceError' | 'errorServiceRejected' | 'errorNotApplicable'
-  | 'errorClearFailed' | 'errorNoProfileStore' | 'errorInvalidProfile' | 'errorPersistFailed'
-  | 'errorNotApplied' | 'errorLoadFailed' | 'errorRestoreFailed' | 'errorUnknown';
-
-const VOICE_PROFILE_ERROR_KEYS: Record<string, VoiceProfileErrorKey> = {
-  service_unavailable: 'errorServiceUnavailable',
-  service_error: 'errorServiceError',
-  service_rejected: 'errorServiceRejected',
-  VOICE_PROFILE_NOT_APPLICABLE: 'errorNotApplicable',
-  VOICE_PROFILE_CLEAR_FAILED: 'errorClearFailed',
-  NO_PROFILE_STORE: 'errorNoProfileStore',
-  'Invalid voice profile': 'errorInvalidProfile',
-  'Failed to persist voice profile': 'errorPersistFailed',
-  'The backend could not apply the stored voice profile': 'errorNotApplied',
-  'The stored voice profile failed validation or has insecure permissions': 'errorLoadFailed',
-  'The previous voice profile could not be restored on the backend': 'errorRestoreFailed',
-  'The active backend could not return to the neutral voice': 'errorClearFailed',
-  'The active backend cannot apply this voice profile': 'errorNotApplicable',
-  'Voice profile storage is not configured': 'errorNoProfileStore',
-};
-
-/** Never returns service free text: unknown input maps to errorUnknown. */
-export function voiceProfileErrorKey(code: unknown): VoiceProfileErrorKey {
-  if (typeof code !== 'string') return 'errorUnknown';
-  return Object.prototype.hasOwnProperty.call(VOICE_PROFILE_ERROR_KEYS, code)
-    ? VOICE_PROFILE_ERROR_KEYS[code]
-    : 'errorUnknown';
-}
-
 const ENROLLMENT_LABEL_KEYS = [
   'budgetTitle', 'budgetUsed', 'budgetRemaining', 'seconds', 'budgetExceededTitle', 'budgetExceededBody',
   'deleteAction', 'deleting', 'otherMicrophone', 'needsReenroll', 'usedInProfile', 'notUsed',
   'stageQueued', 'stageDenoise', 'stageTrim', 'stageEq', 'stageEnroll', 'stageApply', 'stageTimeout',
   'jobDone', 'jobFailed', 'devModelNotice', 'devIsolationModelNotice', 'devIsolationModelError', 'qualityPeak', 'qualityLevel', 'qualitySpeech',
-] as const satisfies ReadonlyArray<Exclude<keyof EnrollmentLabels, 'errors'>>;
+] as const satisfies ReadonlyArray<Exclude<keyof EnrollmentLabels, 'errors' | 'playSample' | 'stopSample'>>;
 
 const ENROLLMENT_ERROR_KEYS = [
   'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
@@ -224,11 +251,16 @@ const ENROLLMENT_ERROR_KEYS = [
 
 /** Fills every EnrollmentLabels field from i18n (`voiceProfile.enrollment.*`). */
 export function buildEnrollmentLabels(t: (path: string) => string): EnrollmentLabels {
-  const labels = {} as Omit<EnrollmentLabels, 'errors'>;
+  const labels = {} as Omit<EnrollmentLabels, 'errors' | 'playSample' | 'stopSample'>;
   for (const key of ENROLLMENT_LABEL_KEYS) labels[key] = t(`voiceProfile.enrollment.${key}`);
   const errors = {} as EnrollmentLabels['errors'];
   for (const code of ENROLLMENT_ERROR_KEYS) errors[code] = t(`voiceProfile.enrollment.errors.${code}`);
-  return { ...labels, errors };
+  return {
+    ...labels,
+    playSample: t('voiceProfile.playSample'),
+    stopSample: t('voiceProfile.stopSample'),
+    errors,
+  };
 }
 
 export type JobOutcome =

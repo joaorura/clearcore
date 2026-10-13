@@ -212,6 +212,14 @@ export interface Translations {
     statusActive: string;
     appliedInServiceNote: string;
     statusPending: string;
+    statusNone: string;
+    statusCorrupted: string;
+    noProfileTitle: string;
+    noProfileDesc: string;
+    startEnrollBtn: string;
+    profileCorruptedTitle: string;
+    profileCorruptedDesc: string;
+    reEnrollFeedback: string;
     storedNotApplied: string;
     errorServiceUnavailable: string;
     errorServiceError: string;

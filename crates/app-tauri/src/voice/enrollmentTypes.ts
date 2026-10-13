@@ -48,6 +48,7 @@ export const CMD = {
   getJob: 'enrollment_get_job',             // { jobId: string } -> EnrollmentJob | { errorCode }
   listSamples: 'enrollment_list_samples',   // {} -> SampleList | { errorCode }
   deleteSample: 'enrollment_delete_sample', // { id: string } -> { success: boolean } | { errorCode }
+  getSampleAudio: 'enrollment_get_sample_audio',
 } as const;
 
 /** Every user-visible string the new components render; E2 fills it from i18n. */
@@ -62,5 +63,6 @@ export interface EnrollmentLabels {
   devIsolationModelNotice: string;                                 // GetStatus dev_base_model === 'pdfnet3-dev'
   devIsolationModelError: string;                                  // dev model configured but not loaded; "{code}" placeholder
   qualityPeak: string; qualityLevel: string; qualitySpeech: string;
+  playSample: string; stopSample: string;
   errors: Record<EnrollErrorCode | 'UNKNOWN', string>;
 }

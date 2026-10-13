@@ -3,7 +3,7 @@ import type { EnrollmentJob, JobStage, JobState, CapturedPcm } from '../enrollme
 
 vi.mock('../../bridge', () => ({ invokeBridge: vi.fn() }));
 import { invokeBridge } from '../../bridge';
-import { addSample, buildProfile, listSamples, deleteSample, waitForJob } from '../enrollmentClient';
+import { addSample, buildProfile, listSamples, deleteSample, getSampleAudio, waitForJob } from '../enrollmentClient';
 
 const mock = vi.mocked(invokeBridge);
 beforeEach(() => mock.mockReset());
@@ -62,6 +62,18 @@ it('deleteSample resolves true/false and false on error', async () => {
   expect(mock).toHaveBeenCalledWith('enrollment_delete_sample', { id: 'a' });
   mock.mockResolvedValueOnce({ success: false }); expect(await deleteSample('a')).toBe(false);
   mock.mockResolvedValueOnce({ errorCode: 'ENROLL_FAILED' }); expect(await deleteSample('a')).toBe(false);
+});
+it('getSampleAudio returns audioUrl on success and null on error/absence', async () => {
+  mock.mockResolvedValueOnce({ success: true, audioUrl: 'data:audio/wav;base64,AAAA' });
+  expect(await getSampleAudio('s1')).toBe('data:audio/wav;base64,AAAA');
+  expect(mock).toHaveBeenCalledWith('enrollment_get_sample_audio', { id: 's1' });
+
+  mock.mockResolvedValueOnce({ success: false, audioUrl: null, errorCode: 'SAMPLE_NOT_FOUND' });
+  expect(await getSampleAudio('s2')).toBeNull();
+  expect(mock).toHaveBeenCalledWith('enrollment_get_sample_audio', { id: 's2' });
+
+  mock.mockResolvedValueOnce({});
+  expect(await getSampleAudio('s3')).toBeNull();
 });
 
 const unavailable = { errorCode: 'SERVICE_UNAVAILABLE' as const };

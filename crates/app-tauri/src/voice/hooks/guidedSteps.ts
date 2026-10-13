@@ -167,7 +167,7 @@ export function syncCompletedStepsFromSamples(
   }
 
   // Fallback 2: if profile is confirmed enrolled, ensure all 5 steps are marked complete
-  if (isEnrolled) {
+  if (isEnrolled && samples.length > 0) {
     for (let s = 1; s <= GUIDED_STEP_COUNT; s++) {
       if (!result[s]) {
         result[s] = { duration: 5 };

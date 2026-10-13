@@ -68,8 +68,23 @@ let nextResult = { job_id: 'sample-job-1' };
 let nextError = null;
 m.registerEnrollmentHandlers({ handle: (ch, fn) => { handlers[ch] = fn; } },
   { sendIpcRequest: async (cmd, payload, timeout) => { sent.push([cmd, timeout]); if (nextError) throw nextError; return nextResult; } });
-assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', 'enrollment_build_profile', 'enrollment_delete_sample', 'enrollment_get_job', 'enrollment_list_samples']);
+assert.deepStrictEqual(Object.keys(handlers).sort(), ['enrollment_add_sample', 'enrollment_build_profile', 'enrollment_delete_sample', 'enrollment_get_job', 'enrollment_get_sample_audio', 'enrollment_list_samples']);
 (async () => {
+  // getProfilesDir test
+  const oldEnv = process.env.CLEARCORE_PROFILES_DIR;
+  try {
+    process.env.CLEARCORE_PROFILES_DIR = '/custom/profiles';
+    assert.strictEqual(m.getProfilesDir(), '/custom/profiles');
+  } finally {
+    if (oldEnv === undefined) delete process.env.CLEARCORE_PROFILES_DIR;
+    else process.env.CLEARCORE_PROFILES_DIR = oldEnv;
+  }
+
+  // enrollment_get_sample_audio validation & missing test
+  const badIdRes = await handlers.enrollment_get_sample_audio({}, { id: '../bad/id' });
+  assert.deepStrictEqual(badIdRes, { success: false, audioUrl: null, errorCode: 'SAMPLE_NOT_FOUND' });
+  const missingRes = await handlers.enrollment_get_sample_audio({}, { id: 'sample-9999' });
+  assert.deepStrictEqual(missingRes, { success: false, audioUrl: null, errorCode: 'SAMPLE_NOT_FOUND' });
   const r = await handlers.enrollment_add_sample({}, { pcm: f, sampleRate: 48000, name: 'n', device: { label: 'M', idHash: hash } });
   assert.deepStrictEqual(r, { jobId: 'sample-job-1' }); assert.strictEqual(sent[0][1], 60000);
   const bad = await handlers.enrollment_add_sample({}, { pcm: f, sampleRate: 1, name: 'n', device: { label: 'M', idHash: hash } });

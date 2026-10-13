@@ -35,7 +35,7 @@ export interface ProfilePanelProps {
 export function ProfilePanel(p: ProfilePanelProps) {
   const { t, profileStatus } = p;
   const status = profileStatusLabel(profileStatus, t);
-  const hasProfile = hasServiceVoiceProfile(profileStatus) || profileStatus.is_enrolled === true;
+  const hasProfile = hasServiceVoiceProfile(profileStatus);
   // Only an explicit `false` from the service; an absent field keeps today's behavior.
   const unsupported = voiceProfileUnsupported(profileStatus);
   const unsupportedText = t('voiceProfile.profileUnsupportedNotice');
@@ -99,7 +99,82 @@ export function ProfilePanel(p: ProfilePanelProps) {
           )}
         </div>
       )}
-      {!status.active && hasProfile && (
+      {!hasProfile && !status.active && !profileStatus.voice_profile_error && (
+        <div
+          role="status"
+          className="profile-empty-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 16px',
+            background: 'rgba(148, 163, 184, 0.08)',
+            border: '1px solid rgba(148, 163, 184, 0.2)',
+            borderRadius: 8,
+            marginBottom: 16,
+            color: 'var(--text-main)',
+          }}
+        >
+          <span style={{ fontSize: '1.4rem' }}>⚪</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+              {t('voiceProfile.noProfileTitle')}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {t('voiceProfile.noProfileDesc')}
+            </div>
+          </div>
+          {p.onResetEnrollment && (
+            <button
+              className="action-btn"
+              onClick={p.onResetEnrollment}
+              style={{ fontSize: '0.8rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+            >
+              {t('voiceProfile.startEnrollBtn')}
+            </button>
+          )}
+        </div>
+      )}
+      {profileStatus.voice_profile_error && !status.active && (
+        <div
+          role="alert"
+          className="profile-corrupted-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 16px',
+            background: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+            borderRadius: 8,
+            marginBottom: 16,
+            color: '#f87171',
+          }}
+        >
+          <span style={{ fontSize: '1.4rem' }}>🔴</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f87171' }}>
+              {t('voiceProfile.profileCorruptedTitle')}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {t(`voiceProfile.${voiceProfileErrorKey(profileStatus.voice_profile_error)}`)}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {t('voiceProfile.profileCorruptedDesc')}
+            </div>
+          </div>
+          {p.onResetEnrollment && (
+            <button
+              className="action-btn"
+              onClick={p.onResetEnrollment}
+              style={{ fontSize: '0.8rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+            >
+              {t('voiceProfile.reEnrollBtn')}
+            </button>
+          )}
+        </div>
+      )}
+      {!status.active && hasProfile && !profileStatus.voice_profile_error && (
         <div
           role="status"
           className="profile-paused-banner"
@@ -145,7 +220,7 @@ export function ProfilePanel(p: ProfilePanelProps) {
       <div className="profile-overview-box">
         <div className="overview-metric">
           <div className="overview-label">{t('voiceProfile.statusTitle')}</div>
-          <div className="overview-value" style={{ color: status.active ? '#4ade80' : '#fbbf24' }}>
+          <div className="overview-value" style={{ color: status.active ? '#4ade80' : status.corrupted ? '#f87171' : '#fbbf24' }}>
             {status.text}
           </div>
           {status.active && (
@@ -154,7 +229,7 @@ export function ProfilePanel(p: ProfilePanelProps) {
             </div>
           )}
           {profileStatus.voice_profile_error && !status.active && (
-            <div style={{ color: '#fbbf24', fontSize: '0.75rem', marginTop: 4 }}>
+            <div style={{ color: status.corrupted ? '#f87171' : '#fbbf24', fontSize: '0.75rem', marginTop: 4 }}>
               {t(`voiceProfile.${voiceProfileErrorKey(profileStatus.voice_profile_error)}`)}
             </div>
           )}

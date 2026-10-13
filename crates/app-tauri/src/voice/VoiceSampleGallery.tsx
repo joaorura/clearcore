@@ -3,13 +3,22 @@ import { formatSecondsLocale } from './format';
 
 const badge = { fontSize: 11, padding: '2px 8px', borderRadius: 10, border: '1px solid var(--border-color)' } as const;
 
-export function VoiceSampleGallery(p: {
-  samples: ServiceSample[]; budget: SpeechBudget; labels: EnrollmentLabels;
-  onDelete: (id: string) => void; deletingId?: string | null; highlightDelete?: boolean; lang?: string;
+export interface VoiceSampleGalleryProps {
+  samples: ServiceSample[];
+  budget: SpeechBudget;
+  labels: EnrollmentLabels;
+  onDelete: (id: string) => void;
+  deletingId?: string | null;
+  highlightDelete?: boolean;
+  lang?: string;
   /** A profile build is running: deleting would change its input, so delete is locked. */
   busy?: boolean;
-}) {
-  const { samples, budget, labels, onDelete, deletingId, highlightDelete, lang = 'en-US', busy = false } = p;
+  onPlay?: (id: string) => void;
+  playingAudioId?: string | null;
+}
+
+export function VoiceSampleGallery(p: VoiceSampleGalleryProps) {
+  const { samples, budget, labels, onDelete, deletingId, highlightDelete, lang = 'en-US', busy = false, onPlay, playingAudioId } = p;
   return (
     <ul className="voice-sample-gallery" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {samples.map((s) => {
@@ -37,6 +46,18 @@ export function VoiceSampleGallery(p: {
               {s.needsReenroll && <span style={{ ...badge, color: '#f87171' }}>{labels.needsReenroll}</span>}
               <span style={{ ...badge, color: 'var(--text-muted)' }}>{s.usedInProfile ? labels.usedInProfile : labels.notUsed}</span>
             </div>
+            {onPlay && (
+              <button
+                type="button"
+                className="action-btn play-sample-btn"
+                data-testid={`play-${s.id}`}
+                disabled={busy}
+                onClick={() => onPlay(s.id)}
+                style={s.id === playingAudioId ? { borderColor: '#f87171', color: '#f87171' } : undefined}
+              >
+                {s.id === playingAudioId ? labels.stopSample : labels.playSample}
+              </button>
+            )}
             <button
               type="button"
               className="action-btn"

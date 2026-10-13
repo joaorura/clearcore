@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('clearcoreApi', {
   setVoiceProfile: (profile) => ipcRenderer.invoke('set_voice_profile', { profile }),
   setVoiceIsolation: (enabled) => ipcRenderer.invoke('set_voice_isolation', enabled),
   getCallTakes: () => ipcRenderer.invoke('get_call_takes'),
+  getSampleAudio: (id) => ipcRenderer.invoke('enrollment_get_sample_audio', { id }),
   listVoiceSamples: () => ipcRenderer.invoke('enrollment_list_samples'),
   listSamples: () => ipcRenderer.invoke('enrollment_list_samples'),
   approveCallTake: (id, name, take) => ipcRenderer.invoke('approve_call_take', { id, name, take }),

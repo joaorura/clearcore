@@ -20,6 +20,8 @@ export interface GalleryPanelProps {
   feedback: JobFeedbackView | null;
   onDelete: (id: string) => void;
   onAddSample: () => void;
+  onPlay?: (id: string) => void;
+  playingAudioId?: string | null;
 }
 
 /** Speech budget, the samples stored in the service and the delete action on each one. */
@@ -74,6 +76,8 @@ export function GalleryPanel(p: GalleryPanelProps) {
           busy={p.busy}
           highlightDelete={budgetError !== null}
           lang={p.locale}
+          onPlay={p.onPlay}
+          playingAudioId={p.playingAudioId}
         />
       ) : (
         <div className="empty-state-card">{t('voiceProfile.emptyGallery')}</div>

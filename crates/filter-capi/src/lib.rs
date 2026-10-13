@@ -225,6 +225,25 @@ pub unsafe extern "C" fn clearcore_filter_set_preset(
     0
 }
 
+/// Set the voice auto-leveler intensity (0–100).
+///
+/// Returns `0` on success, or `-1` if `filter` is NULL.
+///
+/// # Safety
+/// `filter` must be a valid pointer returned by `clearcore_filter_create`, or NULL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clearcore_filter_set_leveler_intensity(
+    filter: *mut ClearcoreFilter,
+    intensity: u8,
+) -> i32 {
+    if filter.is_null() {
+        return -1;
+    }
+    let filter_ref = unsafe { &*filter };
+    filter_ref.control.set_leveler_intensity(intensity);
+    0
+}
+
 /// Destroy and free a neural filter instance.
 ///
 /// # Safety
@@ -543,6 +562,24 @@ mod tests {
         for value in 0..=3_u8 {
             assert_eq!(unsafe { clearcore_filter_set_preset(filter, value) }, 0);
         }
+        unsafe { clearcore_filter_free(filter) };
+    }
+
+    #[test]
+    fn set_leveler_intensity_rejects_a_null_handle() {
+        assert_eq!(
+            unsafe { clearcore_filter_set_leveler_intensity(std::ptr::null_mut(), 50) },
+            -1
+        );
+    }
+
+    #[test]
+    fn set_leveler_intensity_updates_control() {
+        let _env = lock_env();
+        let filter = create_filter();
+        assert!(!filter.is_null());
+        assert_eq!(unsafe { clearcore_filter_set_leveler_intensity(filter, 80) }, 0);
+        assert_eq!(unsafe { (*filter).control.leveler_intensity() }, 80);
         unsafe { clearcore_filter_free(filter) };
     }
 

@@ -40,6 +40,18 @@ describe('profile existence comes from the service (I1)', () => {
     expect(hasServiceVoiceProfile({ is_enrolled: true, active_samples_count: 1 })).toBe(false);
   });
 
+  it('corrupted service profile error causes is_enrolled false and corrupted state', () => {
+    const corruptedStatus: VoiceProfileStatus = normalizeVoiceProfileStatus({
+      stored_voice_profile_id: 'p1',
+      has_voice_profile: true,
+      voice_profile_error: 'Invalid voice profile',
+    });
+    expect(corruptedStatus.is_enrolled).toBe(false);
+    expect(hasServiceVoiceProfile(corruptedStatus)).toBe(false);
+    expect(voiceProfileActivationState(corruptedStatus)).toBe('corrupted');
+    expect(voiceProfileStatusLabelKey(corruptedStatus)).toBe('corrupted');
+  });
+
   it('legacy local is_enrolled:true without a service profile is not "stored, not applied"', () => {
     expect(legacyLocalOnly.is_enrolled).toBe(false);
     expect(voiceProfileActivationState(legacyLocalOnly)).toBe('none');

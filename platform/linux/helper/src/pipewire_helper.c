@@ -628,6 +628,13 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
         }
     }
 
+    char lib_workspace_rel[PATH_MAX] = {0};
+    char lib_workspace_dbg[PATH_MAX] = {0};
+    if (exe_dir[0]) {
+        snprintf(lib_workspace_rel, sizeof(lib_workspace_rel), "%s/../../../../target/release/libclearcore_filter.so", exe_dir);
+        snprintf(lib_workspace_dbg, sizeof(lib_workspace_dbg), "%s/../../../../target/debug/libclearcore_filter.so", exe_dir);
+    }
+
     const char *env_lib = getenv("CLEARCORE_FILTER_LIB");
     const char *home = getenv("HOME");
     char user_lib[PATH_MAX] = {0};
@@ -642,6 +649,8 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
         lib_same_dir[0] ? lib_same_dir : "",
         lib_parent_dir[0] ? lib_parent_dir : "",
         lib_grandparent_dir[0] ? lib_grandparent_dir : "",
+        lib_workspace_rel[0] ? lib_workspace_rel : "",
+        lib_workspace_dbg[0] ? lib_workspace_dbg : "",
         "platform/linux/helper/lib/libclearcore_filter.so",
         "./libclearcore_filter.so",
         "target/release/libclearcore_filter.so",
@@ -738,14 +747,24 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
         return;
     }
 
+    ctx->neural_lib_handle = lib;
+    ctx->neural_filter = filter;
+    ctx->neural_process_fn = process_fn;
+    ctx->neural_free_fn = free_fn;
+    ctx->neural_set_preset_fn = set_preset_fn;
+    ctx->neural_set_voice_profile_fn = set_voice_profile_fn;
+    ctx->neural_clear_voice_profile_fn = clear_voice_profile_fn;
+    ctx->neural_reload_active_profile_fn = reload_active_profile_fn;
+    ctx->neural_supports_voice_profile_fn = supports_voice_profile_fn;
+    ctx->neural_is_voice_profile_active_fn = is_voice_profile_active_fn;
+
     /* Reload persisted active profile from disk BEFORE warmup so the warmup hops exercise the
      * personalized conditioning path (rc: 1 loaded, 0 none/neutral, <0 error). Never on the audio
      * thread — this runs in neural_filter_init on the control thread. */
     int profile_rc = 0;
     bool profile_loaded = false;
     if (reload_active_profile_fn && ctx->neural_filter) {
-        ctx->neural_reload_active_profile_fn = reload_active_profile_fn;
-        profile_rc = reload_active_profile_fn(filter);
+        profile_rc = reload_active_profile_fn(ctx->neural_filter);
         profile_loaded = (profile_rc >= 0);
     }
 
@@ -755,16 +774,6 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     for (int i = 0; i < 5; i++) {
         process_fn(filter, warmup_in, warmup_out);
     }
-
-    ctx->neural_lib_handle = lib;
-    ctx->neural_filter = filter;
-    ctx->neural_process_fn = process_fn;
-    ctx->neural_free_fn = free_fn;
-    ctx->neural_set_preset_fn = set_preset_fn;
-    ctx->neural_set_voice_profile_fn = set_voice_profile_fn;
-    ctx->neural_clear_voice_profile_fn = clear_voice_profile_fn;
-    ctx->neural_supports_voice_profile_fn = supports_voice_profile_fn;
-    ctx->neural_is_voice_profile_active_fn = is_voice_profile_active_fn;
 
     int supports_profile = 0;
     if (supports_voice_profile_fn) {

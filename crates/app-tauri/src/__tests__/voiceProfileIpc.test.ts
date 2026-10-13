@@ -489,6 +489,8 @@ describe('Daemon Active Profile & Gallery Synchronization', () => {
     expect(voiceProfileMerge.serviceHasVoiceProfile({ is_voice_profile_active: true })).toBe(true);
     expect(voiceProfileMerge.serviceHasVoiceProfile({ stored_voice_profile_id: 'p-1' })).toBe(true);
     expect(voiceProfileMerge.serviceHasVoiceProfile({ has_voice_profile: true })).toBe(true);
+    expect(voiceProfileMerge.serviceHasVoiceProfile({ stored_voice_profile_id: 'p-1', voice_profile_error: 'Invalid voice profile' })).toBe(false);
+    expect(voiceProfileMerge.serviceHasVoiceProfile({ active_voice_profile_id: 'p-1', voice_profile_error: 'errorLoadFailed' })).toBe(false);
     expect(voiceProfileMerge.serviceHasVoiceProfile({})).toBe(false);
   });
 
@@ -506,6 +508,8 @@ describe('Daemon Active Profile & Gallery Synchronization', () => {
     expect(hasServiceVoiceProfile(daemonStatus)).toBe(true);
     expect(hasServiceVoiceProfile({ active_voice_profile_id: 'p-123' })).toBe(true);
     expect(hasServiceVoiceProfile({ is_voice_profile_active: true })).toBe(true);
+    expect(hasServiceVoiceProfile({ stored_voice_profile_id: 'p-1', voice_profile_error: 'Invalid voice profile' })).toBe(false);
+    expect(hasServiceVoiceProfile({ active_voice_profile_id: 'p-1', voice_profile_error: 'The stored voice profile failed validation or has insecure permissions' })).toBe(false);
     expect(hasServiceVoiceProfile({})).toBe(false);
   });
 
@@ -524,6 +528,9 @@ describe('Daemon Active Profile & Gallery Synchronization', () => {
       expect(completed[s]).toBeDefined();
       expect(completed[s].sampleId).toBe(`s-${s}`);
     }
+
+    const emptyCompleted = syncCompletedStepsFromSamples([], {}, undefined, true);
+    expect(Object.keys(emptyCompleted)).toHaveLength(0);
   });
 
   it('merges voice_isolation_enabled from service status and handles set_voice_isolation via bridge', async () => {
