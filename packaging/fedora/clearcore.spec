@@ -1,7 +1,7 @@
-%global tag_version v0.1.0-beta.7
+%global tag_version v0.1.0-beta.8
 
 Name:           clearcore
-Version:        0.1.0_beta.7
+Version:        0.1.0_beta.8
 Release:        1%{?dist}
 Summary:        Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
 License:        PolyForm Noncommercial 1.0.0
