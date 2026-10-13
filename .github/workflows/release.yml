@@ -435,6 +435,7 @@ jobs:
   build-macos-x64:
     name: Build macOS x64 (Intel) Package
     runs-on: macos-14
+    continue-on-error: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

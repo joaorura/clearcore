@@ -90,9 +90,9 @@ pub const APPROVED_STATEFUL_DIGESTS: StatefulDigests = StatefulDigests {
 /// ([`OrtBackend::from_archive_bytes`]) trusts the caller's whole-archive verification instead of
 /// re-checking these digests.
 pub const APPROVED_PRO_STATEFUL_DIGESTS: StatefulDigests = StatefulDigests {
-    enc: "d54681c1ba4c3363b8b768f3d5437a1a30b105001b5c6609576f5b33917a594b",
-    erb_dec: "fca0f1a8eadb80aae276574c91508b14e7007b4b4845de57bb75d9192b041a49",
-    df_dec: "2db6b5b16414d3b558898073815b0b51e0f00aa27def7b9cb704fa6ceee8284d",
+    enc: "ca27b7fefa4b7805cad4ad715782eee330730823a96028fefa03a12236aaea55",
+    erb_dec: "e9f6e1fbc94896f5213a9a02f36d514ad8778c583534ee098185e2733b2b1957",
+    df_dec: "ce841e767fff13eff631431734f512598b6f40a7529b7610b6a05d01d247fee3",
 };
 
 fn sha256_hex(bytes: &[u8]) -> String {

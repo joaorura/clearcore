@@ -18,10 +18,10 @@ use studio_dsp::{Preset, StudioControl};
 /// environment variables are not set. Points at the *stateful* graphs (with recurrent state ports)
 /// that `OrtBackend` consumes.
 pub const PDFNET3_PRO_V2_DEFAULT_ASSET: &str =
-    "/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v2_20261009/pdfnet3-stateful-asset-v1.tar.gz";
+    "/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v3_20261013/pdfnet3-stateful-asset-v1.tar.gz";
 /// SHA-256 of [`PDFNET3_PRO_V2_DEFAULT_ASSET`] (the whole archive, lowercase hex).
 pub const PDFNET3_PRO_V2_DEFAULT_SHA256: &str =
-    "a14a97c57159d2d1b5fc28b76755da9dd98ef83b0051651a38f7fa5032b362c2";
+    "d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5";
 
 pub struct ClearcoreFilter {
     backend: StudioBackend<OrtBackend>,
