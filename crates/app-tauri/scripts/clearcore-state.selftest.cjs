@@ -211,6 +211,25 @@ test('a non-regular file at the state path is refused', () => {
   }
 });
 
+test('bumpGeneration increments the 32-bit generation in place and returns it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clearcore-state-'));
+  try {
+    const file = path.join(dir, 'clearcore_state');
+    assert.equal(state.bumpGeneration(file), 1);
+    assert.deepEqual(fs.readFileSync(file), bytes([8, 1]));
+
+    assert.equal(state.bumpGeneration(file), 2);
+    assert.deepEqual(fs.readFileSync(file), bytes([8, 2]));
+
+    // Wraps at 32-bit max
+    state.updateStateFile(file, { generation: 0xffffffff, preset: 'Podcast' });
+    assert.equal(state.bumpGeneration(file), 0);
+    assert.deepEqual(fs.readFileSync(file), bytes([8, 0], [12, 2]));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try {

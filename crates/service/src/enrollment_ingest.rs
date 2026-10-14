@@ -82,6 +82,20 @@ fn ingest_inner(denoiser: &mut dyn Denoiser, pcm48: &[f32]) -> Result<IngestResu
     if trimmed.speech_seconds <= 0.0 {
         return Err(EnrollError::TooLittleSpeech);
     }
+    let speech_rms_linear = 10.0f32.powf(rms_dbfs / 20.0);
+    let noise_sum: f64 = pcm48
+        .iter()
+        .zip(&clean.0)
+        .map(|(&raw, &cln)| {
+            let diff = f64::from(raw) - f64::from(cln);
+            diff * diff
+        })
+        .sum();
+    let noise_rms_linear = (noise_sum / (pcm48.len() as f64)).sqrt() as f32;
+    let snr_db = 20.0 * (speech_rms_linear / (noise_rms_linear + 1e-6)).log10();
+    if snr_db < 5.0 {
+        return Err(EnrollError::NoisyEnvironment);
+    }
     Ok(IngestResult {
         wav_bytes,
         speech_seconds: trimmed.speech_seconds,
@@ -242,11 +256,25 @@ mod tests {
     fn stored_wav_reflects_the_denoised_signal() {
         let raw = bursts(3.0, 0.4);
         let mut pcm = raw;
-        let r = ingest_sample(&mut Gain(0.5), &mut pcm).unwrap();
+        let r = ingest_sample(&mut Gain(0.8), &mut pcm).unwrap();
         let (decoded, _) = decode_wav_pcm16_mono(&r.wav_bytes).unwrap();
         let peak = decoded.iter().fold(0.0_f32, |m, v| m.max(v.abs()));
-        assert!((peak - 0.2).abs() < 0.01, "peak {peak}");
-        assert!((r.peak - 0.2).abs() < 0.01);
+        assert!((peak - 0.32).abs() < 0.01, "peak {peak}");
+        assert!((r.peak - 0.32).abs() < 0.01);
+    }
+
+    #[test]
+    fn noisy_environment_is_rejected() {
+        let mut pcm = bursts(3.0, 0.4);
+        let r = ingest_sample(&mut Gain(0.3), &mut pcm);
+        assert_eq!(r.unwrap_err(), EnrollError::NoisyEnvironment);
+    }
+
+    #[test]
+    fn clean_sample_passes_quality_gate() {
+        let mut pcm = bursts(3.0, 0.4);
+        let r = ingest_sample(&mut Gain(0.95), &mut pcm);
+        assert!(r.is_ok());
     }
 
     #[test]

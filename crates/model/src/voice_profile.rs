@@ -144,6 +144,20 @@ impl FiLMVectors {
             && self.beta_df.iter().all(|&v| v.abs() < f32::EPSILON)
     }
 
+    /// Scales the FiLM vectors by intensity percentage (0–100%).
+    ///
+    /// At 0%, returns identity (gamma = 1.0, beta = 0.0).
+    /// At 100%, returns the vectors unchanged.
+    pub fn with_intensity(&self, intensity: u8) -> Self {
+        let alpha = (f32::from(intensity.min(100))) / 100.0;
+        Self {
+            gamma_enc: self.gamma_enc.iter().map(|&g| 1.0 + alpha * (g - 1.0)).collect(),
+            beta_enc: self.beta_enc.iter().map(|&b| alpha * b).collect(),
+            gamma_df: self.gamma_df.iter().map(|&g| 1.0 + alpha * (g - 1.0)).collect(),
+            beta_df: self.beta_df.iter().map(|&b| alpha * b).collect(),
+        }
+    }
+
     /// Creates and validates a new set of `FiLM` vectors.
     pub fn new(
         gamma_enc: Vec<f32>,
@@ -372,6 +386,18 @@ impl VoiceProfile {
     pub fn with_eq(mut self, eq: Option<BandGains>) -> Result<Self, VoiceProfileError> {
         self.set_eq(eq)?;
         Ok(self)
+    }
+
+    /// Returns a new profile with FiLM vectors scaled by voice isolation intensity (0–100%), recalculating integrity hash.
+    pub fn with_intensity(&self, intensity: u8) -> Result<Self, VoiceProfileError> {
+        let film = self.film.with_intensity(intensity);
+        Self::new(
+            &self.id,
+            &self.name,
+            &self.created_at_utc,
+            film,
+            self.eq.clone(),
+        )
     }
 
     /// Checks if this profile represents a neutral identity operation.
@@ -689,5 +715,56 @@ mod tests {
             .expect("must verify after with_eq");
         assert!(cleared.eq.is_none());
         assert_ne!(cleared.integrity_hash, profile.integrity_hash);
+    }
+
+    #[test]
+    fn test_film_with_intensity() {
+        let original = FiLMVectors::new(
+            vec![1.4; FILM_HIDDEN_DIM],
+            vec![0.2; FILM_HIDDEN_DIM],
+            vec![0.8; FILM_HIDDEN_DIM],
+            vec![-0.1; FILM_HIDDEN_DIM],
+        )
+        .expect("valid vectors");
+
+        // 100% intensity is unchanged
+        let at_100 = original.with_intensity(100);
+        assert_eq!(at_100, original);
+
+        // 0% intensity is identity
+        let at_0 = original.with_intensity(0);
+        assert!(at_0.is_identity());
+
+        // 50% intensity is midpoint
+        let at_50 = original.with_intensity(50);
+        assert!((at_50.gamma_enc[0] - 1.2).abs() < 1e-6);
+        assert!((at_50.beta_enc[0] - 0.1).abs() < 1e-6);
+        assert!((at_50.gamma_df[0] - 0.9).abs() < 1e-6);
+        assert!((at_50.beta_df[0] - (-0.05)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_voice_profile_with_intensity() {
+        let film = FiLMVectors::new(
+            vec![1.4; FILM_HIDDEN_DIM],
+            vec![0.2; FILM_HIDDEN_DIM],
+            vec![0.8; FILM_HIDDEN_DIM],
+            vec![-0.1; FILM_HIDDEN_DIM],
+        )
+        .expect("valid vectors");
+        let profile = VoiceProfile::new(
+            "spk-scaled",
+            "Speaker",
+            "2026-10-14T00:00:00Z",
+            film,
+            Some(BandGains::neutral()),
+        )
+        .expect("profile");
+
+        let scaled = profile.with_intensity(50).expect("scaled profile");
+        assert_eq!(scaled.id, profile.id);
+        assert_eq!(scaled.name, profile.name);
+        assert!(scaled.verify_integrity().is_ok());
+        assert!((scaled.film.gamma_enc[0] - 1.2).abs() < 1e-6);
     }
 }

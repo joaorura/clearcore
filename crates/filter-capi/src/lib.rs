@@ -11,6 +11,7 @@ use realtime_noise_model::{
     CpuProfile, InferenceError, InferenceBackend, OrtBackend, PdfNet3DevArchive, ProfileStore,
     StudioBackend, VoiceProfile,
 };
+use realtime_noise_service::settings::{default_settings_path, Settings};
 use studio_dsp::{Preset, StudioControl};
 
 /// Default deployment path of the pDFNet3 Pro v2 stateful archive (V2 M3 run). Used as the
@@ -107,13 +108,26 @@ fn apply_profile(
 /// [`ProfileStore::default_dir`]. Failures are swallowed: a missing or corrupt profile simply
 /// leaves the filter in neutral conditioning rather than aborting filter construction.
 fn try_load_active_profile(filter: &mut ClearcoreFilter) {
+    let settings = Settings::load(&default_settings_path());
+    if !settings.voice_isolation_enabled {
+        return;
+    }
     let Some(dir) = ProfileStore::default_dir() else {
         return;
     };
     let store = ProfileStore::new(dir);
     let loaded = store.load_active().unwrap_or(None);
     if let Some(profile) = loaded {
-        let _ = apply_profile(&mut filter.backend, filter.supports_film, &mut filter.active_profile_id, &profile);
+        let profile_to_apply = match profile.with_intensity(settings.voice_isolation_intensity) {
+            Ok(p) => p,
+            Err(_) => profile,
+        };
+        let _ = apply_profile(
+            &mut filter.backend,
+            filter.supports_film,
+            &mut filter.active_profile_id,
+            &profile_to_apply,
+        );
     }
 }
 
@@ -343,6 +357,11 @@ pub unsafe extern "C" fn clearcore_filter_reload_active_profile(filter: *mut Cle
         return -1;
     }
     let filter_ref = unsafe { &mut *filter };
+    let settings = Settings::load(&default_settings_path());
+    if !settings.voice_isolation_enabled {
+        clear_to_neutral(&mut filter_ref.backend, &mut filter_ref.active_profile_id);
+        return 0;
+    }
     let Some(dir) = ProfileStore::default_dir() else {
         clear_to_neutral(&mut filter_ref.backend, &mut filter_ref.active_profile_id);
         return 0;
@@ -354,11 +373,15 @@ pub unsafe extern "C" fn clearcore_filter_reload_active_profile(filter: *mut Cle
             0
         }
         Ok(Some(profile)) => {
+            let profile_to_apply = match profile.with_intensity(settings.voice_isolation_intensity) {
+                Ok(p) => p,
+                Err(_) => profile,
+            };
             match apply_profile(
                 &mut filter_ref.backend,
                 filter_ref.supports_film,
                 &mut filter_ref.active_profile_id,
-                &profile,
+                &profile_to_apply,
             ) {
                 Ok(()) => 1,
                 Err(InferenceError::UnsupportedFeature(_)) => -3,
@@ -429,6 +452,7 @@ mod tests {
         // SAFETY (edition 2024): `set_var` is unsafe; we hold the process-wide env lock for the
         // whole test so the mutation is race-free within this test binary.
         unsafe { std::env::set_var("XDG_DATA_HOME", data.path()) };
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", data.path()) };
         EnvGuard {
             _lock: lock,
             _data: data,
@@ -774,6 +798,33 @@ mod tests {
         store.clear_active().expect("clear active");
         assert_eq!(unsafe { clearcore_filter_reload_active_profile(filter) }, 0);
         assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
+        unsafe { clearcore_filter_free(filter) };
+    }
+
+    #[test]
+    fn reload_active_profile_falls_back_to_neutral_when_voice_isolation_disabled_in_settings() {
+        let _env = lock_env();
+        let profiles_dir = ProfileStore::default_dir().expect("default_dir under XDG_DATA_HOME");
+        let store = ProfileStore::new(&profiles_dir);
+        store.save_active(&identity_profile("spk-disabled")).expect("save active");
+
+        let filter = create_filter();
+        assert!(!filter.is_null());
+
+        // By default (settings file missing), voice_isolation_enabled is true.
+        assert_eq!(unsafe { clearcore_filter_reload_active_profile(filter) }, 1);
+        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 1);
+
+        // Save settings with voice_isolation_enabled = false.
+        let mut settings = Settings::default();
+        settings.voice_isolation_enabled = false;
+        let settings_path = default_settings_path();
+        settings.save(&settings_path).expect("save settings");
+
+        // Reload should now fall back to neutral (return 0) and deactivate voice profile.
+        assert_eq!(unsafe { clearcore_filter_reload_active_profile(filter) }, 0);
+        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
+
         unsafe { clearcore_filter_free(filter) };
     }
 }

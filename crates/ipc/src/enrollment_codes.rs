@@ -12,11 +12,13 @@ pub const ENROLL_FAILED: &str = "ENROLL_FAILED";
 pub const ENROLL_BUSY: &str = "ENROLL_BUSY";
 /// The active isolation model cannot apply a voice profile (e.g. no `FiLM` inputs, NPU backend).
 pub const ENROLL_BACKEND_UNSUPPORTED: &str = "ENROLL_BACKEND_UNSUPPORTED";
+/// Active speech is heavily masked by background noise (SNR < 5 dB).
+pub const ENROLL_NOISY_ENVIRONMENT: &str = "ENROLL_NOISY_ENVIRONMENT";
 /// 90 s * 48 kHz * 4 B = 17.28 MB; base64 inflates by 4/3 (23.04 MB) plus envelope.
 pub const MAX_REQUEST_LINE_BYTES: usize = 32 * 1024 * 1024;
 
 /// The closed list of enrollment codes; clients reject (or collapse) anything else.
-pub const ALL_ENROLL_CODES: [&str; 11] = [
+pub const ALL_ENROLL_CODES: [&str; 12] = [
     ENROLL_CLIPPING,
     ENROLL_TOO_QUIET,
     ENROLL_TOO_LITTLE_SPEECH,
@@ -28,6 +30,7 @@ pub const ALL_ENROLL_CODES: [&str; 11] = [
     ENROLL_FAILED,
     ENROLL_BUSY,
     ENROLL_BACKEND_UNSUPPORTED,
+    ENROLL_NOISY_ENVIRONMENT,
 ];
 
 #[cfg(test)]

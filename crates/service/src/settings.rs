@@ -33,6 +33,8 @@ pub struct Settings {
     pub filter_intensity: u8,
     /// Whether voice isolation (biometric profile) is active.
     pub voice_isolation_enabled: bool,
+    /// Voice isolation intensity 0–100 (percentage scale for FiLM vectors).
+    pub voice_isolation_intensity: u8,
     /// Voice auto-leveler intensity 0–100 (0 = bypass, 50 = balanced, 100 = firm).
     pub voice_leveler: u8,
 }
@@ -45,6 +47,7 @@ impl Default for Settings {
             backend: None,
             filter_intensity: 50,
             voice_isolation_enabled: true,
+            voice_isolation_intensity: 100,
             voice_leveler: 0,
         }
     }
@@ -62,6 +65,8 @@ struct SettingsFile {
     filter_intensity: u8,
     #[serde(default = "default_voice_isolation")]
     voice_isolation_enabled: bool,
+    #[serde(default = "default_voice_isolation_intensity")]
+    voice_isolation_intensity: u8,
     #[serde(default = "default_voice_leveler")]
     voice_leveler: u8,
 }
@@ -72,6 +77,10 @@ fn default_filter_intensity() -> u8 {
 
 fn default_voice_isolation() -> bool {
     true
+}
+
+fn default_voice_isolation_intensity() -> u8 {
+    100
 }
 
 fn default_voice_leveler() -> u8 {
@@ -89,6 +98,7 @@ impl Settings {
                 backend: file.backend,
                 filter_intensity: file.filter_intensity.min(100),
                 voice_isolation_enabled: file.voice_isolation_enabled,
+                voice_isolation_intensity: file.voice_isolation_intensity.min(100),
                 voice_leveler: file.voice_leveler.min(100),
             },
             _ => Self::default(),
@@ -140,6 +150,7 @@ impl Settings {
             backend: self.backend.clone(),
             filter_intensity: self.filter_intensity,
             voice_isolation_enabled: self.voice_isolation_enabled,
+            voice_isolation_intensity: self.voice_isolation_intensity,
             voice_leveler: self.voice_leveler,
         })
     }

@@ -12,6 +12,7 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
 realtime-noise-model = { path = "../model", features = ["ort", "tract"] }
+realtime-noise-service = { path = "../service" }
 studio-dsp = { path = "../studio-dsp" }
 
 [dev-dependencies]

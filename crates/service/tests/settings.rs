@@ -88,6 +88,7 @@ fn save_then_load_round_trips_every_preset() {
             backend: None,
             filter_intensity: 50,
             voice_isolation_enabled: true,
+            voice_isolation_intensity: 100,
             voice_leveler: 0,
         };
         settings.save(&path).unwrap();
@@ -109,6 +110,7 @@ fn save_writes_versioned_json_creates_parents_and_leaves_no_temporary_file() {
         backend: None,
         filter_intensity: 50,
         voice_isolation_enabled: true,
+        voice_isolation_intensity: 100,
         voice_leveler: 0,
     }
     .save(&path)
@@ -149,6 +151,7 @@ fn save_replaces_a_stale_temporary_file() {
         backend: None,
         filter_intensity: 50,
         voice_isolation_enabled: true,
+        voice_isolation_intensity: 100,
         voice_leveler: 0,
     }
     .save(&path)
@@ -168,6 +171,7 @@ fn failed_save_keeps_the_previous_file_intact() {
         backend: None,
         filter_intensity: 50,
         voice_isolation_enabled: true,
+        voice_isolation_intensity: 100,
         voice_leveler: 0,
     }
     .save(&path)
@@ -180,6 +184,7 @@ fn failed_save_keeps_the_previous_file_intact() {
         backend: None,
         filter_intensity: 50,
         voice_isolation_enabled: true,
+        voice_isolation_intensity: 100,
         voice_leveler: 0,
     }
     .save(&path);
@@ -197,6 +202,7 @@ fn persist_settings_reports_success_failure_and_absence_of_a_path() {
         backend: None,
         filter_intensity: 50,
         voice_isolation_enabled: true,
+        voice_isolation_intensity: 100,
         voice_leveler: 0,
     };
 
@@ -224,6 +230,7 @@ fn settings_round_trips_backend_field() {
         backend: Some("nvidia-tensorrt".to_string()),
         filter_intensity: 50,
         voice_isolation_enabled: true,
+        voice_isolation_intensity: 100,
         voice_leveler: 0,
     };
     settings.save(&path).unwrap();
@@ -282,6 +289,7 @@ fn settings_round_trips_filter_intensity_and_voice_isolation() {
         backend: None,
         filter_intensity: 75,
         voice_isolation_enabled: false,
+        voice_isolation_intensity: 100,
         voice_leveler: 0,
     };
     settings.save(&path).unwrap();
@@ -295,6 +303,27 @@ fn settings_round_trips_filter_intensity_and_voice_isolation() {
 }
 
 #[test]
+fn settings_round_trips_voice_isolation_intensity() {
+    let dir = TempDir::new("settings-voice-isolation-intensity-roundtrip");
+    let path = dir.path().join("settings.json");
+    let settings = Settings {
+        version: SETTINGS_VERSION,
+        preset: Preset::Natural,
+        backend: None,
+        filter_intensity: 50,
+        voice_isolation_enabled: true,
+        voice_isolation_intensity: 65,
+        voice_leveler: 0,
+    };
+    settings.save(&path).unwrap();
+    let loaded = Settings::load(&path);
+    assert_eq!(loaded.voice_isolation_intensity, 65);
+
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("\"voice_isolation_intensity\": 65"));
+}
+
+#[test]
 fn settings_round_trips_voice_leveler() {
     let dir = TempDir::new("settings-voice-leveler-roundtrip");
     let path = dir.path().join("settings.json");
@@ -304,6 +333,7 @@ fn settings_round_trips_voice_leveler() {
         backend: None,
         filter_intensity: 50,
         voice_isolation_enabled: true,
+        voice_isolation_intensity: 100,
         voice_leveler: 85,
     };
     settings.save(&path).unwrap();

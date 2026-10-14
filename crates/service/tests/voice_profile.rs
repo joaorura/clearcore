@@ -773,3 +773,22 @@ fn set_voice_isolation_temporarily_disables_without_deleting() {
     assert_eq!(status.payload["voice_isolation_enabled"], true);
 }
 
+#[test]
+fn set_voice_isolation_intensity_updates_status_and_reapplies() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    let (mut daemon, _) = daemon_with(&dir, true);
+    set_profile(&mut daemon, &profile_json("prof-intensity"));
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_isolation_intensity"], 100);
+
+    let resp = send(&mut daemon, IpcCommand::SetVoiceIsolationIntensity { intensity: 75 });
+    assert_eq!(resp.payload["voice_isolation_intensity"], 75);
+    assert_eq!(resp.payload["is_voice_profile_active"], true);
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_isolation_intensity"], 75);
+    assert_eq!(status.payload["is_voice_profile_active"], true);
+}
+

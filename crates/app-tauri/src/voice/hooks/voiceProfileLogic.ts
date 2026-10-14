@@ -101,6 +101,11 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     dev_base_model: devBaseModel(src.dev_base_model),
     dev_base_model_error: devBaseModelError(src.dev_base_model_error),
     voice_isolation_enabled: typeof src.voice_isolation_enabled === 'boolean' ? src.voice_isolation_enabled : undefined,
+    voice_isolation_intensity: typeof src.voice_isolation_intensity === 'number'
+      && src.voice_isolation_intensity >= 0
+      && src.voice_isolation_intensity <= 100
+      ? src.voice_isolation_intensity
+      : undefined,
   };
 }
 
@@ -148,6 +153,7 @@ const SERVICE_STATUS_KEYS_IN_RESPONSE = [
   'voice_samples_count',
   'neural_eq_calibrated',
   'voice_isolation_enabled',
+  'voice_isolation_intensity',
 ] as const;
 
 export function mergeVoiceProfileStatus(
@@ -177,6 +183,7 @@ export function mergeVoiceProfileStatus(
     dev_base_model: prof.dev_base_model,
     dev_base_model_error: prof.dev_base_model_error,
     voice_isolation_enabled: prof.voice_isolation_enabled,
+    voice_isolation_intensity: prof.voice_isolation_intensity ?? initial.voice_isolation_intensity,
     active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
   };
 }
@@ -194,6 +201,7 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'dev_base_model',
   'dev_base_model_error',
   'voice_isolation_enabled',
+  'voice_isolation_intensity',
 ] as const;
 
 /** Service-owned fields: the renderer never resends nor inherits them. */
@@ -232,6 +240,7 @@ export function applySetVoiceProfileResult(
     dev_base_model: svc.dev_base_model,
     dev_base_model_error: svc.dev_base_model_error,
     voice_isolation_enabled: svc.voice_isolation_enabled,
+    voice_isolation_intensity: svc.voice_isolation_intensity,
   };
 }
 

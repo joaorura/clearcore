@@ -384,6 +384,7 @@ const fn message_for(error: &EnrollError) -> &'static str {
         EnrollError::BackendUnsupported => {
             "the active isolation model does not accept a voice profile"
         }
+        EnrollError::NoisyEnvironment => "environment has too much background noise",
     }
 }
 

@@ -654,6 +654,15 @@ function writeClearcoreSharedState(updates = {}) {
   }
 }
 
+function bumpClearcoreGeneration() {
+  if (process.platform !== 'linux') return;
+  try {
+    clearcoreState.bumpGeneration(clearcoreStatePath());
+  } catch (err) {
+    console.warn('[Clearcore] Could not bump shared state generation:', err.message);
+  }
+}
+
 // The service owns the studio preset (settings.json); the native helper only reads the copy kept in
 // the shared state file. Call it with the preset reported by GetStatus (`res.preset`). The IPC
 // protocol has no command to change the preset yet, and the service does not report one yet, so
@@ -2107,6 +2116,10 @@ ipcMain.handle('set_voice_leveler', async (_event, args) => {
 });
 
 // Voice Profile & Speaker Isolation IPC Handlers
+async function getDaemonStatus() {
+  return await sendIpcRequest('GetStatus', {}, 1500);
+}
+
 async function getServiceVoiceProfileStatus() {
   try {
     return (await sendIpcRequest('GetStatus', {}, 1500)) || {};
@@ -2147,6 +2160,8 @@ ipcMain.handle('set_voice_profile', async (_event, args) => {
       forwardError = 'service_unavailable';
     }
 
+    bumpClearcoreGeneration();
+
     const result = voiceProfileMerge.buildSetVoiceProfileResult({
       updated,
       serviceStatus: await getServiceVoiceProfileStatus(),
@@ -2177,11 +2192,40 @@ ipcMain.handle('set_voice_isolation', async (_event, args) => {
   } else {
     forwardError = 'service_unavailable';
   }
+  bumpClearcoreGeneration();
   const merged = await readMergedVoiceProfile();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('voice-profile-update', merged);
   }
   return { success: !forwardError, voice_isolation_enabled: enabled, profile: merged, serviceResp };
+});
+
+ipcMain.handle('get_voice_isolation_intensity', async () => {
+  if (await isDaemonResponsive()) {
+    try {
+      const status = await getDaemonStatus();
+      return status?.voice_isolation_intensity ?? 100;
+    } catch {
+      return 100;
+    }
+  }
+  return 100;
+});
+
+ipcMain.handle('set_voice_isolation_intensity', async (_event, args) => {
+  const raw = typeof args === 'number' ? args : (args && typeof args === 'object' ? (args.intensity ?? 100) : 100);
+  const intensity = Math.max(0, Math.min(100, Math.round(Number(raw))));
+  let forwardError = null;
+  if (await isDaemonResponsive()) {
+    try {
+      await sendIpcRequest({ SetVoiceIsolationIntensity: { intensity } });
+    } catch (e) {
+      forwardError = e.message;
+      console.log('[Clearcore IPC] Daemon SetVoiceIsolationIntensity failed:', e.message);
+    }
+  }
+  bumpClearcoreGeneration();
+  return { success: !forwardError, voice_isolation_intensity: intensity };
 });
 
 ipcMain.handle('get_voice_profile', () => readMergedVoiceProfile());

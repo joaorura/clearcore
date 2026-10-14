@@ -62,6 +62,8 @@ export interface ClearcoreApi {
   getVoiceProfileStatus?: () => Promise<VoiceProfileStatus>;
   setVoiceProfile?: (profileData: unknown) => Promise<{ success: boolean; profile?: VoiceProfileStatus }>;
   setVoiceIsolation?: (enabled: boolean) => Promise<{ success: boolean; voice_isolation_enabled?: boolean; profile?: VoiceProfileStatus }>;
+  getVoiceIsolationIntensity?: () => Promise<number>;
+  setVoiceIsolationIntensity?: (intensity: number) => Promise<{ success: boolean; voice_isolation_intensity: number }>;
   getCallTakes?: () => Promise<{ success: boolean; takes: CallSuggestionTake[] } | CallSuggestionTake[]>;
   getSampleAudio?: (id: string) => Promise<{ success: boolean; audioUrl?: string | null; errorCode?: string }>;
   listVoiceSamples?: () => Promise<unknown>;
@@ -211,6 +213,17 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
         return (await api.setVoiceIsolation(enabled)) as unknown as T;
       }
     }
+    if (cmd === 'get_voice_isolation_intensity') {
+      if (typeof api.getVoiceIsolationIntensity === 'function') {
+        return (await api.getVoiceIsolationIntensity()) as unknown as T;
+      }
+    }
+    if (cmd === 'set_voice_isolation_intensity') {
+      if (typeof api.setVoiceIsolationIntensity === 'function') {
+        const raw = typeof args?.intensity === 'number' ? args.intensity : (typeof args === 'number' ? args : 100);
+        return (await api.setVoiceIsolationIntensity(raw)) as unknown as T;
+      }
+    }
     if (cmd === 'get_call_takes') {
       if (typeof api.getCallTakes === 'function') {
         return (await api.getCallTakes()) as unknown as T;
@@ -312,6 +325,16 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     storageSet('clearcore_filter_intensity', String(intensity));
     return { success: true, filter_intensity: intensity } as unknown as T;
   }
+  if (cmd === 'get_voice_isolation_intensity') {
+    const saved = storageGet('clearcore_voice_isolation_intensity');
+    return (saved ? Number(saved) : 100) as unknown as T;
+  }
+  if (cmd === 'set_voice_isolation_intensity') {
+    const raw = args?.intensity ?? args;
+    const intensity = Math.max(0, Math.min(100, Math.round(Number(raw ?? 100))));
+    storageSet('clearcore_voice_isolation_intensity', String(intensity));
+    return { success: true, voice_isolation_intensity: intensity } as unknown as T;
+  }
   // No service in a plain browser: the voice profile is neutral and nothing is kept locally
   // (samples, takes and the enrolled flag live only in the service).
   if (cmd === 'get_voice_profile' || cmd === 'get_voice_profile_status' || cmd === 'set_voice_profile') {
@@ -348,4 +371,12 @@ export async function getVoiceLeveler(): Promise<number> {
 
 export async function setVoiceLeveler(intensity: number): Promise<{ success: boolean; intensity: number; voice_leveler?: number }> {
   return await invokeBridge<{ success: boolean; intensity: number; voice_leveler?: number }>('set_voice_leveler', { intensity });
+}
+
+export async function getVoiceIsolationIntensity(): Promise<number> {
+  return await invokeBridge<number>('get_voice_isolation_intensity');
+}
+
+export async function setVoiceIsolationIntensity(intensity: number): Promise<{ success: boolean; voice_isolation_intensity: number }> {
+  return await invokeBridge<{ success: boolean; voice_isolation_intensity: number }>('set_voice_isolation_intensity', { intensity });
 }

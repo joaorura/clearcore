@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { invokeBridge } from '../bridge';
+import { invokeBridge, getVoiceIsolationIntensity, setVoiceIsolationIntensity } from '../bridge';
 import { normalizeVoiceProfileStatus, mergeVoiceProfileStatus, voiceProfileActivationState, voiceProfileStatusLabelKey, stripServiceVoiceProfileKeys, applySetVoiceProfileResult, voiceProfileErrorKey, hasServiceVoiceProfile } from '../VoiceProfileCard';
 import { syncCompletedStepsFromSamples } from '../voice/hooks/guidedSteps';
 import { ptBR } from '../i18n/locales/pt-BR';
@@ -551,6 +551,78 @@ describe('Daemon Active Profile & Gallery Synchronization', () => {
       const res = await invokeBridge<{ success: boolean }>('set_voice_isolation', { enabled: false });
       expect(res.success).toBe(true);
       expect(mockSetVoiceIsolation).toHaveBeenCalledWith(false);
+    } finally {
+      delete (globalThis as unknown as { window?: unknown }).window;
+    }
+  });
+
+  it('validates and merges voice_isolation_intensity in service profile and bridge', async () => {
+    // 1. SERVICE_VOICE_PROFILE_KEYS contains voice_isolation_intensity
+    expect(voiceProfileMerge.SERVICE_VOICE_PROFILE_KEYS).toContain('voice_isolation_intensity');
+
+    // 2. pickServiceVoiceProfileFields validation
+    expect(voiceProfileMerge.pickServiceVoiceProfileFields({ voice_isolation_intensity: 75 })).toEqual({ voice_isolation_intensity: 75 });
+    expect(voiceProfileMerge.pickServiceVoiceProfileFields({ voice_isolation_intensity: 0 })).toEqual({ voice_isolation_intensity: 0 });
+    expect(voiceProfileMerge.pickServiceVoiceProfileFields({ voice_isolation_intensity: 100 })).toEqual({ voice_isolation_intensity: 100 });
+    expect(voiceProfileMerge.pickServiceVoiceProfileFields({ voice_isolation_intensity: -5 })).toEqual({});
+    expect(voiceProfileMerge.pickServiceVoiceProfileFields({ voice_isolation_intensity: 105 })).toEqual({});
+    expect(voiceProfileMerge.pickServiceVoiceProfileFields({ voice_isolation_intensity: '75' })).toEqual({});
+
+    // 3. normalizeVoiceProfileStatus and mergeVoiceProfileStatus
+    const norm = normalizeVoiceProfileStatus({ voice_isolation_intensity: 50 });
+    expect(norm.voice_isolation_intensity).toBe(50);
+    const normInvalid = normalizeVoiceProfileStatus({ voice_isolation_intensity: -10 });
+    expect(normInvalid.voice_isolation_intensity).toBeUndefined();
+
+    const merged = mergeVoiceProfileStatus(
+      { is_enrolled: true, active_samples_count: 2 },
+      { profile: { is_enrolled: true, voice_isolation_intensity: 80 } },
+      2,
+    );
+    expect(merged.voice_isolation_intensity).toBe(80);
+
+    // 4. stripServiceVoiceProfileKeys strips voice_isolation_intensity
+    const stripped = stripServiceVoiceProfileKeys({ is_enrolled: true, active_samples_count: 1, voice_isolation_intensity: 80 });
+    expect('voice_isolation_intensity' in stripped).toBe(false);
+
+    // 5. applySetVoiceProfileResult forwards voice_isolation_intensity from response
+    const applied = applySetVoiceProfileResult(
+      { is_enrolled: false, active_samples_count: 0 },
+      { is_enrolled: true, active_samples_count: 1 },
+      { profile: { is_enrolled: true, voice_isolation_intensity: 65, is_voice_profile_active: true } },
+    );
+    expect(applied.voice_isolation_intensity).toBe(65);
+
+    // 6. Bridge functions getVoiceIsolationIntensity and setVoiceIsolationIntensity (fallback localStorage)
+    const initialIntensity = await getVoiceIsolationIntensity();
+    expect(initialIntensity).toBe(100);
+
+    const setRes = await setVoiceIsolationIntensity(85);
+    expect(setRes.success).toBe(true);
+    expect(setRes.voice_isolation_intensity).toBe(85);
+
+    const updatedIntensity = await getVoiceIsolationIntensity();
+    expect(updatedIntensity).toBe(85);
+
+    // 7. Bridge functions via clearcoreApi
+    const fakeWindow: Record<string, unknown> = {};
+    (globalThis as unknown as { window: unknown }).window = fakeWindow;
+    try {
+      const mockGetIntensity = vi.fn().mockResolvedValue(60);
+      const mockSetIntensity = vi.fn().mockResolvedValue({ success: true, voice_isolation_intensity: 60 });
+      fakeWindow.clearcoreApi = {
+        getVoiceIsolationIntensity: mockGetIntensity,
+        setVoiceIsolationIntensity: mockSetIntensity,
+      };
+
+      const got = await getVoiceIsolationIntensity();
+      expect(got).toBe(60);
+      expect(mockGetIntensity).toHaveBeenCalled();
+
+      const setResult = await setVoiceIsolationIntensity(60);
+      expect(setResult.success).toBe(true);
+      expect(setResult.voice_isolation_intensity).toBe(60);
+      expect(mockSetIntensity).toHaveBeenCalledWith(60);
     } finally {
       delete (globalThis as unknown as { window?: unknown }).window;
     }

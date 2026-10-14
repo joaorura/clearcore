@@ -81,7 +81,7 @@ impl InferenceBackend for ProfileBackend {
     }
 }
 
-/// Scales by `gain` (0.5 by default), so the stored WAV is provably the denoised signal and
+/// Scales by `gain` (0.8 by default), so the stored WAV is provably the denoised signal and
 /// not the raw one.
 struct GainDenoiser {
     delay: Duration,
@@ -132,7 +132,7 @@ impl Default for Setup {
     fn default() -> Self {
         Self {
             denoise_delay: Duration::ZERO,
-            denoise_gain: Some(0.5),
+            denoise_gain: Some(0.8),
             model_delay: Some(Duration::ZERO),
             legacy: None,
             reject_built: false,
@@ -906,7 +906,7 @@ fn no_raw_audio_is_written_anywhere() {
         stored
             .iter()
             .zip(&raw)
-            .all(|(s, r)| (s - r * 0.5).abs() <= tolerance)
+            .all(|(s, r)| (s - r * 0.8).abs() <= tolerance)
     );
     assert!(stored.iter().zip(&raw).any(|(s, r)| (s - r).abs() > 0.01));
 }

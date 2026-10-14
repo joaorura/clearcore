@@ -47,6 +47,57 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Bumps the 32-bit generation counter at byte offset 8 in `$XDG_RUNTIME_DIR/clearcore_state`
+/// (or `/tmp/clearcore_state`). This notifies the native PipeWire C helper that voice profile
+/// configuration has changed so it reloads the active profile.
+pub fn bump_linux_shared_state_generation() {
+    #[cfg(target_os = "linux")]
+    {
+        let path = linux_shared_state_path();
+        if let Err(err) = bump_linux_shared_state_generation_at(&path) {
+            log_warn!(
+                "DAEMON",
+                "Could not bump shared state generation at {}: {err}",
+                path.display()
+            );
+        }
+    }
+}
+
+#[must_use]
+pub fn linux_shared_state_path() -> PathBuf {
+    let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    runtime_dir.join("clearcore_state")
+}
+
+pub fn bump_linux_shared_state_generation_at(path: &Path) -> io::Result<u32> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    let len = file.metadata()?.len();
+    if len < 16 {
+        file.set_len(16)?;
+    }
+    file.seek(SeekFrom::Start(8))?;
+    let mut buf = [0u8; 4];
+    file.read_exact(&mut buf)?;
+    let current = u32::from_le_bytes(buf);
+    let next = current.wrapping_add(1);
+    file.seek(SeekFrom::Start(8))?;
+    file.write_all(&next.to_le_bytes())?;
+    file.flush()?;
+    Ok(next)
+}
+
 pub struct ServiceDaemon {
     supervisor: EngineSupervisor,
     shutdown: bool,
@@ -131,6 +182,7 @@ impl ServiceDaemon {
             backend: None,
             filter_intensity: 50,
             voice_isolation_enabled: true,
+            voice_isolation_intensity: 100,
             voice_leveler: supervisor.voice_leveler_intensity(),
         };
         Self {
@@ -200,7 +252,11 @@ impl ServiceDaemon {
                     profile.id
                 );
                 if self.settings.voice_isolation_enabled {
-                    if self.supervisor.set_voice_profile(Some(&profile)).is_err() {
+                    let profile_to_apply = match profile.with_intensity(self.settings.voice_isolation_intensity) {
+                        Ok(p) => p,
+                        Err(_) => profile.clone(),
+                    };
+                    if self.supervisor.set_voice_profile(Some(&profile_to_apply)).is_err() {
                         log_warn!(
                             "VOICE_PROFILE",
                             "Stored voice profile '{}' was rejected by the active backend",
@@ -333,6 +389,7 @@ impl ServiceDaemon {
     /// stored one (a previous backend may have rejected it) and refresh the diagnostic.
     fn reapply_stored_profile(&mut self) {
         if !self.settings.voice_isolation_enabled {
+            let _ = self.supervisor.set_voice_profile(None);
             return;
         }
         reapply_stored_profile(
@@ -340,6 +397,7 @@ impl ServiceDaemon {
             self.profile_store.as_ref(),
             &mut self.stored_voice_profile_id,
             &mut self.voice_profile_error,
+            self.settings.voice_isolation_intensity,
         );
     }
 
@@ -353,6 +411,8 @@ impl ServiceDaemon {
             self.profile_store.as_ref(),
             &mut self.stored_voice_profile_id,
             &mut self.voice_profile_error,
+            self.settings.voice_isolation_enabled,
+            self.settings.voice_isolation_intensity,
         )
     }
 
@@ -504,6 +564,7 @@ impl ServiceDaemon {
                         "dev_base_model_error": self.supervisor.dev_base_model_error(),
                         "filter_intensity": self.settings.filter_intensity,
                         "voice_isolation_enabled": self.settings.voice_isolation_enabled,
+                        "voice_isolation_intensity": self.settings.voice_isolation_intensity,
                         "voice_leveler": self.settings.voice_leveler,
                         "voice_leveler_intensity": self.settings.voice_leveler,
                     }),
@@ -532,6 +593,8 @@ impl ServiceDaemon {
                     self.profile_store.as_ref(),
                     &mut self.stored_voice_profile_id,
                     &mut self.voice_profile_error,
+                    self.settings.voice_isolation_enabled,
+                    self.settings.voice_isolation_intensity,
                 );
                 log_info!(
                     "DAEMON_IPC",
@@ -662,12 +725,14 @@ impl ServiceDaemon {
                     "ClearVoiceProfile received: resetting to neutral voice"
                 );
                 self.enrollment.bump_generation();
-                clear_voice_profile(
+                let resp = clear_voice_profile(
                     &mut self.supervisor,
                     self.profile_store.as_ref(),
                     &mut self.stored_voice_profile_id,
                     &mut self.voice_profile_error,
-                )
+                );
+                bump_linux_shared_state_generation();
+                resp
             }
             IpcCommand::ListVoiceSamples => {
                 let resp = self.list_voice_samples();
@@ -821,10 +886,34 @@ impl ServiceDaemon {
                 } else {
                     let _ = self.supervisor.set_voice_profile(None);
                 }
+                bump_linux_shared_state_generation();
                 IpcResponse::success(
                     "set-voice-isolation-resp",
                     json!({
                         "voice_isolation_enabled": enabled,
+                        "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
+                        "success": true,
+                        "persisted": persisted,
+                    }),
+                )
+            }
+            IpcCommand::SetVoiceIsolationIntensity { intensity } => {
+                let clamped = (*intensity).min(100);
+                log_info!("DAEMON_IPC", "SetVoiceIsolationIntensity received: {clamped}%");
+                self.settings.voice_isolation_intensity = clamped;
+                let persisted = settings::persist_settings(
+                    self.settings.clone(),
+                    self.settings_path.as_deref(),
+                );
+                if self.settings.voice_isolation_enabled {
+                    self.reapply_stored_profile();
+                }
+                bump_linux_shared_state_generation();
+                IpcResponse::success(
+                    "set-voice-isolation-intensity-resp",
+                    json!({
+                        "intensity": clamped,
+                        "voice_isolation_intensity": clamped,
                         "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
                         "success": true,
                         "persisted": persisted,
@@ -912,8 +1001,15 @@ impl ServiceDaemon {
             return Err(ApplyError::NoStore);
         };
         let previous = self.supervisor.active_voice_profile().cloned();
-        if self.supervisor.set_voice_profile(Some(profile)).is_err() {
+        let target_profile = match profile.with_intensity(self.settings.voice_isolation_intensity) {
+            Ok(p) => p,
+            Err(_) => profile.clone(),
+        };
+        if self.supervisor.set_voice_profile(Some(&target_profile)).is_err() {
             return Err(ApplyError::NotApplicable);
+        }
+        if !self.settings.voice_isolation_enabled {
+            let _ = self.supervisor.set_voice_profile(None);
         }
         if store.save_active(profile).is_err() {
             restore_previous(
@@ -925,6 +1021,7 @@ impl ServiceDaemon {
         }
         self.stored_voice_profile_id = Some(profile.id.clone());
         self.voice_profile_error = None;
+        bump_linux_shared_state_generation();
         Ok(())
     }
 
@@ -1047,9 +1144,21 @@ fn select_backend_and_reapply(
     store: Option<&ProfileStore>,
     stored_slot: &mut Option<String>,
     error: &mut Option<String>,
+    voice_isolation_enabled: bool,
+    voice_isolation_intensity: u8,
 ) -> BackendResolutionInfo {
     let info = supervisor.select_backend(request, model_dir, repo_root);
-    reapply_stored_profile(supervisor, store, stored_slot, error);
+    if voice_isolation_enabled {
+        reapply_stored_profile(
+            supervisor,
+            store,
+            stored_slot,
+            error,
+            voice_isolation_intensity,
+        );
+    } else {
+        let _ = supervisor.set_voice_profile(None);
+    }
     info
 }
 
@@ -1058,23 +1167,20 @@ fn reapply_stored_profile(
     store: Option<&ProfileStore>,
     stored_slot: &mut Option<String>,
     error: &mut Option<String>,
+    intensity: u8,
 ) {
     let Some(store) = store else {
         return;
     };
-    if let (Some(id), Some(active_id)) =
-        (stored_slot.as_deref(), supervisor.active_voice_profile_id())
-    {
-        if id == active_id {
-            *error = None;
-            return;
-        }
-    }
     match store.load_active() {
         Ok(Some(profile)) => {
             *stored_slot = Some(profile.id.clone());
+            let profile_to_apply = match profile.with_intensity(intensity) {
+                Ok(p) => p,
+                Err(_) => profile,
+            };
             *error = supervisor
-                .set_voice_profile(Some(&profile))
+                .set_voice_profile(Some(&profile_to_apply))
                 .err()
                 .map(|_| NOT_APPLIED_MESSAGE.to_owned());
         }
@@ -1176,5 +1282,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(tampered["dev_base_model"], "base");
         assert_eq!(tampered["dev_base_model_error"], "DEV_MODEL_HASH_MISMATCH");
+    }
+
+    #[test]
+    fn test_bump_linux_shared_state_generation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("clearcore_state");
+
+        // First bump on non-existent file creates 16-byte file with generation = 1
+        let gen1 = bump_linux_shared_state_generation_at(&path).expect("bump 1");
+        assert_eq!(gen1, 1);
+        let meta = std::fs::metadata(&path).expect("metadata");
+        assert_eq!(meta.len(), 16);
+
+        // Second bump increments to 2
+        let gen2 = bump_linux_shared_state_generation_at(&path).expect("bump 2");
+        assert_eq!(gen2, 2);
+
+        // Pre-fill generation with u32::MAX to test wrapping
+        {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut file = std::fs::OpenOptions::new().write(true).open(&path).expect("open");
+            file.seek(SeekFrom::Start(8)).expect("seek");
+            file.write_all(&u32::MAX.to_le_bytes()).expect("write");
+        }
+        let gen3 = bump_linux_shared_state_generation_at(&path).expect("bump 3");
+        assert_eq!(gen3, 0); // Wrapped around to 0
     }
 }

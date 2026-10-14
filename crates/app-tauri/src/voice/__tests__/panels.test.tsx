@@ -238,6 +238,49 @@ describe('ProfilePanel', () => {
     expect(mPaused).toContain('toggle-switch-wrapper');
     expect(mPaused).toContain('voiceProfile.isolationDisabled');
   });
+  it('renders troubleshooting alert banner when profile is active, but not when empty or paused', () => {
+    const active: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, is_voice_profile_active: true };
+    const mActive = html(<ProfilePanel {...profileProps({ profileStatus: active, onResetEnrollment: noop })} />);
+    expect(mActive).toContain('profile-troubleshoot-banner');
+    expect(mActive).toContain('voiceProfile.troubleshootTitle');
+    expect(mActive).toContain('voiceProfile.troubleshootDesc');
+
+    const empty: VoiceProfileStatus = { is_enrolled: false, active_samples_count: 0 };
+    const mEmpty = html(<ProfilePanel {...profileProps({ profileStatus: empty })} />);
+    expect(mEmpty).not.toContain('profile-troubleshoot-banner');
+
+    const paused: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, stored_voice_profile_id: 'p1', is_voice_profile_active: false };
+    const mPaused = html(<ProfilePanel {...profileProps({ profileStatus: paused })} />);
+    expect(mPaused).not.toContain('profile-troubleshoot-banner');
+  });
+  it('renders voice isolation intensity controls when profile exists, dimmed/disabled when paused or busy', () => {
+    const active: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, is_voice_profile_active: true, voice_isolation_intensity: 75 };
+    const mActive = html(<ProfilePanel {...profileProps({ profileStatus: active })} />);
+    expect(mActive).toContain('voice-isolation-intensity');
+    expect(mActive).toContain('voiceProfile.intensityTitle');
+    expect(mActive).toContain('voiceProfile.intensityDesc');
+    expect(mActive).toContain('voice-isolation-intensity-slider');
+    expect(mActive).toContain('isolation-preset-btn-50');
+    expect(mActive).toContain('isolation-preset-btn-75');
+    expect(mActive).toContain('isolation-preset-btn-100');
+    const isInputDisabled = (markup: string) =>
+      /<input[^>]*disabled=""[^>]*data-testid="voice-isolation-intensity-slider"|<input[^>]*data-testid="voice-isolation-intensity-slider"[^>]*disabled=""/.test(markup);
+
+    expect(isInputDisabled(mActive)).toBe(false);
+
+    const paused: VoiceProfileStatus = { is_enrolled: true, active_samples_count: 2, stored_voice_profile_id: 'p1', is_voice_profile_active: false };
+    const mPaused = html(<ProfilePanel {...profileProps({ profileStatus: paused })} />);
+    expect(mPaused).toContain('voice-isolation-intensity');
+    expect(isInputDisabled(mPaused)).toBe(true);
+    expect(mPaused).toMatch(/<button[^>]*disabled=""[^>]*data-testid="isolation-preset-btn-75"|<button[^>]*data-testid="isolation-preset-btn-75"[^>]*disabled=""/);
+
+    const mBusy = html(<ProfilePanel {...profileProps({ profileStatus: active, busy: true })} />);
+    expect(isInputDisabled(mBusy)).toBe(true);
+
+    const empty: VoiceProfileStatus = { is_enrolled: false, active_samples_count: 0 };
+    const mEmpty = html(<ProfilePanel {...profileProps({ profileStatus: empty })} />);
+    expect(mEmpty).not.toContain('voice-isolation-intensity');
+  });
   it('shows building indicator on button and disables it when isBuilding is true', () => {
     const m = html(<ProfilePanel {...profileProps({ isBuilding: true })} />);
     expect(m).toMatch(/<button[^>]*disabled=""[^>]*>⏳ voiceProfile.buildingProfile/);

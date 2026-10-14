@@ -144,6 +144,21 @@ fn set_voice_isolation_roundtrips_through_json() {
 }
 
 #[test]
+fn set_voice_isolation_intensity_roundtrips_through_json() {
+    let cmd = IpcCommand::SetVoiceIsolationIntensity { intensity: 75 };
+    let req = IpcRequest::new(cmd.clone(), json!({}));
+    let wire = req.to_json().expect("serialize");
+    let parsed = IpcRequest::from_json(&wire).expect("deserialize");
+    assert_eq!(parsed.command, cmd);
+
+    let wire_value: serde_json::Value = serde_json::from_str(&wire).expect("json");
+    assert_eq!(
+        wire_value["command"],
+        json!({"SetVoiceIsolationIntensity": {"intensity": 75}})
+    );
+}
+
+#[test]
 fn existing_commands_keep_their_wire_format() {
     assert_eq!(
         serde_json::to_value(IpcCommand::GetStatus).expect("serialize"),

@@ -101,6 +101,30 @@ function readPreset(statePath) {
   }
 }
 
+// Reads the current 32-bit generation at OFFSET_GENERATION (8), increments it by 1
+// (wrapping 32-bit: (current + 1) >>> 0), updates generation via updateStateFile,
+// and returns the new generation.
+function bumpGeneration(statePath) {
+  let current = 0;
+  try {
+    const fd = openStateFile(statePath, fs.constants.O_RDONLY);
+    try {
+      const buf = Buffer.alloc(STATE_SIZE, 0);
+      const read = fs.readSync(fd, buf, 0, STATE_SIZE, 0);
+      if (read >= STATE_SIZE) {
+        current = buf.readUInt32LE(OFFSET_GENERATION);
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    current = 0;
+  }
+  const next = (current + 1) >>> 0;
+  updateStateFile(statePath, { generation: next });
+  return next;
+}
+
 // Updates the file IN PLACE, writing only the 4-byte fields named in `updates`. The helper (mode,
 // via `pipewire_helper --mode`) may write other fields concurrently, so a read-modify-write of all
 // 16 bytes could put a stale `mode` back (for instance un-muting a Mute). It also never truncates:
@@ -134,4 +158,5 @@ module.exports = {
   encodeState,
   readPreset,
   updateStateFile,
+  bumpGeneration,
 };

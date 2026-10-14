@@ -208,6 +208,14 @@ export interface Translations {
     isolationToggling: string;
     isolationEnabledFeedback: string;
     isolationDisabledFeedback: string;
+    troubleshootTitle: string;
+    troubleshootDesc: string;
+    intensityTitle: string;
+    intensityDesc: string;
+    intensityMild: string;
+    intensityStandard: string;
+    intensityMaximum: string;
+    intensityFeedback: string;
     statusTitle: string;
     statusActive: string;
     appliedInServiceNote: string;
@@ -362,6 +370,7 @@ export interface Translations {
         ENROLL_CLIPPING: string;
         ENROLL_TOO_QUIET: string;
         ENROLL_TOO_LITTLE_SPEECH: string;
+        ENROLL_NOISY_ENVIRONMENT: string;
         ENROLL_MODEL_NOT_CONFIGURED: string;
         ENROLL_BUDGET_EXCEEDED: string;
         ENROLL_INVALID_AUDIO: string;

@@ -126,6 +126,11 @@ pub enum IpcCommand {
     SetVoiceIsolation {
         enabled: bool,
     },
+    /// Sets the voice isolation intensity (0–100).
+    #[serde(alias = "set_voice_isolation_intensity")]
+    SetVoiceIsolationIntensity {
+        intensity: u8,
+    },
     /// Sets the voice auto-leveler intensity (0–100). 0 is disabled/bypass, 50 is balanced (-16 LUFS), 100 is firm/max (-12 LUFS).
     #[serde(
         alias = "set_voice_leveler",
@@ -161,6 +166,11 @@ impl IpcCommand {
     #[must_use]
     pub const fn get_preset() -> Self {
         Self::GetPreset
+    }
+
+    #[must_use]
+    pub const fn set_voice_isolation_intensity(intensity: u8) -> Self {
+        Self::SetVoiceIsolationIntensity { intensity }
     }
 
     #[must_use]
@@ -229,6 +239,10 @@ impl std::fmt::Debug for IpcCommand {
             Self::SetVoiceIsolation { enabled } => f
                 .debug_struct("SetVoiceIsolation")
                 .field("enabled", enabled)
+                .finish(),
+            Self::SetVoiceIsolationIntensity { intensity } => f
+                .debug_struct("SetVoiceIsolationIntensity")
+                .field("intensity", intensity)
                 .finish(),
             Self::SetVoiceLeveler { intensity } => f
                 .debug_struct("SetVoiceLeveler")

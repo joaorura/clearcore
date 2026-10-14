@@ -10,6 +10,7 @@ export interface EngineStatus {
   filter_intensity?: number;
   voice_leveler?: number;
   voice_leveler_intensity?: number;
+  voice_isolation_intensity?: number;
 }
 
 export interface VirtualMicStatus {
@@ -92,5 +93,7 @@ export interface VoiceProfileStatus {
   dev_base_model_error?: string | null;
   /** Service-reported: whether voice isolation is enabled in settings. */
   voice_isolation_enabled?: boolean;
+  /** Service-reported (GetStatus): voice isolation intensity level (0-100). */
+  voice_isolation_intensity?: number;
 }
 

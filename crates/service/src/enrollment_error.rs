@@ -15,6 +15,7 @@ pub enum EnrollError {
     Failed,
     Busy,
     BackendUnsupported,
+    NoisyEnvironment,
 }
 
 impl EnrollError {
@@ -32,6 +33,7 @@ impl EnrollError {
             Self::Failed => codes::ENROLL_FAILED,
             Self::Busy => codes::ENROLL_BUSY,
             Self::BackendUnsupported => codes::ENROLL_BACKEND_UNSUPPORTED,
+            Self::NoisyEnvironment => codes::ENROLL_NOISY_ENVIRONMENT,
         }
     }
 }
@@ -56,6 +58,7 @@ mod tests {
             Failed,
             Busy,
             BackendUnsupported,
+            NoisyEnvironment,
         ];
         let mut codes: Vec<&str> = all.iter().map(EnrollError::code).collect();
         assert!(codes.iter().all(|c| c.starts_with("ENROLL_")));

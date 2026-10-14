@@ -1,8 +1,16 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { VoiceProfileStatus } from '../../types';
 import type { EnrollmentLabels } from '../enrollmentTypes';
 import { hasServiceVoiceProfile, voiceProfileErrorKey, voiceProfileUnsupported, type Translate } from '../hooks/voiceProfileLogic';
 import { profileStatusLabel } from './profileStatusLabel';
 import { JobFeedbackBlock, type JobFeedbackView } from './shared';
+import { getVoiceIsolationIntensity, setVoiceIsolationIntensity } from '../../bridge';
+
+export const ISOLATION_PRESETS = [
+  { value: 50, key: 'voiceProfile.intensityMild' as const },
+  { value: 75, key: 'voiceProfile.intensityStandard' as const },
+  { value: 100, key: 'voiceProfile.intensityMaximum' as const },
+];
 
 export interface ProfilePanelProps {
   t: Translate;
@@ -39,6 +47,74 @@ export function ProfilePanel(p: ProfilePanelProps) {
   // Only an explicit `false` from the service; an absent field keeps today's behavior.
   const unsupported = voiceProfileUnsupported(profileStatus);
   const unsupportedText = t('voiceProfile.profileUnsupportedNotice');
+
+  const [intensity, setIntensity] = useState<number>(() => {
+    if (typeof profileStatus?.voice_isolation_intensity === 'number') {
+      return profileStatus.voice_isolation_intensity;
+    }
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('clearcore_voice_isolation_intensity') : null;
+    return saved ? Number(saved) : 100;
+  });
+
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const isControlDisabled = !status.active || p.busy || Boolean(p.isBuilding) || unsupported;
+
+  useEffect(() => {
+    if (typeof profileStatus?.voice_isolation_intensity === 'number') {
+      setIntensity(profileStatus.voice_isolation_intensity);
+    }
+  }, [profileStatus?.voice_isolation_intensity]);
+
+  useEffect(() => {
+    let isMounted = true;
+    getVoiceIsolationIntensity().then((val) => {
+      if (isMounted && typeof val === 'number') {
+        setIntensity(val);
+      }
+    }).catch(() => {});
+    return () => {
+      isMounted = false;
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    };
+  }, []);
+
+  const sendIntensityUpdate = useCallback(async (newVal: number) => {
+    try {
+      await setVoiceIsolationIntensity(newVal);
+      setFeedback(t('voiceProfile.intensityFeedback', { intensity: newVal }));
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = setTimeout(() => setFeedback(null), 2500);
+    } catch {
+      // ignore
+    }
+  }, [t]);
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value);
+    setIntensity(val);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      sendIntensityUpdate(val);
+    }, 200);
+  };
+
+  const handlePresetClick = (val: number) => {
+    if (isControlDisabled) return;
+    setIntensity(val);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    sendIntensityUpdate(val);
+  };
+
+  const getIntensityLabel = (val: number) => {
+    if (val === 50) return t('voiceProfile.intensityMild');
+    if (val === 75) return t('voiceProfile.intensityStandard');
+    if (val === 100) return t('voiceProfile.intensityMaximum');
+    return `${val}%`;
+  };
   return (
     <div>
       {unsupported && (
@@ -92,6 +168,43 @@ export function ProfilePanel(p: ProfilePanelProps) {
               className="action-btn"
               onClick={p.onResetEnrollment}
               style={{ fontSize: '0.8rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+              title={t('voiceProfile.reEnrollHint')}
+            >
+              {t('voiceProfile.reEnrollBtn')}
+            </button>
+          )}
+        </div>
+      )}
+      {hasProfile && status.active && (
+        <div
+          role="alert"
+          className="profile-troubleshoot-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 12,
+            padding: '12px 16px',
+            background: 'rgba(234, 179, 8, 0.08)',
+            border: '1px solid rgba(234, 179, 8, 0.3)',
+            borderRadius: 8,
+            marginBottom: 16,
+            color: '#eab308',
+          }}
+        >
+          <span style={{ fontSize: '1.3rem', lineHeight: '1.2' }}>💡</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#fde047' }}>
+              {t('voiceProfile.troubleshootTitle')}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 3, lineHeight: '1.4' }}>
+              {t('voiceProfile.troubleshootDesc')}
+            </div>
+          </div>
+          {p.onResetEnrollment && (
+            <button
+              className="action-btn"
+              onClick={p.onResetEnrollment}
+              style={{ fontSize: '0.75rem', padding: '4px 10px', whiteSpace: 'nowrap' }}
               title={t('voiceProfile.reEnrollHint')}
             >
               {t('voiceProfile.reEnrollBtn')}
@@ -247,6 +360,139 @@ export function ProfilePanel(p: ProfilePanelProps) {
           </div>
         </div>
       </div>
+
+      {hasProfile && (
+        <div
+          className="voice-isolation-intensity-block"
+          style={{
+            marginTop: 16,
+            padding: '16px',
+            background: 'var(--bg-secondary)',
+            borderRadius: 8,
+            border: '1px solid var(--border-color)',
+            opacity: isControlDisabled ? 0.6 : 1,
+          }}
+          data-testid="voice-isolation-intensity"
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 8,
+              flexWrap: 'wrap',
+              gap: 8,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '1.1rem' }}>🎚️</span>
+              <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-main)' }}>
+                {t('voiceProfile.intensityTitle')}
+              </span>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'var(--bg-card)',
+                padding: '3px 10px',
+                borderRadius: 6,
+                border: '1px solid var(--border-color)',
+              }}
+            >
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Nível:</span>
+              <span
+                style={{
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  color: intensity >= 75 ? '#38bdf8' : intensity >= 50 ? '#4ade80' : '#facc15',
+                }}
+                data-testid="voice-isolation-intensity-value"
+              >
+                {intensity}%
+              </span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                ({getIntensityLabel(intensity)})
+              </span>
+            </div>
+          </div>
+
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+            {t('voiceProfile.intensityDesc')}
+          </p>
+
+          {/* Main Slider Control */}
+          <div style={{ position: 'relative', padding: '0 4px', marginBottom: 12 }}>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={intensity}
+              disabled={isControlDisabled}
+              onChange={handleSliderChange}
+              aria-label={t('voiceProfile.intensityTitle')}
+              data-testid="voice-isolation-intensity-slider"
+              style={{
+                width: '100%',
+                height: 6,
+                borderRadius: 3,
+                outline: 'none',
+                background: 'linear-gradient(to right, #facc15 0%, #4ade80 50%, #38bdf8 75%, #818cf8 100%)',
+                cursor: isControlDisabled ? 'not-allowed' : 'pointer',
+                opacity: isControlDisabled ? 0.5 : 1,
+              }}
+            />
+          </div>
+
+          {/* Preset Buttons */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 6,
+            }}
+          >
+            {ISOLATION_PRESETS.map((preset) => {
+              const isSelected = intensity === preset.value;
+              return (
+                <button
+                  key={preset.value}
+                  type="button"
+                  disabled={isControlDisabled}
+                  onClick={() => handlePresetClick(preset.value)}
+                  className="action-btn"
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '5px 4px',
+                    textAlign: 'center',
+                    background: isSelected ? 'var(--bg-card)' : 'transparent',
+                    borderColor: isSelected ? '#3b82f6' : 'var(--border-color)',
+                    color: isSelected ? '#93c5fd' : 'var(--text-muted)',
+                    fontWeight: isSelected ? 600 : 400,
+                    borderRadius: 4,
+                    cursor: isControlDisabled ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  data-testid={`isolation-preset-btn-${preset.value}`}
+                >
+                  {t(preset.key)}
+                </button>
+              );
+            })}
+          </div>
+
+          {feedback && (
+            <div
+              className="feedback-banner success-banner"
+              style={{ marginTop: 10, fontSize: '0.8rem', padding: '6px 12px' }}
+            >
+              ✓ {feedback}
+            </div>
+          )}
+        </div>
+      )}
 
       {p.stale && (
         <div role="status" style={{ color: '#fbbf24', fontSize: 13, marginTop: 8 }}>

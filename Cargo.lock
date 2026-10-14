@@ -1020,6 +1020,7 @@ version = "0.1.0"
 dependencies = [
  "realtime-noise-contracts",
  "realtime-noise-model",
+ "realtime-noise-service",
  "studio-dsp",
  "tempfile",
 ]

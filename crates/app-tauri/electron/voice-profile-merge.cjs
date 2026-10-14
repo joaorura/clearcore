@@ -18,6 +18,7 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   // GetStatus: fixed DEV_MODEL_* code or null (free text, e.g. a path, is dropped).
   'dev_base_model_error',
   'voice_isolation_enabled',
+  'voice_isolation_intensity',
 ];
 
 const DEV_BASE_MODELS = new Set(['pdfnet3-dev', 'base']);
@@ -39,6 +40,7 @@ function pickServiceVoiceProfileFields(serviceStatus) {
   for (const key of SERVICE_VOICE_PROFILE_KEYS) {
     if (!(key in serviceStatus) || serviceStatus[key] === undefined) continue;
     if (BOOLEAN_SERVICE_KEYS.has(key) && typeof serviceStatus[key] !== 'boolean') continue;
+    if (key === 'voice_isolation_intensity' && !(typeof serviceStatus[key] === 'number' && serviceStatus[key] >= 0 && serviceStatus[key] <= 100)) continue;
     if (key === 'dev_base_model' && !DEV_BASE_MODELS.has(serviceStatus[key])) continue;
     if (key === 'dev_base_model_error' && serviceStatus[key] !== null
       && !(typeof serviceStatus[key] === 'string' && DEV_BASE_MODEL_ERROR_RE.test(serviceStatus[key]))) continue;
