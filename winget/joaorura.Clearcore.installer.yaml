@@ -12,6 +12,6 @@ InstallModes:
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-Setup.exe
-    InstallerSha256: 4385cd27f5a86eb8c852b507532e0620cdcb8b1ed90271a8f9f0e83e0c7280ce
+    InstallerSha256: 3efebc76f03ff91ec1f46ae720128928163dd2e5340561254aeb565f6126fc09
 ManifestType: installer
 ManifestVersion: 1.6.0

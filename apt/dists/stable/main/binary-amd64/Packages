@@ -4,10 +4,10 @@ Architecture: amd64
 Maintainer: João Messias Lima Pereira <jmessiaslp856@gmail.com>
 Depends: pipewire (>= 0.3.0)
 Filename: pool/main/Clearcore-0.1.0-beta.1_amd64.deb
-Size: 319817986
-MD5sum: e17687fff3e8d82c3030a3667c51077f
-SHA1: 062939bb3fff98975d14ea2a6b0f6f7c88b3bc6d
-SHA256: 69c222ee52a1df82c0fa6ffab6942297254b938dfb0c4ad48500fd0c45a378af
+Size: 319843122
+MD5sum: d8d447e63c08bf25f99cde0ea3c8577c
+SHA1: 30c6d5357d4631d3e9602baeb6494f00fa59e937
+SHA256: f3daf2cfc1ca06931f732afde3ba1483b1182a02dcf115087841619b15e00b9a
 Section: sound
 Priority: optional
 Homepage: https://github.com/joaorura/clearcore
