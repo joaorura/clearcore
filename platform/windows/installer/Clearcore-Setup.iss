@@ -2,7 +2,7 @@
 ; Clearcore Desktop Application - Inno Setup Script
 ; ==============================================================================
 #define MyAppName "Clearcore"
-#define MyAppVersion "0.1.0-beta.1"
+#define MyAppVersion "0.1.0-beta.2"
 #define MyAppPublisher "Clearcore Team"
 #define MyAppExeName "Clearcore.exe"
 

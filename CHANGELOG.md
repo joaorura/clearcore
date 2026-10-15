@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual microphone powered by DeepFilterNet3 ONNX, ONNX Runtime (`ort` v2) neural streaming, Target Speaker Extraction (DFNet-TSE-MHCA), PipeWire C bridge (Linux), WaveRT PortCls kernel driver (Windows), CoreAudio HAL (macOS), and a resilient Rust supervisor daemon.
 
+## [0.1.0-beta.2] - 2026-10-15
+
+### Fixed
+- Voice profile enrollment failed on every recording: the noisy-environment gate estimated the noise as the raw-minus-denoised difference, which counted the voice itself removed by the denoiser as noise. The gate now estimates the SNR on the raw signal (speech level against the noise floor of the pauses, with digital silence treated as a quiet environment) and logs `snr_db`.
+- The `ENROLL_NOISY_ENVIRONMENT` code was not recognized by the Electron layer and was shown as "O serviço não conseguiu processar o áudio". It now shows the correct noisy-environment message.
+
 ## [0.1.0-beta.1] - 2026-10-13
 
 ### Added
@@ -33,4 +39,5 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 - Complete architecture migration to ONNX Runtime (`ort` v2), providing hardware-accelerated AVX2 / AVX-512 VNNI execution and sub-millisecond per-frame latency (< 0.28 ms).
 - Licensing: Released under PolyForm Noncommercial License 1.0.0 (source code) and CC BY-NC 4.0 (models and documentation).
 
+[0.1.0-beta.2]: https://github.com/joaorura/clearcore/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/joaorura/clearcore/releases/tag/v0.1.0-beta.1

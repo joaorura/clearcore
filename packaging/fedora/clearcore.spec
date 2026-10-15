@@ -1,4 +1,4 @@
-%global tag_version v0.1.0-beta.1
+%global tag_version v0.1.0-beta.2
 
 Name:           clearcore
 Version:        0.1.0_beta.1
