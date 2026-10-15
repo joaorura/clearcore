@@ -58,6 +58,7 @@ assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: '
 // The active isolation model cannot apply a profile: its own code, on the closed list.
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ENROLL_BACKEND_UNSUPPORTED' })), 'ENROLL_BACKEND_UNSUPPORTED');
 assert.strictEqual(m.mapJob({ job_id: 'profile-job-2', state: 'failed', stage: 'apply', error_code: 'ENROLL_BACKEND_UNSUPPORTED' }).errorCode, 'ENROLL_BACKEND_UNSUPPORTED');
+assert.strictEqual(m.mapJob({ job_id: 'sample-job-3', state: 'failed', stage: 'apply', error_code: 'ENROLL_NOISY_ENVIRONMENT' }).errorCode, 'ENROLL_NOISY_ENVIRONMENT');
 assert.strictEqual(m.classifyEnrollError(Object.assign(new Error('x'), { code: 'ETIMEDOUT' })), 'SERVICE_UNAVAILABLE');
 assert.strictEqual(m.classifyEnrollError(new Error('Daemon IPC timeout')), 'SERVICE_UNAVAILABLE');
 assert.strictEqual(m.classifyEnrollError(new Error('boom')), 'ENROLL_FAILED');

@@ -114,6 +114,61 @@ pub fn active_rms_dbfs(samples: &[f32], sample_rate: u32) -> f32 {
     (10.0 * (sum / count as f64 + 1e-12).log10()) as f32
 }
 
+const MIN_SNR_FRAMES: usize = 10;
+const DIGITAL_SILENCE_DBFS: f32 = -90.0;
+const NOISE_FLOOR_PERCENTILE_DIVISOR: usize = 10; // 10th percentile
+
+/// Rough SNR estimate on a RAW (not denoised) take: speech level minus noise floor, in dB.
+///
+/// Per 20 ms frame dBFS (mean-square); speech level is the power mean of the active frames (same
+/// rule as [`active_rms_dbfs`]); the noise floor is the 10th percentile of the frame dBFS, ignoring
+/// frames of digital silence (< -90 dBFS). If those are >= 10% of all frames the environment is
+/// effectively silent and the floor is taken as -90 dBFS (gated mics deliver exact zeros).
+/// Returns `None` with fewer than 10 frames or when nothing is active.
+#[must_use]
+pub fn estimate_snr_db(samples: &[f32], sample_rate: u32) -> Option<f32> {
+    let a = analyze(samples, sample_rate);
+    if a.active.is_empty() {
+        return None;
+    }
+    let frame_db: Vec<f32> = samples
+        .chunks_exact(a.frame)
+        .map(|c| {
+            let ms = c.iter().map(|v| f64::from(*v) * f64::from(*v)).sum::<f64>() / a.frame as f64;
+            (10.0 * (ms + 1e-12).log10()) as f32
+        })
+        .collect();
+    let mut floor_candidates: Vec<f32> = frame_db
+        .iter()
+        .copied()
+        .filter(|d| *d >= DIGITAL_SILENCE_DBFS)
+        .collect();
+    if frame_db.len() < MIN_SNR_FRAMES || floor_candidates.is_empty() {
+        return None;
+    }
+    // Gated mics / noise gates deliver exact zeros in the pauses: with at least 10% of the frames
+    // in digital silence the environment is effectively silent, so the floor is the digital floor.
+    let silent_frames = frame_db.len() - floor_candidates.len();
+    let silent_environment = silent_frames * NOISE_FLOOR_PERCENTILE_DIVISOR >= frame_db.len();
+    let (mut power, mut count) = (0.0_f64, 0_usize);
+    for (d, act) in frame_db.iter().zip(&a.active) {
+        if *act {
+            power += 10f64.powf(f64::from(*d) / 10.0);
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return None;
+    }
+    let speech_db = (10.0 * (power / count as f64 + 1e-12).log10()) as f32;
+    if silent_environment {
+        return Some(speech_db - DIGITAL_SILENCE_DBFS);
+    }
+    floor_candidates.sort_by(f32::total_cmp);
+    let idx = (floor_candidates.len() - 1) / NOISE_FLOOR_PERCENTILE_DIVISOR;
+    Some(speech_db - floor_candidates[idx])
+}
+
 /// Applies gain with clamping to maximum absolute value.
 ///
 /// Multiply by `10^(gain_db/20)` with `gain_db` clamped to `±max_abs_db` (a negative
@@ -293,5 +348,80 @@ mod tests {
         x[20_000] = f32::NAN;
         let _ = trim_speech(&x, 48_000);
         let _ = active_rms_dbfs(&x, 48_000);
+    }
+
+    fn lcg_noise(len: usize, rms_dbfs: f32, seed: u32) -> Vec<f32> {
+        let mut state = seed;
+        let amp = 10f32.powf(rms_dbfs / 20.0) * 3f32.sqrt();
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((state >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0) * amp
+            })
+            .collect()
+    }
+
+    /// 4 s of tone bursts (0.3 s on, 0.2 s off) at about -20 dBFS RMS during bursts.
+    fn burst_speech() -> Vec<f32> {
+        let amp = 10f32.powf(-20.0 / 20.0) * 2f32.sqrt();
+        (0..192_000)
+            .map(|i| {
+                let t = i as f32 / 48_000.0;
+                let on = (t / 0.5).fract() < 0.6;
+                if on {
+                    amp * (2.0 * std::f32::consts::PI * 220.0 * t).sin()
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+
+    fn mix(a: &[f32], b: &[f32]) -> Vec<f32> {
+        a.iter().zip(b).map(|(x, y)| x + y).collect()
+    }
+
+    #[test]
+    fn snr_is_high_for_speech_with_quiet_pauses() {
+        let x = mix(&burst_speech(), &lcg_noise(192_000, -60.0, 1));
+        let snr = estimate_snr_db(&x, 48_000).unwrap();
+        assert!(snr > 20.0, "snr {snr}");
+    }
+
+    #[test]
+    fn snr_is_low_for_speech_over_constant_white_noise() {
+        let x = mix(&burst_speech(), &lcg_noise(192_000, -21.0, 2));
+        let snr = estimate_snr_db(&x, 48_000).unwrap();
+        assert!(snr < 5.0, "snr {snr}");
+    }
+
+    #[test]
+    fn continuous_syllabic_speech_without_pauses_is_not_noisy() {
+        let amp = 10f32.powf(-20.0 / 20.0) * 2f32.sqrt();
+        let speech: Vec<f32> = (0..192_000)
+            .map(|i| {
+                let t = i as f32 / 48_000.0;
+                let env = 0.55 + 0.45 * (2.0 * std::f32::consts::PI * 4.0 * t).sin();
+                amp * env * (2.0 * std::f32::consts::PI * 220.0 * t).sin()
+            })
+            .collect();
+        let x = mix(&speech, &lcg_noise(192_000, -60.0, 3));
+        let snr = estimate_snr_db(&x, 48_000).unwrap();
+        assert!(snr >= 5.0, "snr {snr}");
+    }
+
+    #[test]
+    fn exact_digital_silence_in_pauses_means_a_silent_environment() {
+        // Gated mics / PipeWire noise gates deliver exact zeros between phrases.
+        let x = burst_speech();
+        let snr = estimate_snr_db(&x, 48_000).unwrap();
+        assert!(snr > 20.0, "snr {snr}");
+    }
+
+    #[test]
+    fn snr_is_none_with_too_few_frames_or_digital_silence() {
+        assert!(estimate_snr_db(&tone(4_800, 0.1), 48_000).is_none());
+        assert!(estimate_snr_db(&vec![0.0; 96_000], 48_000).is_none());
+        assert!(estimate_snr_db(&tone(96_000, 0.1), 0).is_none());
     }
 }

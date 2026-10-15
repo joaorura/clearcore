@@ -1152,6 +1152,13 @@ fn bursts(seconds: f32, peak: f32, mut source: impl FnMut(usize) -> f32) -> Vec<
     for v in &mut out {
         *v *= peak / max;
     }
+    // A faint (about -60 dBFS) room-noise floor in the pauses, as in any real take: the SNR gate
+    // ignores digital silence, so perfectly gated synthetic pauses would read as "no noise floor".
+    let mut seed = 0x9e37_79b9_u32;
+    for v in &mut out {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        *v += ((seed >> 8) as f32 / 8_388_608.0 - 1.0) * 0.001;
+    }
     out
 }
 

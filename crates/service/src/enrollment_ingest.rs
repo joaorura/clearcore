@@ -1,7 +1,7 @@
 //! Ingestion of enrollment samples: validate the raw take, run it through the base denoiser,
 //! measure the clean speech and encode the full clean take as the stored WAV.
 
-use realtime_noise_model::speech_trim::{active_rms_dbfs, trim_speech};
+use realtime_noise_model::speech_trim::{active_rms_dbfs, estimate_snr_db, trim_speech};
 use realtime_noise_model::wav::{decode_wav_pcm16_mono, encode_wav_pcm16_mono};
 
 use crate::enrollment_error::EnrollError;
@@ -13,6 +13,9 @@ pub trait Denoiser: Send {
 
 pub const MIN_SPEECH_RMS_DBFS: f32 = -40.0;
 pub const MAX_PEAK: f32 = 0.99;
+/// Minimum speech-over-background SNR (dB), estimated on the RAW take, below which the
+/// environment is considered too noisy to enroll.
+const MIN_SNR_DB: f32 = 5.0;
 const SAMPLE_RATE: u32 = 48_000;
 
 #[derive(Debug, Clone)]
@@ -82,18 +85,14 @@ fn ingest_inner(denoiser: &mut dyn Denoiser, pcm48: &[f32]) -> Result<IngestResu
     if trimmed.speech_seconds <= 0.0 {
         return Err(EnrollError::TooLittleSpeech);
     }
-    let speech_rms_linear = 10.0f32.powf(rms_dbfs / 20.0);
-    let noise_sum: f64 = pcm48
-        .iter()
-        .zip(&clean.0)
-        .map(|(&raw, &cln)| {
-            let diff = f64::from(raw) - f64::from(cln);
-            diff * diff
-        })
-        .sum();
-    let noise_rms_linear = (noise_sum / (pcm48.len() as f64)).sqrt() as f32;
-    let snr_db = 20.0 * (speech_rms_linear / (noise_rms_linear + 1e-6)).log10();
-    if snr_db < 5.0 {
+    // Background noise is judged on the RAW take (what the user's room sounds like), never on
+    // what the denoiser removes: that would count the voice itself as noise.
+    let snr_db = estimate_snr_db(pcm48, SAMPLE_RATE);
+    match snr_db {
+        Some(snr) => eprintln!("ingest_sample snr_db={snr:.1} min_snr_db={MIN_SNR_DB:.1}"),
+        None => eprintln!("ingest_sample snr_db=unavailable"),
+    }
+    if snr_db.is_some_and(|snr| snr < MIN_SNR_DB) {
         return Err(EnrollError::NoisyEnvironment);
     }
     Ok(IngestResult {
@@ -177,13 +176,27 @@ mod tests {
         }
     }
 
+    /// Deterministic uniform noise with the given RMS in dBFS.
+    fn noise(len: usize, rms_dbfs: f32, seed: u32) -> Vec<f32> {
+        let mut state = seed;
+        let amp = 10f32.powf(rms_dbfs / 20.0) * 3f32.sqrt();
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((state >> 8) as f32 / 16_777_216.0 * 2.0 - 1.0) * amp
+            })
+            .collect()
+    }
+
+    /// Syllable-like bursts over a light (-60 dBFS) room-noise floor, like a quiet room.
     fn bursts(secs: f32, amp: f32) -> Vec<f32> {
         let n = (secs * 48_000.0) as usize;
+        let floor = noise(n, -60.0, 7);
         (0..n)
             .map(|i| {
                 let t = i as f32 / 48_000.0;
                 let env = if (t * 4.0).fract() < 0.7 { 1.0 } else { 0.0 };
-                amp * env * (2.0 * std::f32::consts::PI * 220.0 * t).sin()
+                amp * env * (2.0 * std::f32::consts::PI * 220.0 * t).sin() + floor[i]
             })
             .collect()
     }
@@ -264,17 +277,25 @@ mod tests {
     }
 
     #[test]
-    fn noisy_environment_is_rejected() {
-        let mut pcm = bursts(3.0, 0.4);
-        let r = ingest_sample(&mut Gain(0.3), &mut pcm);
+    fn strong_background_noise_is_rejected() {
+        // Speech at about the same level as constant white noise: SNR well under 5 dB.
+        let speech = bursts(3.0, 0.2);
+        let mut pcm: Vec<f32> = speech
+            .iter()
+            .zip(noise(speech.len(), -21.0, 11))
+            .map(|(s, n)| s + n)
+            .collect();
+        let r = ingest_sample(&mut Gain(1.0), &mut pcm);
         assert_eq!(r.unwrap_err(), EnrollError::NoisyEnvironment);
     }
 
     #[test]
-    fn clean_sample_passes_quality_gate() {
-        let mut pcm = bursts(3.0, 0.4);
-        let r = ingest_sample(&mut Gain(0.95), &mut pcm);
-        assert!(r.is_ok());
+    fn clean_take_passes_regardless_of_how_much_the_denoiser_attenuates() {
+        for gain in [0.95_f32, 0.6, 0.3] {
+            let mut pcm = bursts(3.0, 0.4);
+            let r = ingest_sample(&mut Gain(gain), &mut pcm);
+            assert!(r.is_ok(), "gain {gain}: {:?}", r.err());
+        }
     }
 
     #[test]
@@ -320,6 +341,10 @@ mod tests {
             for i in 0..960_usize {
                 pcm.push(if i % 2 == 0 { amp } else { -amp });
             }
+        }
+        // A quiet tail (-60 dBFS), below the activity threshold, gives the take a noise floor.
+        for i in 0..(60 * 960_usize) {
+            pcm.push(if i % 2 == 0 { 0.001 } else { -0.001 });
         }
         let r = ingest_sample(&mut Gain(1.0), &mut pcm).unwrap();
         let (decoded, _) = decode_wav_pcm16_mono(&r.wav_bytes).unwrap();
