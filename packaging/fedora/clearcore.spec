@@ -1,7 +1,7 @@
 %global tag_version v0.1.0-beta.2
 
 Name:           clearcore
-Version:        0.1.0_beta.1
+Version:        0.1.0_beta.2
 Release:        1%{?dist}
 Summary:        Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
 License:        PolyForm Noncommercial 1.0.0
@@ -63,6 +63,9 @@ gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database /usr/share/applications 2>/dev/null || true
 
 %changelog
+* Fri Oct 16 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.2-1
+- Release v0.1.0-beta.2: fix voice profile enrollment noisy-environment gate.
+
 * Fri Oct 09 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.6-1
 - Release v0.1.0-beta.6: Bundle native voice enrollment model into release packages, robust multi-path model lookup.
 
