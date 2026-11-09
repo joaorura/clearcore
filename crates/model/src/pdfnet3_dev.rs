@@ -25,7 +25,8 @@ use crate::TractBackend;
 use crate::OrtBackend;
 use crate::{BackendDescriptor, CpuProfile};
 
-/// Asset id reported by the backend descriptor. Deliberately says "unapproved".
+/// Asset id reported by the backend descriptor for an archive given through the development
+/// override (`CLEARCORE_DEV_PDFNET3_*`). Deliberately says "unapproved".
 pub const PDFNET3_DEV_ASSET_ID: &str = "pdfnet3-dev-unapproved";
 
 /// The exact flat members the development archive must contain, each exactly once.
@@ -58,6 +59,14 @@ pub enum PdfNet3DevError {
 }
 
 impl PdfNet3DevError {
+    /// Same failure as [`Self::code`] without the historical `DEV_` prefix (`MODEL_*`), used for
+    /// the bundled pDFNet3 Pro, which is not a development model.
+    #[must_use]
+    pub fn model_code(self) -> &'static str {
+        let code = self.code();
+        code.strip_prefix("DEV_").unwrap_or(code)
+    }
+
     /// Short machine code for status/diagnostics (never a path).
     #[must_use]
     pub const fn code(self) -> &'static str {
@@ -95,11 +104,14 @@ impl std::error::Error for PdfNet3DevError {}
 pub struct PdfNet3DevArchive {
     bytes: Arc<[u8]>,
     sha256: String,
+    /// Reported as `BackendDescriptor::asset_id` by every backend built from this archive.
+    asset_id: &'static str,
 }
 
 impl fmt::Debug for PdfNet3DevArchive {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PdfNet3DevArchive")
+            .field("asset_id", &self.asset_id)
             .field("size_bytes", &self.bytes.len())
             .finish_non_exhaustive()
     }
@@ -139,7 +151,31 @@ impl PdfNet3DevArchive {
         Ok(Self {
             bytes: Arc::from(bytes),
             sha256: actual,
+            asset_id: PDFNET3_DEV_ASSET_ID,
         })
+    }
+
+    /// Same as [`Self::read`] for an archive pinned in the code (the bundled pDFNet3 Pro): the
+    /// backends built from it report `asset_id` instead of [`PDFNET3_DEV_ASSET_ID`].
+    pub fn read_pinned(
+        path: &Path,
+        expected_sha256_hex: &str,
+        asset_id: &'static str,
+    ) -> Result<Self, PdfNet3DevError> {
+        Self::read(path, expected_sha256_hex).map(|archive| archive.with_asset_id(asset_id))
+    }
+
+    /// Replaces the asset id reported by the backends built from this archive.
+    #[must_use]
+    pub fn with_asset_id(mut self, asset_id: &'static str) -> Self {
+        self.asset_id = asset_id;
+        self
+    }
+
+    /// Asset id reported by the backends built from this archive.
+    #[must_use]
+    pub const fn asset_id(&self) -> &'static str {
+        self.asset_id
     }
 
     /// Lowercase hex SHA-256 of the whole archive (the pinned value).
@@ -161,7 +197,7 @@ impl PdfNet3DevArchive {
             backend_version: "deep_filter-v0.5.6",
             runtime: "tract",
             runtime_version: "0.19.16",
-            asset_id: PDFNET3_DEV_ASSET_ID.to_owned(),
+            asset_id: self.asset_id.to_owned(),
             asset_sha256: self.sha256.clone(),
             cpu_profile: profile.name(),
         };
@@ -188,7 +224,7 @@ impl PdfNet3DevArchive {
             backend_version: "deep_filter-v0.5.6",
             runtime: "onnxruntime",
             runtime_version: "2.0.0-rc.13",
-            asset_id: PDFNET3_DEV_ASSET_ID.to_owned(),
+            asset_id: self.asset_id.to_owned(),
             asset_sha256: self.sha256.clone(),
             cpu_profile: profile.name(),
         };

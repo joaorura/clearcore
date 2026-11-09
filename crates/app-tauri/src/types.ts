@@ -99,6 +99,13 @@ export interface VoiceProfileStatus {
   dev_base_model?: 'pdfnet3-dev' | 'base';
   /** Service-reported fixed code (`DEV_MODEL_*`) when the configured development model is not in use. */
   dev_base_model_error?: string | null;
+  /**
+   * Service-reported (GetStatus): isolation model of the live backend. 'pdfnet3-pro' is the
+   * bundled model (the only production one); 'none' means it is unavailable. `undefined` = older service.
+   */
+  isolation_model?: 'pdfnet3-pro' | 'pdfnet3-dev' | 'base' | 'none';
+  /** Service-reported fixed code (`MODEL_*`) while the isolation model is unavailable. */
+  isolation_model_error?: string | null;
   /** Service-reported: whether voice isolation is enabled in settings. */
   voice_isolation_enabled?: boolean;
   /** Service-reported (GetStatus): voice isolation intensity level (0-100). */

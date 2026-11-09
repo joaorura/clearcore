@@ -1,5 +1,8 @@
 # Grafos ONNX stateful do DeepFilterNet3
 
+> **Não distribuído.** Desde a v0.1.0-beta.1 os pacotes levam só o pDFNet3 Pro (`models/pdfnet3/`). Estes
+> grafos do DFNet3 base ficam no repositório apenas para testes e desenvolvimento dos backends acelerados.
+
 Entrada dos backends de aceleração (OpenVINO hoje; TensorRT, CoreML, DirectML e Vulkan planejados).
 Os três grafos são o DeepFilterNet3 do asset aprovado com os estados recorrentes e os anéis de atraso
 das convoluções temporais expostos como entradas e saídas do grafo (`h_in`/`h_out`, `feat_erb_buf`,

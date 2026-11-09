@@ -17,6 +17,8 @@ pub mod model_registry;
 #[cfg(feature = "ort")]
 mod ort_backend;
 #[cfg(any(feature = "tract", feature = "ort"))]
+pub mod pdfnet3_bundle;
+#[cfg(any(feature = "tract", feature = "ort"))]
 pub mod pdfnet3_dev;
 pub mod profile_store;
 pub mod resample;
@@ -47,6 +49,8 @@ pub use model_registry::{
 };
 #[cfg(feature = "ort")]
 pub use ort_backend::{APPROVED_PRO_STATEFUL_DIGESTS, APPROVED_STATEFUL_DIGESTS, OrtBackend};
+#[cfg(any(feature = "tract", feature = "ort"))]
+pub use pdfnet3_bundle::{BundledModelError, PDFNET3_PRO_ASSET_ID};
 #[cfg(any(feature = "tract", feature = "ort"))]
 pub use pdfnet3_dev::{PDFNET3_DEV_ASSET_ID, PdfNet3DevArchive, PdfNet3DevError};
 pub use profile_store::{ACTIVE_PROFILE_FILE_NAME, ProfileStore};

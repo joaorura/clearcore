@@ -85,6 +85,7 @@ describe('buildEnrollmentLabels', () => {
       expect(labels.errors.ENROLL_BACKEND_UNSUPPORTED, code).not.toMatch(/^MISSING:/);
       expect(labels.errors.ENROLL_BACKEND_UNSUPPORTED, code).not.toBe(labels.errors.ENROLL_FAILED);
       expect(strictT(translations)('voiceProfile.profileUnsupportedNotice'), code).not.toMatch(/^MISSING:/);
+      expect(strictT(translations)('voiceProfile.isolationModelUnavailableNotice'), code).toContain('{code}');
     }
     expect(buildEnrollmentLabels(strictT(ptBR)).errors.ENROLL_BACKEND_UNSUPPORTED).toBe(
       'O modelo de isolamento ativo ainda não aceita perfil de voz. Suas amostras e o cadastro foram salvos; o perfil será aplicado quando houver um modelo com suporte.',

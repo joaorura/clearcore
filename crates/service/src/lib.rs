@@ -143,9 +143,10 @@ impl ServiceDaemon {
         let model_dir = find_stateful_model_dir();
         let repo_root = find_repo_root();
         let mut supervisor = EngineSupervisor::default();
-        configure_dev_base_model(
+        configure_isolation_model(
             &mut supervisor,
             pdfnet3_dev_config::PdfNet3DevConfig::from_env(),
+            realtime_noise_model::pdfnet3_bundle::load_tract_archive,
         );
         let _ = supervisor.select_backend("auto", model_dir.as_deref(), repo_root.as_deref());
         let default_dir = VoiceSampleManager::default_dir();
@@ -560,9 +561,13 @@ impl ServiceDaemon {
                         "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
                         "backend_runtime": desc.as_ref().map(|d| d.runtime),
                         "backend_device": self.supervisor.active_backend_device(),
-                        // Development only: "pdfnet3-dev" while the unsigned pDFNet3 (FiLM, M2
-                        // NO-GO checkpoint) drives the live backend, "base" otherwise. The error
-                        // is a fixed code (never a path) when the configured model is not in use.
+                        // The isolation model of the live backend: "pdfnet3-pro" (bundled, the
+                        // only production model), "pdfnet3-dev" (development override) or "none"
+                        // when it is unavailable; the error is a fixed MODEL_* code, never a path.
+                        "isolation_model": self.supervisor.isolation_model(),
+                        "isolation_model_error": self.supervisor.isolation_model_error(),
+                        // Development override only: "pdfnet3-dev" while CLEARCORE_DEV_PDFNET3_*
+                        // drives the live backend, "base" otherwise (kept for older clients).
                         "dev_base_model": self.supervisor.dev_base_model(),
                         "dev_base_model_error": self.supervisor.dev_base_model_error(),
                         "filter_intensity": self.settings.filter_intensity,
@@ -1096,35 +1101,51 @@ fn clear_voice_profile(
 
 /// Puts the engine back on `previous` after a failed persist. A failed restore leaves the engine
 /// and the disk disagreeing, so it is surfaced in the status instead of being swallowed.
-/// Loads the development pDFNet3 named by `CLEARCORE_DEV_PDFNET3_*` (if any) into the supervisor.
-/// Any failure is logged with a fixed code and recorded for `GetStatus`; the daemon then keeps the
-/// default model instead of silently loading something else.
-fn configure_dev_base_model(
+/// Makes the pDFNet3 the ONLY isolation model of the daemon (production policy).
+///
+/// The bundled pDFNet3 Pro (`<models>/pdfnet3/`, hash pinned in the model crate) is loaded by
+/// default. `CLEARCORE_DEV_PDFNET3_*` remains a development override: when set it replaces the
+/// bundled model, and an invalid override is an error (never a silent switch to another model).
+/// Any failure is logged with a fixed code and reported by `GetStatus`
+/// (`isolation_model_error`); no backend is installed and nothing falls back to the base `DFNet3`.
+fn configure_isolation_model(
     supervisor: &mut EngineSupervisor,
     config: Result<Option<pdfnet3_dev_config::PdfNet3DevConfig>, &'static str>,
+    bundled: impl FnOnce() -> Result<
+        realtime_noise_model::PdfNet3DevArchive,
+        realtime_noise_model::BundledModelError,
+    >,
 ) {
     let loaded = match config {
-        Ok(None) => return,
-        Ok(Some(config)) => realtime_noise_model::PdfNet3DevArchive::read(
-            &config.archive_path,
-            &config.expected_sha256,
-        )
-        .map_err(realtime_noise_model::PdfNet3DevError::code),
-        Err(code) => Err(code),
-    };
-    match loaded {
-        Ok(archive) => {
-            eprintln!(
-                "DEVELOPMENT MODEL: the unsigned pDFNet3 (M2 NO-GO checkpoint) is the isolation \
-                 model; the tract backend is forced"
+        Ok(None) => bundled().map_err(realtime_noise_model::BundledModelError::code),
+        Ok(Some(config)) => {
+            let archive = realtime_noise_model::PdfNet3DevArchive::read(
+                &config.archive_path,
+                &config.expected_sha256,
             );
-            supervisor.set_dev_base_model(Some(archive));
+            if let Err(error) = archive {
+                supervisor.set_dev_base_model_error(Some(error.code()));
+            }
+            archive.map_err(realtime_noise_model::PdfNet3DevError::model_code)
         }
         Err(code) => {
-            eprintln!("Development pDFNet3 model was not loaded ({code}); using the default model");
             supervisor.set_dev_base_model_error(Some(code));
+            Err(code.strip_prefix("DEV_").unwrap_or(code))
         }
+    };
+    match &loaded {
+        Ok(archive) if archive.asset_id() == realtime_noise_model::PDFNET3_DEV_ASSET_ID => {
+            eprintln!(
+                "DEVELOPMENT MODEL: the pDFNet3 given by CLEARCORE_DEV_PDFNET3_* replaces the \
+                 bundled pDFNet3 Pro"
+            );
+        }
+        Ok(_) => eprintln!("Isolation model: bundled pDFNet3 Pro"),
+        Err(code) => eprintln!(
+            "Isolation model unavailable ({code}); no fallback model is loaded"
+        ),
     }
+    supervisor.require_isolation_model(loaded);
 }
 
 fn restore_previous(
@@ -1234,31 +1255,128 @@ mod tests {
         assert!(take_json.is_empty());
     }
 
-    fn dev_status(
+    fn repository_models() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../models")
+    }
+
+    fn bundled_from(
+        dirs: Vec<PathBuf>,
+    ) -> impl FnOnce() -> Result<realtime_noise_model::PdfNet3DevArchive, realtime_noise_model::BundledModelError>
+    {
+        move || realtime_noise_model::pdfnet3_bundle::load_tract_archive_from(&dirs)
+    }
+
+    fn status_with(
         config: Result<Option<pdfnet3_dev_config::PdfNet3DevConfig>, &'static str>,
+        dirs: Vec<PathBuf>,
+        request: &str,
     ) -> serde_json::Value {
         let mut supervisor = EngineSupervisor::default();
-        configure_dev_base_model(&mut supervisor, config);
-        let _ = supervisor.select_backend("tract", None, None);
+        configure_isolation_model(&mut supervisor, config, bundled_from(dirs));
+        let _ = supervisor.select_backend(request, None, None);
         let mut daemon = ServiceDaemon::with_supervisor(supervisor);
         daemon.handle_command(&IpcCommand::GetStatus).payload
     }
 
-    #[test]
-    fn without_dev_variables_the_status_reports_the_base_model() {
-        let status = dev_status(Ok(None));
-        assert_eq!(status["dev_base_model"], "base");
-        assert_eq!(status["dev_base_model_error"], serde_json::Value::Null);
+    fn dev_status(
+        config: Result<Option<pdfnet3_dev_config::PdfNet3DevConfig>, &'static str>,
+    ) -> serde_json::Value {
+        // An empty bundle directory: only the development override can provide a model.
+        status_with(config, Vec::new(), "tract")
     }
 
     #[test]
-    fn a_bad_dev_configuration_keeps_the_default_model_and_reports_a_code() {
-        let status = dev_status(Err(pdfnet3_dev_config::CONFIG_INCOMPLETE));
-        assert_eq!(status["dev_base_model"], "base");
+    fn the_bundled_pdfnet3_pro_is_the_default_model_for_every_request() {
+        for request in ["auto", "tract", "openvino-npu", "tensorrt"] {
+            let status = status_with(Ok(None), vec![repository_models()], request);
+            assert_eq!(status["isolation_model"], "pdfnet3-pro", "{request}");
+            assert_eq!(status["isolation_model_error"], serde_json::Value::Null);
+            assert_eq!(status["active_backend"], "tract", "{request}");
+            assert_eq!(status["voice_profile_supported"], true, "{request}");
+            assert_eq!(status["dev_base_model"], "base");
+            assert_eq!(status["dev_base_model_error"], serde_json::Value::Null);
+        }
+    }
+
+    #[test]
+    fn a_missing_bundle_reports_an_error_and_never_falls_back() {
+        let status = dev_status(Ok(None));
+        assert_eq!(status["isolation_model"], "none");
+        assert_eq!(status["isolation_model_error"], "MODEL_ASSET_NOT_FOUND");
+        assert_eq!(status["active_backend"], "none");
+        assert_eq!(status["voice_profile_supported"], false);
+    }
+
+    #[test]
+    fn a_tampered_bundle_reports_a_hash_mismatch_and_never_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("pdfnet3");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(
+            bundle.join(realtime_noise_model::pdfnet3_bundle::PDFNET3_PRO_TRACT_FILE),
+            b"not the pinned archive",
+        )
+        .unwrap();
+        let status = status_with(
+            Ok(None),
+            vec![dir.path().to_path_buf(), repository_models()],
+            "auto",
+        );
+        assert_eq!(status["isolation_model"], "none");
+        assert_eq!(status["isolation_model_error"], "MODEL_HASH_MISMATCH");
+        assert_eq!(status["active_backend"], "none");
+        assert_eq!(status["voice_profile_supported"], false);
+        assert!(!status.to_string().contains(&dir.path().display().to_string()));
+    }
+
+    fn daemon_with(dirs: Vec<PathBuf>) -> ServiceDaemon {
+        let mut supervisor = EngineSupervisor::default();
+        configure_isolation_model(&mut supervisor, Ok(None), bundled_from(dirs));
+        let _ = supervisor.select_backend("auto", None, None);
+        ServiceDaemon::with_supervisor(supervisor)
+    }
+
+    #[test]
+    fn without_the_model_a_profile_build_is_refused_up_front_and_no_denoiser_exists() {
+        let mut daemon = daemon_with(Vec::new());
+        let resp = daemon.handle_command(&IpcCommand::BuildVoiceProfile { name: "n".into() });
+        assert_eq!(
+            resp.error.as_ref().map(|e| e.code.as_str()),
+            Some("ENROLL_BACKEND_UNSUPPORTED"),
+            "{resp:?}"
+        );
+        assert!(
+            daemon.make_denoiser().is_none(),
+            "no base DFNet3 denoiser behind the missing pDFNet3"
+        );
+    }
+
+    #[test]
+    fn the_enrollment_denoiser_is_the_bundled_pro_in_neutral_conditioning() {
+        let daemon = daemon_with(vec![repository_models()]);
+        let mut denoiser = daemon.make_denoiser().expect("pDFNet3 Pro denoiser");
+        let input: Vec<f32> = (0..24_000_u16)
+            .map(|n| (f32::from(n) * 0.0291).sin() * 0.3)
+            .collect();
+        let out = denoiser.denoise(&input).expect("denoise");
+        assert_eq!(out.len(), input.len());
+        assert!(out.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn a_bad_dev_configuration_reports_a_code_and_loads_no_model() {
+        let status = status_with(
+            Err(pdfnet3_dev_config::CONFIG_INCOMPLETE),
+            vec![repository_models()],
+            "tract",
+        );
+        assert_eq!(status["isolation_model"], "none");
+        assert_eq!(status["isolation_model_error"], "MODEL_CONFIG_INCOMPLETE");
         assert_eq!(
             status["dev_base_model_error"],
             "DEV_MODEL_CONFIG_INCOMPLETE"
         );
+        assert_eq!(status["voice_profile_supported"], false);
     }
 
     #[test]
@@ -1272,6 +1390,7 @@ mod tests {
             missing["dev_base_model_error"],
             "DEV_MODEL_ASSET_UNREADABLE"
         );
+        assert_eq!(missing["isolation_model_error"], "MODEL_ASSET_UNREADABLE");
         assert!(!missing.to_string().contains("clearcore-secret"));
 
         let dir = std::env::temp_dir().join(format!("cc-pdfnet3-dev-{}", std::process::id()));
@@ -1285,6 +1404,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(tampered["dev_base_model"], "base");
         assert_eq!(tampered["dev_base_model_error"], "DEV_MODEL_HASH_MISMATCH");
+        assert_eq!(tampered["isolation_model"], "none");
     }
 
     #[test]

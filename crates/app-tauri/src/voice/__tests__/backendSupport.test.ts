@@ -3,6 +3,8 @@ import type { VoiceProfileStatus } from '../../types';
 import {
   applySetVoiceProfileResult,
   mergeVoiceProfileStatus,
+  isolationModel,
+  isolationModelError,
   normalizeVoiceProfileStatus,
   stripServiceVoiceProfileKeys,
   voiceProfileUnsupported,
@@ -78,5 +80,35 @@ describe('dev_base_model (GetStatus, development pDFNet3)', () => {
     );
     expect(merged.dev_base_model).toBe('pdfnet3-dev');
     expect(stripServiceVoiceProfileKeys(merged).dev_base_model).toBeUndefined();
+  });
+});
+
+describe('isolation_model / isolation_model_error (GetStatus)', () => {
+  it('keeps only the documented model values', () => {
+    for (const v of ['pdfnet3-pro', 'pdfnet3-dev', 'base', 'none'] as const) {
+      expect(isolationModel(v)).toBe(v);
+      expect(normalizeVoiceProfileStatus({ isolation_model: v }).isolation_model).toBe(v);
+    }
+    expect(isolationModel('dfnet3')).toBeUndefined();
+    expect(isolationModel(undefined)).toBeUndefined();
+  });
+
+  it('keeps only a fixed MODEL_* code (never a path)', () => {
+    expect(isolationModelError('MODEL_ASSET_NOT_FOUND')).toBe('MODEL_ASSET_NOT_FOUND');
+    expect(isolationModelError(null)).toBeNull();
+    expect(isolationModelError('/opt/clearcore/models/pdfnet3')).toBeUndefined();
+    expect(isolationModelError('DEV_MODEL_NO_FILM')).toBeUndefined();
+  });
+
+  it('flows through the merge from the service', () => {
+    const merged = mergeVoiceProfileStatus(
+      initial,
+      { is_voice_profile_active: false, voice_profile_supported: false, isolation_model: 'none', isolation_model_error: 'MODEL_HASH_MISMATCH' },
+      0,
+    );
+    expect(merged.isolation_model).toBe('none');
+    expect(merged.isolation_model_error).toBe('MODEL_HASH_MISMATCH');
+    expect(voiceProfileUnsupported(merged)).toBe(true);
+    expect('isolation_model_error' in stripServiceVoiceProfileKeys(merged)).toBe(false);
   });
 });

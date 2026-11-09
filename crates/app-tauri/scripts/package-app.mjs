@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { createHash } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -173,32 +174,47 @@ if (platform === 'linux') {
 
 }
 
-// 8. Bundle Neural Models & Multi-Runtime Assets (All Platforms)
-// Bundles:
-// - models/stateful/ (ONNX for OpenVINO/DirectML/Vulkan, plus tensorrt/ compiled engines for NVIDIA GPU)
-//   into both resources/models/stateful/ and bundle root models/stateful/
-// - models/enrollment/ (Voice enrollment neural models) into both resources/models/enrollment/ and bundle root models/enrollment/
-// - vendor/approved/ (Tract approved neural models) into both resources/vendor/approved/ and bundle root vendor/approved/
-// - governance/model-assets/ (model trust policy and cryptographic manifests) into bundle root and resources
-console.log('🧠 Bundling neural models and multi-runtime assets for all platforms...');
+// 8. Bundle Neural Models (All Platforms)
+// The pDFNet3 Pro (FiLM voice-profile conditioning) is the ONLY isolation model shipped. Bundles:
+// - models/pdfnet3/ (pDFNet3 Pro: tract export for the daemon, stateful export for the virtual-mic
+//   filter) into both resources/models/pdfnet3/ and bundle root models/pdfnet3/. Mandatory: the
+//   package build fails if an archive is missing or its SHA-256 is not the one pinned in
+//   crates/model/src/pdfnet3_bundle.rs (the runtime refuses it anyway, with no fallback).
+// - models/enrollment/ (voice enrollment model paired with the pDFNet3 Pro) likewise.
+// - governance/model-assets/ (provenance and license records of the DeepFilterNet3 weights the
+//   pDFNet3 Pro derives from) into bundle root and resources.
+// The base DeepFilterNet3 (models/stateful/, its TensorRT engines and vendor/approved/) is NOT
+// shipped: it stays in the repository for tests and development only.
+console.log('🧠 Bundling the pDFNet3 Pro isolation model and the enrollment model...');
 
-const modelsStatefulSrc = path.join(repoRoot, 'models', 'stateful');
-if (fs.existsSync(modelsStatefulSrc)) {
-  const destResourcesStateful = path.join(resourcesDir, 'models', 'stateful');
-  const destBundleStateful = path.join(bundleDir, 'models', 'stateful');
-
-  fs.mkdirSync(destResourcesStateful, { recursive: true });
-  fs.mkdirSync(destBundleStateful, { recursive: true });
-
-  fs.cpSync(modelsStatefulSrc, destResourcesStateful, { recursive: true });
-  fs.cpSync(modelsStatefulSrc, destBundleStateful, { recursive: true });
-  console.log('✓ Bundled models/stateful (ONNX stateful & TensorRT engines) into resources/models/stateful and bundle root');
-} else {
-  console.warn(`⚠️ models/stateful directory not found at ${modelsStatefulSrc}`);
+const PDFNET3_BUNDLE = {
+  'pdfnet3-release-asset-v1.tar.gz': '1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8',
+  'pdfnet3-stateful-asset-v1.tar.gz': 'd1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5',
+};
+const pdfnet3Src = path.join(repoRoot, 'models', 'pdfnet3');
+for (const [file, expected] of Object.entries(PDFNET3_BUNDLE)) {
+  const source = path.join(pdfnet3Src, file);
+  if (!fs.existsSync(source)) {
+    console.error(`❌ Missing pDFNet3 Pro archive: ${source}`);
+    process.exit(1);
+  }
+  const actual = createHash('sha256').update(fs.readFileSync(source)).digest('hex');
+  if (actual !== expected) {
+    console.error(`❌ pDFNet3 Pro archive ${file} has SHA-256 ${actual}, expected ${expected}`);
+    process.exit(1);
+  }
 }
+for (const dest of [path.join(resourcesDir, 'models', 'pdfnet3'), path.join(bundleDir, 'models', 'pdfnet3')]) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const file of [...Object.keys(PDFNET3_BUNDLE), 'README.md']) {
+    const source = path.join(pdfnet3Src, file);
+    if (fs.existsSync(source)) fs.copyFileSync(source, path.join(dest, file));
+  }
+}
+console.log('✓ Bundled models/pdfnet3 (pDFNet3 Pro, SHA-256 verified) into resources/models/pdfnet3 and bundle root');
 
 const modelsEnrollmentSrc = path.join(repoRoot, 'models', 'enrollment');
-if (fs.existsSync(modelsEnrollmentSrc)) {
+if (fs.existsSync(path.join(modelsEnrollmentSrc, 'enrollment.onnx'))) {
   const destResourcesEnrollment = path.join(resourcesDir, 'models', 'enrollment');
   const destBundleEnrollment = path.join(bundleDir, 'models', 'enrollment');
 
@@ -209,22 +225,8 @@ if (fs.existsSync(modelsEnrollmentSrc)) {
   fs.cpSync(modelsEnrollmentSrc, destBundleEnrollment, { recursive: true });
   console.log('✓ Bundled models/enrollment (Voice enrollment model) into resources/models/enrollment and bundle root');
 } else {
-  console.warn(`⚠️ models/enrollment directory not found at ${modelsEnrollmentSrc}`);
-}
-
-const vendorApproved = path.join(repoRoot, 'vendor', 'approved');
-if (fs.existsSync(vendorApproved)) {
-  const destBundleVendor = path.join(bundleDir, 'vendor', 'approved');
-  const destResourcesVendor = path.join(resourcesDir, 'vendor', 'approved');
-
-  fs.mkdirSync(destBundleVendor, { recursive: true });
-  fs.mkdirSync(destResourcesVendor, { recursive: true });
-
-  fs.cpSync(vendorApproved, destBundleVendor, { recursive: true });
-  fs.cpSync(vendorApproved, destResourcesVendor, { recursive: true });
-  console.log('✓ Bundled vendor/approved DeepFilterNet3 neural model (bundle root & resources)');
-} else {
-  console.warn(`⚠️ vendor/approved directory not found at ${vendorApproved}`);
+  console.error(`❌ models/enrollment/enrollment.onnx not found at ${modelsEnrollmentSrc}`);
+  process.exit(1);
 }
 
 const governanceDir = path.join(repoRoot, 'governance', 'model-assets');

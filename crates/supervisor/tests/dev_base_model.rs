@@ -1,4 +1,5 @@
-//! The development pDFNet3 (unsigned, FiLM) overrides every backend selection while set.
+//! The development pDFNet3 (unsigned, FiLM) overrides every backend selection while set,
+//! accelerator requests included (they could only run a model without FiLM).
 #![forbid(unsafe_code)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -60,7 +61,7 @@ fn real_pdfnet3_used_for_default_and_tract_and_accepts_a_profile() {
 
 #[test]
 #[ignore = "reads the real M3 pDFNet3 archive from the training repository"]
-fn explicit_accelerator_request_honored_when_dev_base_model_present() {
+fn accelerator_requests_stay_on_the_dev_pdfnet3() {
     if !Path::new(M3_PDFNET3).is_file() {
         eprintln!("real M3 pDFNet3 archive not present; skipping");
         return;
@@ -68,25 +69,13 @@ fn explicit_accelerator_request_honored_when_dev_base_model_present() {
     let archive = PdfNet3DevArchive::read(Path::new(M3_PDFNET3), M3_PDFNET3_SHA256).unwrap();
     let mut supervisor = EngineSupervisor::default();
     supervisor.set_dev_base_model(Some(archive));
-
-    let info = supervisor.select_backend("tensorrt", None, None);
-    if realtime_noise_accelerators::TensorRtBackend::is_available() {
-        assert_eq!(info.name, "nvidia-tensorrt");
-        assert!(info.is_hardware_accelerated);
-        assert!(!info.is_fallback);
-        assert_eq!(supervisor.active_backend_name(), "nvidia-tensorrt");
-        assert!(supervisor.is_hardware_accelerated());
-        assert_eq!(supervisor.requested_backend_name(), "tensorrt");
-    }
-
-    let info_npu = supervisor.select_backend("openvino-npu", None, None);
-    if realtime_noise_accelerators::OpenVINOBackend::is_available() {
-        assert_eq!(info_npu.name, "openvino-npu");
-        assert!(info_npu.is_hardware_accelerated);
-        assert!(!info_npu.is_fallback);
-        assert_eq!(supervisor.active_backend_name(), "openvino-npu");
-        assert!(supervisor.is_hardware_accelerated());
-        assert_eq!(supervisor.requested_backend_name(), "openvino-npu");
+    for request in ["tensorrt", "openvino-npu"] {
+        let info = supervisor.select_backend(request, None, None);
+        assert_eq!(info.name, "tract");
+        assert!(info.is_fallback);
+        assert!(!supervisor.is_hardware_accelerated());
+        assert_eq!(supervisor.dev_base_model(), DEV_BASE_MODEL_PDFNET3);
+        assert_eq!(supervisor.requested_backend_name(), request);
+        assert!(supervisor.supports_voice_profile());
     }
 }
-

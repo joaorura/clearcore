@@ -247,6 +247,8 @@ export interface Translations {
     neuralEqPending: string;
     /** Profile tab notice (and reason of the disabled build button) when GetStatus says voice_profile_supported: false. */
     profileUnsupportedNotice: string;
+    /** Same place, when GetStatus reports isolation_model_error ({code} = fixed MODEL_* code). */
+    isolationModelUnavailableNotice: string;
     stepProgress: string;
     stepPercent: string;
     openQuestionsMode: string;

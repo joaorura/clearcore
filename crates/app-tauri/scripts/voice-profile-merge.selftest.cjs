@@ -131,4 +131,16 @@ for (const v of ['/home/u/pdfnet3.tar.gz', 'boom', 1]) {
 // Never read from the local file.
 assert.ok(!('dev_base_model' in mergeLocalAndServiceProfile({ dev_base_model: 'pdfnet3-dev' }, {})));
 
+console.log('Testing isolation_model / isolation_model_error are validated service fields...');
+for (const v of ['pdfnet3-pro', 'pdfnet3-dev', 'base', 'none']) {
+  assert.strictEqual(mergeLocalAndServiceProfile({}, { isolation_model: v }).isolation_model, v);
+}
+assert.ok(!('isolation_model' in mergeLocalAndServiceProfile({}, { isolation_model: 'dfnet3' })), 'unknown model dropped');
+assert.strictEqual(mergeLocalAndServiceProfile({}, { isolation_model_error: 'MODEL_HASH_MISMATCH' }).isolation_model_error, 'MODEL_HASH_MISMATCH');
+assert.strictEqual(mergeLocalAndServiceProfile({}, { isolation_model_error: null }).isolation_model_error, null);
+for (const v of ['/opt/clearcore/models/pdfnet3', 'DEV_MODEL_NO_FILM', 'model_x', 42]) {
+  assert.ok(!('isolation_model_error' in mergeLocalAndServiceProfile({}, { isolation_model_error: v })), 'free text dropped');
+}
+assert.ok(!('isolation_model' in mergeLocalAndServiceProfile({ isolation_model: 'pdfnet3-pro' }, {})), 'never read from the local file');
+
 console.log('voice-profile-merge selftest passed.');

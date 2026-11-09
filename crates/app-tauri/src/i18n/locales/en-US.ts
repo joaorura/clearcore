@@ -248,6 +248,7 @@ export const enUS: Translations = {
     neuralEqCalibrated: '🟢 Calibrated',
     neuralEqPending: '⚪ Not Calibrated',
     profileUnsupportedNotice: 'Voice profile not supported by the active isolation model',
+    isolationModelUnavailableNotice: 'The pDFNet3 Pro isolation model could not be loaded ({code}). Reinstall Clearcore to restore it.',
     stepProgress: 'Step {current} of {total}',
     stepPercent: '{percent}% Completed',
     openQuestionsMode: 'Open Questions (Spontaneous Speech)',

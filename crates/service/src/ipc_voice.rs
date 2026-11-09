@@ -82,7 +82,7 @@ const JOB_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(10 * 60
 const SAMPLE_JOB_PREFIX: &str = "sample-";
 const PROFILE_JOB_PREFIX: &str = "profile-";
 
-/// Builds a fresh denoiser for one sample (test seam; production is the base `DFNet3`).
+/// Builds a fresh denoiser for one sample (test seam; production is the bundled pDFNet3 Pro).
 pub type DenoiserFactory = Box<dyn Fn() -> Box<dyn Denoiser> + Send + Sync>;
 /// Loads the enrollment model on a job thread (test seam; production is the dev archive).
 pub type ModelFactory =
@@ -95,7 +95,7 @@ type SharedModelFactory =
 #[doc(hidden)]
 #[derive(Default)]
 pub struct EnrollmentHooks {
-    /// `None` keeps the production denoiser (base `DFNet3` through tract, needs the repo root).
+    /// `None` keeps the production denoiser (the daemon's pDFNet3 in neutral conditioning).
     pub denoiser_factory: Option<DenoiserFactory>,
     /// `None` keeps the production loader driven by `dev_enrollment_asset`.
     pub model_factory: Option<ModelFactory>,
@@ -373,7 +373,7 @@ const fn message_for(error: &EnrollError) -> &'static str {
         EnrollError::TooQuiet => "the recording is too quiet",
         EnrollError::TooLittleSpeech => "not enough speech from this microphone",
         EnrollError::ModelNotConfigured => {
-            "the development enrollment model or the base denoiser is not available"
+            "the enrollment model or the pDFNet3 isolation model is not available"
         }
         EnrollError::BudgetExceeded => "the speech budget is full; delete audio first",
         EnrollError::InvalidAudio => "invalid audio payload",
@@ -662,13 +662,21 @@ impl ServiceDaemon {
         self
     }
 
-    /// A fresh denoiser for one sample, or `None` when no usable denoiser exists (no test hook
-    /// and an unknown repository root, so the approved base `DFNet3` asset cannot be located).
-    /// The real denoiser is always compiled in: the service depends on the model crate with its
-    /// `tract` feature (see `crates/service/Cargo.toml`).
+    /// A fresh denoiser for one sample, or `None` when no usable denoiser exists. Production:
+    /// the daemon's pDFNet3 (bundled Pro) in neutral conditioning; `None` when that model is
+    /// unavailable (no fallback to the base `DFNet3`). Only a daemon without the production
+    /// policy (embedding/test seam) still uses the approved base asset under the repository root.
     pub(crate) fn make_denoiser(&self) -> Option<Box<dyn Denoiser>> {
         if let Some(factory) = &self.enrollment.denoiser_factory {
             return Some(factory());
+        }
+        if let Some(archive) = self.supervisor.isolation_archive() {
+            return Some(Box::new(crate::enrollment_ingest::PdfNet3Denoiser::new(
+                archive.clone(),
+            )));
+        }
+        if self.supervisor.isolation_model_required() {
+            return None;
         }
         let root = self.repo_root.as_deref()?;
         Some(Box::new(crate::enrollment_ingest::TractDenoiser::new(

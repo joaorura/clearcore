@@ -72,18 +72,22 @@ jobs:
           for entry in \
             "Clearcore-linux-x64/resources/bin/pipewire_helper" \
             "Clearcore-linux-x64/resources/scripts/check-virtual-mic.sh" \
-            "Clearcore-linux-x64/resources/models/stateful/enc.onnx" \
-            "Clearcore-linux-x64/resources/models/stateful/tensorrt/enc.engine" \
+            "Clearcore-linux-x64/resources/models/pdfnet3/pdfnet3-release-asset-v1.tar.gz" \
+            "Clearcore-linux-x64/resources/models/pdfnet3/pdfnet3-stateful-asset-v1.tar.gz" \
             "Clearcore-linux-x64/resources/models/enrollment/enrollment.onnx" \
-            "Clearcore-linux-x64/models/stateful/enc.onnx" \
-            "Clearcore-linux-x64/models/stateful/tensorrt/enc.engine" \
-            "Clearcore-linux-x64/models/enrollment/enrollment.onnx" \
-            "Clearcore-linux-x64/vendor/approved/df-compatible-release-asset-v1.bin"; do
+            "Clearcore-linux-x64/models/pdfnet3/pdfnet3-release-asset-v1.tar.gz" \
+            "Clearcore-linux-x64/models/pdfnet3/pdfnet3-stateful-asset-v1.tar.gz" \
+            "Clearcore-linux-x64/models/enrollment/enrollment.onnx"; do
             if ! grep -qx "./${entry}\|${entry}" "${RUNNER_TEMP}/linux-package-listing.txt"; then
               echo "::error::${entry} ausente em ${TARBALL}"
               exit 1
             fi
           done
+          # Only the pDFNet3 Pro ships: the base DFNet3 must not be in the package.
+          if grep -E "models/stateful/|vendor/approved/" "${RUNNER_TEMP}/linux-package-listing.txt"; then
+            echo "::error::o DFNet3 base (models/stateful ou vendor/approved) nao deve estar em ${TARBALL}"
+            exit 1
+          fi
           EXTRACT_DIR="$(mktemp -d "${RUNNER_TEMP}/linux-package-check.XXXXXX")"
           tar -xzf "${TARBALL}" -C "${EXTRACT_DIR}"
           if [ ! -x "${EXTRACT_DIR}/Clearcore-linux-x64/resources/bin/pipewire_helper" ]; then
@@ -91,7 +95,11 @@ jobs:
             ls -l "${EXTRACT_DIR}/Clearcore-linux-x64/resources/bin/" || true
             exit 1
           fi
-          echo "Pacote Linux OK: pipewire_helper, check-virtual-mic.sh e modelos de todos os runtimes presentes"
+          (cd "${EXTRACT_DIR}/Clearcore-linux-x64/models/pdfnet3" && printf '%s\n' \
+            "1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8  pdfnet3-release-asset-v1.tar.gz" \
+            "d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5  pdfnet3-stateful-asset-v1.tar.gz" \
+            | sha256sum -c -)
+          echo "Pacote Linux OK: pipewire_helper, check-virtual-mic.sh, pDFNet3 Pro (SHA-256 conferido) e modelo de cadastro presentes"
 
       - name: Build Linux AppImage Package
         run: |
@@ -126,15 +134,6 @@ jobs:
           chmod +x scripts/package-linux-packages.sh
           QA_RPATHS=0x0002 ./scripts/package-linux-packages.sh Clearcore-linux-x64
 
-      - name: Package Standalone Neural Models
-        run: |
-          set -euo pipefail
-          mkdir -p release
-          tar -czf release/Clearcore-models-stateful-v2.tar.gz -C models stateful
-          if [ -d "vendor/approved" ]; then
-            tar -czf release/Clearcore-models-approved-dfnet3.tar.gz -C vendor approved
-          fi
-
       - name: Upload Linux Package Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -144,8 +143,6 @@ jobs:
             release/Clearcore-linux-x64.AppImage
             release/Clearcore-*.rpm
             release/Clearcore-*.deb
-            release/Clearcore-models-stateful-v2.tar.gz
-            release/Clearcore-models-approved-dfnet3.tar.gz
 
   build-linux-arm64:
     name: Build Linux ARM64 Package
@@ -522,7 +519,7 @@ jobs:
                 "- **Windows x64**: Single-click installer (\`Clearcore-Setup.exe\`, \`Clearcore-Inno-Setup.exe\`) with WaveRT virtual audio driver and portable zip (\`.zip\`)." \
                 "- **Windows ARM64 (Snapdragon X Elite / Copilot+)**: Standalone ARM64 package (\`.zip\`)." \
                 "- **macOS (Apple Silicon ARM64)**: Application bundle with CoreAudio HAL driver (\`.tar.gz\` and \`.dmg\`)." \
-                "- **Neural Acceleration Models**: Standalone archives (\`Clearcore-models-stateful-v2.tar.gz\`) containing stateful ONNX graphs and pre-compiled TensorRT engines." > "${NOTES_FILE}"
+                "- **Isolation model**: pDFNet3 Pro (FiLM voice-profile conditioning) bundled in every package under \`models/pdfnet3/\`." > "${NOTES_FILE}"
             fi
           fi
 

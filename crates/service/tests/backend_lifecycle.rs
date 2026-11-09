@@ -18,104 +18,49 @@ fn send(daemon: &mut ServiceDaemon, command: IpcCommand) -> IpcResponse {
     IpcResponse::from_json(resp_str.trim()).expect("parse")
 }
 
+/// Production policy: the bundled pDFNet3 Pro (FiLM) is the only isolation model and runs on
+/// tract, whatever accelerators the host has. `auto` is not a fallback.
 #[test]
-fn service_starts_with_auto_accelerator_and_reports_status() {
+fn service_starts_with_the_bundled_pdfnet3_pro_on_auto() {
     let mut daemon = ServiceDaemon::new();
     let resp = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(resp.status, IpcStatus::Ok);
-
-    let active_backend = resp.payload["active_backend"]
-        .as_str()
-        .expect("active_backend");
-    assert!(!active_backend.is_empty());
-
-    if realtime_noise_accelerators::OpenVINOBackend::is_available()
-        && realtime_noise_accelerators::OpenVINOBackend::available_devices()
-            .iter()
-            .any(|d| d.eq_ignore_ascii_case("NPU"))
-    {
-        assert!(
-            resp.payload["is_hardware_accelerated"]
-                .as_bool()
-                .unwrap_or(false)
-        );
-        assert_eq!(active_backend, "openvino-npu");
-        assert_eq!(resp.payload["backend_device"], "NPU");
-        assert_eq!(resp.payload["backend_runtime"], "openvino-npu");
-    } else if realtime_noise_accelerators::TensorRtBackend::is_available() {
-        assert!(
-            resp.payload["is_hardware_accelerated"]
-                .as_bool()
-                .unwrap_or(false)
-        );
-        assert_eq!(active_backend, "nvidia-tensorrt");
-        assert_eq!(resp.payload["backend_device"], "GPU");
-        assert_eq!(resp.payload["backend_runtime"], "tensorrt");
-    } else if realtime_noise_accelerators::OpenVINOBackend::is_available() {
-        assert!(
-            resp.payload["is_hardware_accelerated"]
-                .as_bool()
-                .unwrap_or(false)
-        );
-        assert!(active_backend.starts_with("openvino"));
-    }
+    assert_eq!(resp.payload["active_backend"], "tract");
+    assert_eq!(resp.payload["isolation_model"], "pdfnet3-pro");
+    assert_eq!(resp.payload["isolation_model_error"], json!(null));
+    assert_eq!(resp.payload["voice_profile_supported"], true);
+    assert_eq!(resp.payload["is_hardware_accelerated"], false);
+    assert_eq!(resp.payload["backend_device"], "CPU");
 }
 
+/// An accelerator request cannot run the pDFNet3 Pro (no FiLM inputs on those backends): it
+/// resolves to tract with the Pro model and says so, instead of loading the base `DFNet3`.
 #[test]
 fn service_switches_backend_via_set_backend_ipc() {
     let mut daemon = ServiceDaemon::new();
 
-    // Switch to Tract CPU explicitly
     let switch_to_tract = send(&mut daemon, IpcCommand::set_backend("tract"));
     assert_eq!(switch_to_tract.status, IpcStatus::Ok);
     assert_eq!(switch_to_tract.payload["success"], true);
     assert_eq!(switch_to_tract.payload["active_backend"], "tract");
     assert_eq!(switch_to_tract.payload["is_hardware_accelerated"], false);
+    assert_eq!(switch_to_tract.payload["fallback"], false);
 
-    // Verify GetStatus reflects Tract CPU
     let status_after_tract = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status_after_tract.payload["active_backend"], "tract");
-    assert_eq!(status_after_tract.payload["is_hardware_accelerated"], false);
+    assert_eq!(status_after_tract.payload["isolation_model"], "pdfnet3-pro");
 
-    // Switch back to OpenVINO NPU
-    if realtime_noise_accelerators::OpenVINOBackend::is_available() {
-        let switch_to_npu = send(&mut daemon, IpcCommand::set_backend("openvino-npu"));
-        assert_eq!(switch_to_npu.status, IpcStatus::Ok);
-        assert_eq!(switch_to_npu.payload["success"], true);
-        assert_eq!(switch_to_npu.payload["active_backend"], "openvino-npu");
-        assert_eq!(switch_to_npu.payload["is_hardware_accelerated"], true);
-        assert_eq!(switch_to_npu.payload["device"], "NPU");
-
-        let status_after_npu = send(&mut daemon, IpcCommand::GetStatus);
-        assert_eq!(status_after_npu.payload["active_backend"], "openvino-npu");
-        assert_eq!(status_after_npu.payload["is_hardware_accelerated"], true);
-    }
-
-    // Switch to TensorRT
-    if realtime_noise_accelerators::TensorRtBackend::is_available() {
-        let switch_to_trt = send(&mut daemon, IpcCommand::set_backend("tensorrt"));
-        assert_eq!(switch_to_trt.status, IpcStatus::Ok);
-        assert_eq!(switch_to_trt.payload["success"], true);
-        assert_eq!(switch_to_trt.payload["active_backend"], "nvidia-tensorrt");
-        assert_eq!(switch_to_trt.payload["is_hardware_accelerated"], true);
-        assert!(
-            switch_to_trt.payload["device"]
-                .as_str()
-                .unwrap_or("")
-                .contains("GPU")
-                || switch_to_trt.payload["device"]
-                    .as_str()
-                    .unwrap_or("")
-                    .contains("NVIDIA")
-        );
-
-        let status_after_trt = send(&mut daemon, IpcCommand::GetStatus);
-        assert_eq!(
-            status_after_trt.payload["active_backend"],
-            "nvidia-tensorrt"
-        );
-        assert_eq!(status_after_trt.payload["is_hardware_accelerated"], true);
-        assert_eq!(status_after_trt.payload["backend_device"], "GPU");
+    for accelerator in ["openvino-npu", "tensorrt", "gpu"] {
+        let resp = send(&mut daemon, IpcCommand::set_backend(accelerator));
+        assert_eq!(resp.status, IpcStatus::Ok, "{accelerator}");
+        assert_eq!(resp.payload["active_backend"], "tract", "{accelerator}");
+        assert_eq!(resp.payload["is_hardware_accelerated"], false);
+        assert_eq!(resp.payload["fallback"], true, "{accelerator}");
+        assert!(resp.payload["fallback_reason"].is_string());
+        let status = send(&mut daemon, IpcCommand::GetStatus);
+        assert_eq!(status.payload["isolation_model"], "pdfnet3-pro");
+        assert_eq!(status.payload["voice_profile_supported"], true);
+        assert_eq!(status.payload["requested_backend"], accelerator);
     }
 }
 

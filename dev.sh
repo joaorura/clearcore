@@ -22,13 +22,10 @@ export CLEARCORE_DAEMON_BIN="${SCRIPT_DIR}/target/release/realtime-noise-service
 export CLEARCORE_DEV_OWN_DAEMON=1
 
 # Modelo de cadastro de voz e modelos de inferência nativos embutidos no Clearcore.
-echo "🎙️  Utilizando modelos nativos embutidos: models/enrollment/ e models/stateful/"
-
-export CLEARCORE_DEV_PDFNET3_ASSET="${CLEARCORE_DEV_PDFNET3_ASSET:-/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v3_20261013/pdfnet3-release-asset-v1.tar.gz}"
-export CLEARCORE_DEV_PDFNET3_SHA256="${CLEARCORE_DEV_PDFNET3_SHA256:-1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8}"
-
-export CLEARCORE_DEV_ENROLLMENT_ASSET="${CLEARCORE_DEV_ENROLLMENT_ASSET:-/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v3_20261013/voice-enrollment-asset-v1.tar.gz}"
-export CLEARCORE_DEV_ENROLLMENT_SHA256="${CLEARCORE_DEV_ENROLLMENT_SHA256:-59c31a618f9ca80dd0f82ae00e417fba9eb29f3c3083dea454a0c723c5cffaed}"
+# O pDFNet3 Pro (models/pdfnet3/) e o modelo de cadastro pareado (models/enrollment/) estão no
+# repositório e são achados sem variável nenhuma. CLEARCORE_DEV_PDFNET3_* e
+# CLEARCORE_DEV_ENROLLMENT_* continuam valendo como override, se já estiverem no ambiente.
+echo "🎙️  Utilizando modelos nativos embutidos: models/pdfnet3/ (pDFNet3 Pro) e models/enrollment/"
 
 # Core dump desligado neste shell e em tudo que ele inicia (Electron e o daemon, que
 # segura PCM cru em memória durante o cadastro de voz). O Electron também aplica

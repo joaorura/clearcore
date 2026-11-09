@@ -1,14 +1,14 @@
 #![forbid(unsafe_code)]
 
 use crate::backend::{
-    BackendResolutionInfo, instantiate_backend_with_fallback,
+    BackendResolutionInfo, instantiate_backend_with_fallback, is_explicit_accelerator_request,
 };
 use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
 use realtime_noise_model::{
     BackendDescriptor, CpuProfile, InferenceBackend, InferenceError, PDFNET3_DEV_ASSET_ID,
-    PdfNet3DevArchive, StudioBackend, StudioResetHandle, VoiceProfile,
+    PDFNET3_PRO_ASSET_ID, PdfNet3DevArchive, StudioBackend, StudioResetHandle, VoiceProfile,
 };
 use std::fmt;
 use std::path::Path;
@@ -71,11 +71,26 @@ pub struct EngineSupervisor {
     studio_control: Arc<StudioControl>,
     studio_reset: StudioResetHandle,
     active_profile: Option<VoiceProfile>,
-    /// Development pDFNet3 (`FiLM`, unsigned) that overrides every backend selection while set.
+    /// pDFNet3 archive (`FiLM`) that overrides every backend selection while set: the bundled
+    /// pDFNet3 Pro in production, or the development override.
     dev_base_model: Option<PdfNet3DevArchive>,
     /// Fixed code of the last reason the development model could not be used.
     dev_base_model_error: Option<&'static str>,
+    /// Production policy ([`Self::require_isolation_model`]): the pDFNet3 is the ONLY isolation
+    /// model. Without it no backend is installed (no fallback to the base `DFNet3`).
+    isolation_model_required: bool,
+    /// Fixed `MODEL_*` code while the required isolation model is unavailable.
+    isolation_model_error: Option<&'static str>,
 }
+
+/// `GetStatus.isolation_model` while the bundled pDFNet3 Pro drives the live backend.
+pub const ISOLATION_MODEL_PDFNET3_PRO: &str = "pdfnet3-pro";
+/// `GetStatus.isolation_model` while the development pDFNet3 override drives the live backend.
+pub const ISOLATION_MODEL_PDFNET3_DEV: &str = "pdfnet3-dev";
+/// `GetStatus.isolation_model` for any other live model (legacy/test seams only).
+pub const ISOLATION_MODEL_BASE: &str = "base";
+/// `GetStatus.isolation_model` when no isolation model is loaded.
+pub const ISOLATION_MODEL_NONE: &str = "none";
 
 /// `GetStatus.dev_base_model` while the development pDFNet3 drives the live backend.
 pub const DEV_BASE_MODEL_PDFNET3: &str = "pdfnet3-dev";
@@ -105,6 +120,56 @@ impl EngineSupervisor {
             active_profile: None,
             dev_base_model: None,
             dev_base_model_error: None,
+            isolation_model_required: false,
+            isolation_model_error: None,
+        }
+    }
+
+    /// Production policy: `model` (the verified pDFNet3 archive, or the fixed `MODEL_*` code of
+    /// why it is unavailable) becomes the ONLY isolation model. Every backend selection installs
+    /// tract with it; when it is unavailable no backend is installed, the status reports the code
+    /// and nothing falls back to the base `DFNet3`. Takes effect on the next selection.
+    pub fn require_isolation_model(&mut self, model: Result<PdfNet3DevArchive, &'static str>) {
+        self.isolation_model_required = true;
+        match model {
+            Ok(archive) => {
+                self.dev_base_model = Some(archive);
+                self.isolation_model_error = None;
+            }
+            Err(code) => {
+                self.dev_base_model = None;
+                self.isolation_model_error = Some(code);
+            }
+        }
+    }
+
+    /// The verified pDFNet3 archive, if one is configured (shared with the enrollment denoiser).
+    #[must_use]
+    pub const fn isolation_archive(&self) -> Option<&PdfNet3DevArchive> {
+        self.dev_base_model.as_ref()
+    }
+
+    /// Whether the production "pDFNet3 only" policy is active.
+    #[must_use]
+    pub const fn isolation_model_required(&self) -> bool {
+        self.isolation_model_required
+    }
+
+    /// Fixed `MODEL_*` code while the required isolation model is unavailable.
+    #[must_use]
+    pub const fn isolation_model_error(&self) -> Option<&'static str> {
+        self.isolation_model_error
+    }
+
+    /// Which isolation model the live backend runs: [`ISOLATION_MODEL_PDFNET3_PRO`],
+    /// [`ISOLATION_MODEL_PDFNET3_DEV`], [`ISOLATION_MODEL_BASE`] or [`ISOLATION_MODEL_NONE`].
+    #[must_use]
+    pub fn isolation_model(&self) -> &'static str {
+        match self.active_backend_descriptor() {
+            None => ISOLATION_MODEL_NONE,
+            Some(desc) if desc.asset_id == PDFNET3_PRO_ASSET_ID => ISOLATION_MODEL_PDFNET3_PRO,
+            Some(desc) if desc.asset_id == PDFNET3_DEV_ASSET_ID => ISOLATION_MODEL_PDFNET3_DEV,
+            Some(_) => ISOLATION_MODEL_BASE,
         }
     }
 
@@ -257,21 +322,10 @@ impl EngineSupervisor {
         self.reapply_voice_profile();
     }
 
-    #[must_use]
-    pub fn is_accelerator_base(&self) -> bool {
-        if self.active_backend_name == "mock" {
-            return false;
-        }
-        self.is_hardware_accelerated()
-            || matches!(
-                self.active_backend_name.as_str(),
-                "nvidia-tensorrt" | "tensorrt" | "openvino" | "openvino-gpu" | "openvino-npu" | "openvino-cpu"
-            )
-    }
-
     /// Applies `profile` to the live backend. The profile is reported as active only after the
-    /// backend confirms it or the bridge reconciles it with integrity for an accelerator base;
-    /// on failure the previously active profile is preserved.
+    /// backend confirms it (`FiLM` inputs); on failure the previously active profile is preserved.
+    /// There is no "DSP bridge": a backend without `FiLM` refuses a conditioned profile, which is
+    /// exactly what [`Self::supports_voice_profile`] announces up front.
     pub fn set_voice_profile(
         &mut self,
         profile: Option<&VoiceProfile>,
@@ -290,35 +344,9 @@ impl EngineSupervisor {
         p.verify_integrity()
             .map_err(|e| InferenceError::InputContract(e.to_string()))?;
 
-        match backend.set_voice_profile(Some(p)) {
-            Ok(()) => {
-                self.active_profile = Some(p.clone());
-                Ok(())
-            }
-            Err(err) => {
-                // If the live model doesn't support FiLM, fallback to pDFNet3 if configured
-                if let Some(archive) = &self.dev_base_model {
-                    if let Ok(dev_backend) = archive.instantiate(CpuProfile::Avx2Minimum) {
-                        self.dev_base_model_error = None;
-                        self.set_backend(Box::new(dev_backend), "tract");
-                        if let Some(b) = self.backend.as_mut() {
-                            if b.set_voice_profile(Some(p)).is_ok() {
-                                self.active_profile = Some(p.clone());
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-
-                // If backend is an accelerator base (without FiLM), reconcile via DSP bridge with integrity
-                if self.is_accelerator_base() {
-                    self.active_profile = Some(p.clone());
-                    return Ok(());
-                }
-
-                Err(err)
-            }
-        }
+        backend.set_voice_profile(Some(p))?;
+        self.active_profile = Some(p.clone());
+        Ok(())
     }
 
     #[must_use]
@@ -331,27 +359,14 @@ impl EngineSupervisor {
         self.active_profile.as_ref().map(|p| p.id.as_str())
     }
 
-    /// Whether the live backend can apply a conditioned voice profile.
-    /// Enrollment and voice profile handling are native capabilities of Clearcore.
+    /// Whether the live backend can apply a conditioned voice profile: exactly when its model
+    /// declares the `FiLM` inputs, so `true` here means [`Self::set_voice_profile`] accepts a
+    /// conditioned profile and `false` lets `BuildVoiceProfile` refuse up front.
     #[must_use]
     pub fn supports_voice_profile(&self) -> bool {
-        if self
-            .backend
+        self.backend
             .as_deref()
             .is_some_and(InferenceBackend::supports_voice_profile)
-        {
-            return true;
-        }
-        if self.dev_base_model.is_some() {
-            return true;
-        }
-        if self.backend.is_some()
-            && (self.is_accelerator_base()
-                || matches!(self.active_backend_name.as_str(), "tract" | "cpu-tract"))
-        {
-            return true;
-        }
-        false
     }
 
     /// Re-applies the stored profile to a freshly installed backend. If the new backend does not
@@ -371,28 +386,37 @@ impl EngineSupervisor {
         repo_root: Option<&Path>,
     ) -> BackendResolutionInfo {
         self.requested_backend_name = request.to_string();
-        let trimmed = request.trim().to_ascii_lowercase().replace('_', "-");
-        let is_tract_request = matches!(
-            trimmed.as_str(),
-            "tract" | "cpu-tract" | "tract-cpu" | "cpu"
-        );
-        if is_tract_request {
-            if let Some(archive) = &self.dev_base_model {
-                match archive.instantiate(CpuProfile::Avx2Minimum) {
-                    Ok(backend) => {
-                        self.dev_base_model_error = None;
-                        let info = BackendResolutionInfo {
-                            name: "tract".to_string(),
-                            runtime: "tract".to_string(),
-                            device: "CPU".to_string(),
-                            is_hardware_accelerated: false,
-                            is_fallback: false,
-                            fallback_reason: None,
-                        };
-                        self.set_backend(Box::new(backend), &info.name);
-                        return info;
-                    }
-                    Err(error) => {
+        // The pDFNet3 (FiLM) overrides EVERY request: its graphs only run on tract here, and an
+        // accelerator would have to run another model, which could never apply a voice profile.
+        if let Some(archive) = &self.dev_base_model {
+            match archive.instantiate(CpuProfile::Avx2Minimum) {
+                Ok(backend) => {
+                    self.dev_base_model_error = None;
+                    self.isolation_model_error = None;
+                    let accelerator = is_explicit_accelerator_request(request);
+                    let info = BackendResolutionInfo {
+                        name: "tract".to_string(),
+                        runtime: "tract".to_string(),
+                        device: "CPU".to_string(),
+                        is_hardware_accelerated: false,
+                        is_fallback: accelerator,
+                        fallback_reason: accelerator.then(|| {
+                            "The pDFNet3 Pro isolation model runs on the CPU (tract): the \
+                             accelerator backends cannot feed its FiLM voice-profile inputs"
+                                .to_string()
+                        }),
+                    };
+                    self.set_backend(Box::new(backend), &info.name);
+                    return info;
+                }
+                Err(error) => {
+                    if self.isolation_model_required {
+                        eprintln!(
+                            "pDFNet3 isolation model failed to load ({}); no isolation backend",
+                            error.model_code()
+                        );
+                        self.isolation_model_error = Some(error.model_code());
+                    } else {
                         eprintln!(
                             "Development pDFNet3 model was not loaded ({}); using the default model",
                             error.code()
@@ -402,9 +426,31 @@ impl EngineSupervisor {
                 }
             }
         }
+        if self.isolation_model_required {
+            return self.clear_backend_for_missing_model();
+        }
         let (backend, info) = instantiate_backend_with_fallback(request, model_dir, repo_root);
         self.set_backend(backend, &info.name);
         info
+    }
+
+    /// Production policy without its model: no backend at all (never the base `DFNet3`), the
+    /// applied profile is dropped and the resolution names the fixed `MODEL_*` code.
+    fn clear_backend_for_missing_model(&mut self) -> BackendResolutionInfo {
+        let code = self.isolation_model_error.unwrap_or("MODEL_UNAVAILABLE");
+        self.backend = None;
+        self.active_backend_name.clear();
+        self.active_profile = None;
+        BackendResolutionInfo {
+            name: "none".to_string(),
+            runtime: "none".to_string(),
+            device: "none".to_string(),
+            is_hardware_accelerated: false,
+            is_fallback: true,
+            fallback_reason: Some(format!(
+                "The pDFNet3 Pro isolation model is unavailable ({code}); no fallback model is used"
+            )),
+        }
     }
 
     /// Process a frame according to supervisor state, denoise mode, and active backend.

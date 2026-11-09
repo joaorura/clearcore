@@ -17,12 +17,18 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'dev_base_model',
   // GetStatus: fixed DEV_MODEL_* code or null (free text, e.g. a path, is dropped).
   'dev_base_model_error',
+  // GetStatus: 'pdfnet3-pro' | 'pdfnet3-dev' | 'base' | 'none' (anything else is dropped).
+  'isolation_model',
+  // GetStatus: fixed MODEL_* code or null while the isolation model is unavailable.
+  'isolation_model_error',
   'voice_isolation_enabled',
   'voice_isolation_intensity',
 ];
 
 const DEV_BASE_MODELS = new Set(['pdfnet3-dev', 'base']);
 const DEV_BASE_MODEL_ERROR_RE = /^DEV_MODEL_[A-Z_]{1,48}$/;
+const ISOLATION_MODELS = new Set(['pdfnet3-pro', 'pdfnet3-dev', 'base', 'none']);
+const ISOLATION_MODEL_ERROR_RE = /^MODEL_[A-Z_]{1,48}$/;
 
 // Service fields accepted only as real booleans; anything else is dropped (= unknown).
 const BOOLEAN_SERVICE_KEYS = new Set([
@@ -44,6 +50,9 @@ function pickServiceVoiceProfileFields(serviceStatus) {
     if (key === 'dev_base_model' && !DEV_BASE_MODELS.has(serviceStatus[key])) continue;
     if (key === 'dev_base_model_error' && serviceStatus[key] !== null
       && !(typeof serviceStatus[key] === 'string' && DEV_BASE_MODEL_ERROR_RE.test(serviceStatus[key]))) continue;
+    if (key === 'isolation_model' && !ISOLATION_MODELS.has(serviceStatus[key])) continue;
+    if (key === 'isolation_model_error' && serviceStatus[key] !== null
+      && !(typeof serviceStatus[key] === 'string' && ISOLATION_MODEL_ERROR_RE.test(serviceStatus[key]))) continue;
     out[key] = serviceStatus[key];
   }
   return out;

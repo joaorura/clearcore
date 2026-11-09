@@ -11,7 +11,8 @@ pub use backend::{
 };
 pub use backoff::{BACKOFF_SECONDS, BackoffTracker, FIFTEEN_MINUTES, MAX_CRASHES_PER_15_MINUTES};
 pub use supervisor::{
-    DEV_BASE_MODEL_BASE, DEV_BASE_MODEL_PDFNET3, EngineSupervisor, SupervisorError,
+    DEV_BASE_MODEL_BASE, DEV_BASE_MODEL_PDFNET3, EngineSupervisor, ISOLATION_MODEL_BASE,
+    ISOLATION_MODEL_NONE, ISOLATION_MODEL_PDFNET3_DEV, ISOLATION_MODEL_PDFNET3_PRO, SupervisorError,
     SupervisorState, SupervisorStatus, convert_dsp_preset_to_ipc, convert_engine_mode_to_ipc,
     convert_ipc_mode_to_engine, convert_ipc_preset_to_dsp,
 };

@@ -197,7 +197,8 @@ exit 0
     os.symlink("/usr/bin/clearcore-pipewire-helper", os.path.join(gui_root, "opt/clearcore/resources/bin/pipewire_helper"))
     os.symlink("/usr/lib/clearcore/libclearcore_filter.so", os.path.join(gui_root, "opt/clearcore/resources/bin/libclearcore_filter.so"))
     os.symlink("/usr/lib/clearcore/libclearcore_filter.so", os.path.join(gui_root, "opt/clearcore/libclearcore_filter.so"))
-    os.symlink("/usr/share/clearcore/vendor", os.path.join(gui_root, "opt/clearcore/vendor"))
+    if os.path.exists(os.path.join(src_dir, "vendor")):
+        os.symlink("/usr/share/clearcore/vendor", os.path.join(gui_root, "opt/clearcore/vendor"))
     os.symlink("/usr/share/clearcore/governance", os.path.join(gui_root, "opt/clearcore/governance"))
     os.symlink("/usr/share/clearcore/scripts", os.path.join(gui_root, "opt/clearcore/resources/scripts"))
 

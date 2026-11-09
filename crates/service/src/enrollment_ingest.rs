@@ -1,4 +1,5 @@
-//! Ingestion of enrollment samples: validate the raw take, run it through the base denoiser,
+//! Ingestion of enrollment samples: validate the raw take, run it through the neutral denoiser
+//! (the bundled pDFNet3 Pro without a voice profile),
 //! mix a bounded fraction of the removed residual back in, measure the result and encode the full
 //! take as the stored WAV.
 
@@ -130,6 +131,62 @@ fn peak_of(samples: &[f32]) -> f32 {
     samples.iter().fold(0.0_f32, |m, v| m.max(v.abs()))
 }
 
+/// Denoises one enrollment take with a backend built fresh for that take (fresh recurrent state)
+/// and no voice profile, i.e. neutral conditioning.
+fn denoise_with(
+    mut backend: impl realtime_noise_model::InferenceBackend,
+    pcm48: &[f32],
+) -> Result<Vec<f32>, EnrollError> {
+    use realtime_noise_contracts::HOP_SAMPLES;
+    use realtime_noise_model::ALGORITHM_LATENCY_SAMPLES;
+
+    let delay = usize::try_from(ALGORITHM_LATENCY_SAMPLES).map_err(|_| EnrollError::Failed)?;
+    let pad = delay + (HOP_SAMPLES - pcm48.len() % HOP_SAMPLES) % HOP_SAMPLES;
+    // Every buffer holding raw or denoised voice is wiped on all exits (including `?`).
+    // tract's internal state is outside our reach and cannot be zeroed by us.
+    let mut padded = ZeroOnDrop(Vec::with_capacity(pcm48.len() + pad));
+    padded.0.extend_from_slice(pcm48);
+    padded.0.resize(pcm48.len() + pad, 0.0);
+    let mut out = ZeroOnDrop(Vec::with_capacity(padded.0.len()));
+    let mut frame = ZeroOnDrop([0.0_f32; HOP_SAMPLES]);
+    for chunk in padded.0.chunks_exact(HOP_SAMPLES) {
+        frame.0.copy_from_slice(chunk);
+        let processed = backend.process(&frame.0).map_err(|_| EnrollError::Failed)?;
+        out.0.extend_from_slice(&processed.samples);
+    }
+    let result: Vec<f32> = out
+        .0
+        .get(delay..delay + pcm48.len())
+        .ok_or(EnrollError::Failed)?
+        .to_vec();
+    Ok(result)
+}
+
+/// Production denoiser: the bundled pDFNet3 Pro (the daemon's only isolation model) in neutral
+/// conditioning, a fresh tract backend per take.
+pub struct PdfNet3Denoiser {
+    archive: realtime_noise_model::PdfNet3DevArchive,
+}
+
+impl PdfNet3Denoiser {
+    #[must_use]
+    pub const fn new(archive: realtime_noise_model::PdfNet3DevArchive) -> Self {
+        Self { archive }
+    }
+}
+
+impl Denoiser for PdfNet3Denoiser {
+    fn denoise(&mut self, pcm48: &[f32]) -> Result<Vec<f32>, EnrollError> {
+        let backend = self
+            .archive
+            .instantiate(realtime_noise_model::CpuProfile::Avx2Minimum)
+            .map_err(|_| EnrollError::Failed)?;
+        denoise_with(backend, pcm48)
+    }
+}
+
+/// Legacy denoiser: the approved base `DFNet3` (`vendor/approved`). Only used by embeddings and
+/// tests that configure no pDFNet3 (the production daemon always does, see `ServiceDaemon::new`).
 pub struct TractDenoiser {
     repo_root: std::path::PathBuf,
 }
@@ -143,37 +200,14 @@ impl TractDenoiser {
 
 impl Denoiser for TractDenoiser {
     fn denoise(&mut self, pcm48: &[f32]) -> Result<Vec<f32>, EnrollError> {
-        use realtime_noise_contracts::HOP_SAMPLES;
-        use realtime_noise_model::{
-            ALGORITHM_LATENCY_SAMPLES, ApprovedAssetManifest, CpuProfile, InferenceBackend,
-            TractBackend,
-        };
+        use realtime_noise_model::{ApprovedAssetManifest, CpuProfile, TractBackend};
 
         let manifest =
             ApprovedAssetManifest::verify(&self.repo_root).map_err(|_| EnrollError::Failed)?;
         // No reset exists: a fresh backend (fresh state) per sample is the contract.
-        let mut backend = TractBackend::new(&manifest, CpuProfile::Avx2Minimum)
+        let backend = TractBackend::new(&manifest, CpuProfile::Avx2Minimum)
             .map_err(|_| EnrollError::Failed)?;
-        let delay = usize::try_from(ALGORITHM_LATENCY_SAMPLES).map_err(|_| EnrollError::Failed)?;
-        let pad = delay + (HOP_SAMPLES - pcm48.len() % HOP_SAMPLES) % HOP_SAMPLES;
-        // Every buffer holding raw or denoised voice is wiped on all exits (including `?`).
-        // tract's internal state is outside our reach and cannot be zeroed by us.
-        let mut padded = ZeroOnDrop(Vec::with_capacity(pcm48.len() + pad));
-        padded.0.extend_from_slice(pcm48);
-        padded.0.resize(pcm48.len() + pad, 0.0);
-        let mut out = ZeroOnDrop(Vec::with_capacity(padded.0.len()));
-        let mut frame = ZeroOnDrop([0.0_f32; HOP_SAMPLES]);
-        for chunk in padded.0.chunks_exact(HOP_SAMPLES) {
-            frame.0.copy_from_slice(chunk);
-            let processed = backend.process(&frame.0).map_err(|_| EnrollError::Failed)?;
-            out.0.extend_from_slice(&processed.samples);
-        }
-        let result: Vec<f32> = out
-            .0
-            .get(delay..delay + pcm48.len())
-            .ok_or(EnrollError::Failed)?
-            .to_vec();
-        Ok(result)
+        denoise_with(backend, pcm48)
     }
 }
 

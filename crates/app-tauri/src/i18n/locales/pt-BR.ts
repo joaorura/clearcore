@@ -248,6 +248,7 @@ export const ptBR: Translations = {
     neuralEqCalibrated: '🟢 Calibrado',
     neuralEqPending: '⚪ Não Calibrado',
     profileUnsupportedNotice: 'Perfil de voz não suportado pelo modelo de isolamento ativo',
+    isolationModelUnavailableNotice: 'O modelo de isolamento pDFNet3 Pro não pôde ser carregado ({code}). Reinstale o Clearcore para restaurá-lo.',
     stepProgress: 'Etapa {current} de {total}',
     stepPercent: '{percent}% Concluído',
     openQuestionsMode: 'Perguntas Abertas (Fala Espontânea)',

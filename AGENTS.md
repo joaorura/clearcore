@@ -57,30 +57,19 @@ CLEARCORE_DEV_ENROLLMENT_SHA256=bd4d6dd941f8527b5011a2bae78169148f33155e25d30c57
 
 The asset is never copied to `vendor/approved/`, pinned or distributed (see `docs/ipc-v1.md` §3.1.7).
 
-**Development isolation model (pDFNet3 with FiLM).** The approved base DFNet3 cannot apply a voice
-profile (no FiLM inputs), and on machines with an Intel NPU `auto` picks `openvino-npu`, which never
-applies one either. To test the profile end to end, give the daemon the pDFNet3 produced by
-`clearcore-train` (M3). `dev.sh` passes these on too; without them the daemon uses the base model and
-"Gerar perfil" is refused with `ENROLL_BACKEND_UNSUPPORTED`:
+**Isolation model: bundled pDFNet3 Pro (FiLM).** The pDFNet3 Pro is the ONLY isolation model shipped
+(`models/pdfnet3/`, see its `README.md`): the daemon loads `pdfnet3-release-asset-v1.tar.gz` (tract) and the
+virtual-mic filter loads `pdfnet3-stateful-asset-v1.tar.gz` (ONNX Runtime) by default, with no environment
+variable; both SHA-256 are pinned in `crates/model/src/pdfnet3_bundle.rs`. Every backend request runs tract
+with it (`GetStatus`: `isolation_model: "pdfnet3-pro"`, `voice_profile_supported: true`). If the archive is
+missing or tampered there is no fallback: no backend, `isolation_model: "none"` and a fixed
+`isolation_model_error` (`MODEL_*`). The base DFNet3 (`models/stateful/`, `vendor/approved/`) stays in the
+repository for tests only and is not packaged. `models/enrollment/enrollment.onnx` is the enrollment model
+paired with this checkpoint.
 
-| Variable | Value |
-| :--- | :--- |
-| `CLEARCORE_DEV_PDFNET3_ASSET` | Absolute path of `pdfnet3-release-asset-v1.tar.gz`. |
-| `CLEARCORE_DEV_PDFNET3_SHA256` | SHA-256 of the whole file (64 lowercase hex). Both or neither. |
-
-With both set, the daemon forces the `tract` backend with this model for every selection
-(`GetStatus`: `dev_base_model: "pdfnet3-dev"`, `voice_profile_supported: true`). If the archive is
-missing or does not match, it keeps the base model and reports a fixed code in
-`dev_base_model_error`. This is the M2 NO-GO checkpoint (no proven isolation benefit): development
-only, never approved, never copied to `vendor/approved/`. Example only:
-
-```bash
-CLEARCORE_DEV_ENROLLMENT_ASSET=/home/joaorura/orca/projects/clearcore-train/runs/m3/voice-enrollment-asset-v1.tar.gz \
-CLEARCORE_DEV_ENROLLMENT_SHA256=bd4d6dd941f8527b5011a2bae78169148f33155e25d30c5707e88963e7ea824d \
-CLEARCORE_DEV_PDFNET3_ASSET=/home/joaorura/orca/projects/clearcore-train/runs/m3/pdfnet3-release-asset-v1.tar.gz \
-CLEARCORE_DEV_PDFNET3_SHA256=42dfc577fdf8a881ecbafce7777bf6f0a4cf914ffc1aaff2580aec0cbac79505 \
-./dev.sh
-```
+Development overrides (both variables or none): `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256` (daemon, tract
+export) and `CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET`/`_SHA256` (filter, stateful export). An invalid override
+is reported and loads no model.
 
 ### Standalone Desktop App Execution (Production Package)
 - **Run Standalone App (Linux):** `./release/Clearcore-linux-x64/clearcore`

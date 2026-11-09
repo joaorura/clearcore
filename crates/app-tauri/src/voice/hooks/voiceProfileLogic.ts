@@ -100,6 +100,8 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     voice_profile_supported: typeof src.voice_profile_supported === 'boolean' ? src.voice_profile_supported : undefined,
     dev_base_model: devBaseModel(src.dev_base_model),
     dev_base_model_error: devBaseModelError(src.dev_base_model_error),
+    isolation_model: isolationModel(src.isolation_model),
+    isolation_model_error: isolationModelError(src.isolation_model_error),
     voice_isolation_enabled: typeof src.voice_isolation_enabled === 'boolean' ? src.voice_isolation_enabled : undefined,
     voice_isolation_intensity: typeof src.voice_isolation_intensity === 'number'
       && src.voice_isolation_intensity >= 0
@@ -118,6 +120,19 @@ export function devBaseModel(value: unknown): VoiceProfileStatus['dev_base_model
 export function devBaseModelError(value: unknown): string | null | undefined {
   if (value === null) return null;
   return typeof value === 'string' && /^DEV_MODEL_[A-Z_]{1,48}$/.test(value) ? value : undefined;
+}
+
+/** Only the documented values are accepted; anything else is unknown. */
+export function isolationModel(value: unknown): VoiceProfileStatus['isolation_model'] {
+  return value === 'pdfnet3-pro' || value === 'pdfnet3-dev' || value === 'base' || value === 'none'
+    ? value
+    : undefined;
+}
+
+/** Only a fixed `MODEL_*` code is accepted (never free text such as a path). */
+export function isolationModelError(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === 'string' && /^MODEL_[A-Z_]{1,48}$/.test(value) ? value : undefined;
 }
 
 /** The service said the active isolation model cannot apply a voice profile (absent = unknown). */
@@ -182,6 +197,8 @@ export function mergeVoiceProfileStatus(
     voice_profile_supported: prof.voice_profile_supported,
     dev_base_model: prof.dev_base_model,
     dev_base_model_error: prof.dev_base_model_error,
+    isolation_model: prof.isolation_model,
+    isolation_model_error: prof.isolation_model_error,
     voice_isolation_enabled: prof.voice_isolation_enabled,
     voice_isolation_intensity: prof.voice_isolation_intensity ?? initial.voice_isolation_intensity,
     active_samples_count: loadedSamplesCount > 0 ? loadedSamplesCount : prof.active_samples_count,
@@ -200,6 +217,8 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'voice_samples_count',
   'dev_base_model',
   'dev_base_model_error',
+  'isolation_model',
+  'isolation_model_error',
   'voice_isolation_enabled',
   'voice_isolation_intensity',
 ] as const;

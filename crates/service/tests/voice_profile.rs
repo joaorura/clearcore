@@ -714,8 +714,10 @@ fn public_select_backend_reapplies_the_stored_profile() {
     );
 }
 
+/// No "DSP bridge": a backend without FiLM inputs (here an accelerator mock) never reports a
+/// stored profile as applied, and `voice_profile_supported` says so up front.
 #[test]
-fn accelerator_base_applies_stored_voice_profile_via_bridge() {
+fn backend_without_film_never_fakes_an_applied_profile() {
     use realtime_noise_accelerators::BackendSelection;
     let temp = tempfile::tempdir().expect("tempdir");
     let dir = temp.path().join("profiles");
@@ -729,10 +731,10 @@ fn accelerator_base_applies_stored_voice_profile_via_bridge() {
 
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["stored_voice_profile_id"], "prof-1");
-    assert_eq!(status.payload["active_voice_profile_id"], "prof-1");
-    assert_eq!(status.payload["is_voice_profile_active"], true);
-    assert_eq!(status.payload["voice_profile_supported"], true);
-    assert_eq!(status.payload["voice_profile_error"], json!(null));
+    assert_eq!(status.payload["active_voice_profile_id"], json!(null));
+    assert_eq!(status.payload["is_voice_profile_active"], false);
+    assert_eq!(status.payload["voice_profile_supported"], false);
+    assert!(status.payload["voice_profile_error"].is_string());
 }
 
 #[test]

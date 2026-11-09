@@ -48,7 +48,11 @@ export function ProfilePanel(p: ProfilePanelProps) {
   const hasProfile = hasServiceVoiceProfile(profileStatus);
   // Only an explicit `false` from the service; an absent field keeps today's behavior.
   const unsupported = voiceProfileUnsupported(profileStatus);
-  const unsupportedText = t('voiceProfile.profileUnsupportedNotice');
+  // The bundled pDFNet3 Pro failed to load: show the fixed service code instead of a generic text.
+  const modelError = profileStatus?.isolation_model_error;
+  const unsupportedText = modelError
+    ? t('voiceProfile.isolationModelUnavailableNotice', { code: modelError })
+    : t('voiceProfile.profileUnsupportedNotice');
 
   const [intensity, setIntensity] = useState<number>(() => {
     if (typeof profileStatus?.voice_isolation_intensity === 'number') {

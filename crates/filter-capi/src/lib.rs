@@ -9,20 +9,17 @@ use std::sync::Arc;
 use realtime_noise_contracts::AudioFrame;
 use realtime_noise_model::{
     CpuProfile, InferenceError, InferenceBackend, OrtBackend, PdfNet3DevArchive, ProfileStore,
-    StudioBackend, VoiceProfile,
+    StudioBackend, VoiceProfile, pdfnet3_bundle,
 };
 use realtime_noise_service::settings::{default_settings_path, Settings};
 use studio_dsp::{Preset, StudioControl};
 
-/// Default deployment path of the pDFNet3 Pro v2 stateful archive (V2 M3 run). Used as the
-/// tier-1 candidate when the `CLEARCORE_DEV_PDFNET3_ASSET` / `CLEARCORE_DEV_PDFNET3_SHA256`
-/// environment variables are not set. Points at the *stateful* graphs (with recurrent state ports)
-/// that `OrtBackend` consumes.
-pub const PDFNET3_PRO_V2_DEFAULT_ASSET: &str =
-    "/home/joaorura/orca/projects/clearcore-train/runs/m3_deploy_pro_v3_20261013/pdfnet3-stateful-asset-v1.tar.gz";
-/// SHA-256 of [`PDFNET3_PRO_V2_DEFAULT_ASSET`] (the whole archive, lowercase hex).
-pub const PDFNET3_PRO_V2_DEFAULT_SHA256: &str =
-    "d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5";
+/// Development override of the stateful pDFNet3 archive the filter runs. Distinct from the
+/// daemon's `CLEARCORE_DEV_PDFNET3_*` (that one names the tract export, which has no state ports
+/// and cannot run here). Both must be set together; otherwise the bundled archive is used.
+pub const ENV_DEV_STATEFUL_ASSET: &str = "CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET";
+/// SHA-256 (64 lowercase hex characters) of the whole archive named by [`ENV_DEV_STATEFUL_ASSET`].
+pub const ENV_DEV_STATEFUL_SHA256: &str = "CLEARCORE_DEV_PDFNET3_STATEFUL_SHA256";
 
 pub struct ClearcoreFilter {
     backend: StudioBackend<OrtBackend>,
@@ -31,49 +28,70 @@ pub struct ClearcoreFilter {
     active_profile_id: Option<String>,
 }
 
-/// Candidate for the (unsigned, development) pDFNet3 Pro v2 stateful archive, resolved the same
-/// way the service daemon reads it: both `CLEARCORE_DEV_PDFNET3_ASSET` and
-/// `CLEARCORE_DEV_PDFNET3_SHA256` must be set together (both valid). If neither is set, the
-/// machine-default archive ([`PDFNET3_PRO_V2_DEFAULT_ASSET`] with [`PDFNET3_PRO_V2_DEFAULT_SHA256`])
-/// is used. A partial or malformed env configuration is treated as "not configured".
-fn dev_pdfnet3_candidate() -> Option<(PathBuf, String)> {
-    const ENV_ASSET: &str = "CLEARCORE_DEV_PDFNET3_ASSET";
-    const ENV_SHA: &str = "CLEARCORE_DEV_PDFNET3_SHA256";
-    let asset = std::env::var_os(ENV_ASSET).filter(|v| !v.is_empty());
-    let sha = std::env::var_os(ENV_SHA).filter(|v| !v.is_empty());
+/// Where the stateful pDFNet3 archive comes from.
+#[derive(Debug, PartialEq, Eq)]
+enum ArchiveSource {
+    /// Both development variables set and well formed.
+    DevOverride(PathBuf, String),
+    /// Neither variable set: the bundled pDFNet3 Pro, searched over these models directories.
+    Bundled(Vec<PathBuf>),
+    /// A partial or malformed override: fail closed (no silent switch to the bundled model).
+    InvalidOverride,
+}
+
+/// Resolves the archive source. The bundled search starts at `<repo_root>/models` and
+/// `<repo_root>/resources/models` (the root the PipeWire helper passes), then the standard
+/// locations of [`pdfnet3_bundle::candidate_model_dirs`].
+fn archive_source(repo_root: &Path) -> ArchiveSource {
+    let asset = std::env::var_os(ENV_DEV_STATEFUL_ASSET).filter(|v| !v.is_empty());
+    let sha = std::env::var_os(ENV_DEV_STATEFUL_SHA256).filter(|v| !v.is_empty());
     match (asset, sha) {
-        (Some(a), Some(s)) => {
-            let path = PathBuf::from(a);
-            let sha = s.into_string().ok()?;
-            let valid = path.is_absolute()
-                && sha.len() == 64
-                && sha.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
-            if valid {
-                Some((path, sha))
-            } else {
-                None
+        (Some(asset), Some(sha)) => {
+            let path = PathBuf::from(asset);
+            match sha.into_string() {
+                Ok(sha)
+                    if path.is_absolute()
+                        && sha.len() == 64
+                        && sha.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) =>
+                {
+                    ArchiveSource::DevOverride(path, sha)
+                }
+                _ => ArchiveSource::InvalidOverride,
             }
         }
-        (None, None) => Some((
-            PathBuf::from(PDFNET3_PRO_V2_DEFAULT_ASSET),
-            PDFNET3_PRO_V2_DEFAULT_SHA256.to_owned(),
-        )),
-        // One variable set alone or a non-UTF-8 value: not a valid configuration -> skip tier 1.
-        _ => None,
+        (None, None) => {
+            let mut dirs = vec![
+                repo_root.join("models"),
+                repo_root.join("resources/models"),
+            ];
+            dirs.extend(pdfnet3_bundle::candidate_model_dirs());
+            ArchiveSource::Bundled(dirs)
+        }
+        _ => ArchiveSource::InvalidOverride,
     }
 }
 
-/// Tier-1 model resolution (fail-closed, no base-model fallback).
+/// The verified stateful pDFNet3 archive, or `None` (fail closed).
+fn resolve_archive(repo_root: &Path) -> Option<PdfNet3DevArchive> {
+    match archive_source(repo_root) {
+        ArchiveSource::DevOverride(path, sha) => PdfNet3DevArchive::read(&path, &sha).ok(),
+        ArchiveSource::Bundled(dirs) => pdfnet3_bundle::load_stateful_archive_from(&dirs).ok(),
+        ArchiveSource::InvalidOverride => None,
+    }
+}
+
+/// Model resolution (fail-closed, no base-model fallback).
 ///
-/// When the pDFNet3 Pro v2 stateful archive is available (env vars or machine default) and its
-/// whole-file SHA-256 matches, it is verified (allowlisted members, no symlinks/exec bits) and
-/// instantiated as an [`OrtBackend`]. The loaded graphs must declare the `FiLM` inputs; if they
-/// do not, the archive is rejected. Returns `None` on any failure — there is no lower-tier
-/// fallback, so a machine without the Pro archive simply has no filter (R1: fail-closed).
-fn resolve_ort_backend(_repo_root: &Path) -> Option<OrtBackend> {
-    let (path, sha) = dev_pdfnet3_candidate()?;
-    let archive = PdfNet3DevArchive::read(&path, &sha).ok()?;
-    archive.instantiate_ort(CpuProfile::Avx2Minimum).ok()
+/// The pDFNet3 Pro stateful archive bundled with every package
+/// (`<models>/pdfnet3/pdfnet3-stateful-asset-v1.tar.gz`, whole-file SHA-256 pinned in
+/// [`pdfnet3_bundle::PDFNET3_PRO_STATEFUL_SHA256`]) — or the development override — is verified
+/// (size cap, hash before decompression, exact flat members) and instantiated as an
+/// [`OrtBackend`]. The loaded graphs must declare the `FiLM` inputs. Returns `None` on any
+/// failure: there is no lower-tier fallback, so without the archive there is no filter (R1).
+fn resolve_ort_backend(repo_root: &Path) -> Option<OrtBackend> {
+    resolve_archive(repo_root)?
+        .instantiate_ort(CpuProfile::Avx2Minimum)
+        .ok()
 }
 
 /// Clears the active voice profile and restores neutral (identity) conditioning. `Ok(())` on
@@ -133,10 +151,8 @@ fn try_load_active_profile(filter: &mut ClearcoreFilter) {
 
 /// Create a new neural filter instance.
 ///
-/// The model asset is resolved fail-closed (R1): the pDFNet3 Pro v2 stateful archive (env vars
-/// `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256`, or the machine-default archive at
-/// [`PDFNET3_PRO_V2_DEFAULT_ASSET`] — verified against [`PDFNET3_PRO_V2_DEFAULT_SHA256`]) is the
-/// only candidate. When it loads, its `FiLM` inputs are detected and a persisted
+/// The model asset is resolved fail-closed (R1): the bundled pDFNet3 Pro stateful archive (or
+/// the `CLEARCORE_DEV_PDFNET3_STATEFUL_*` development override) is the only candidate. When it loads, its `FiLM` inputs are detected and a persisted
 /// `active_profile.json` (if any) is applied atomically as part of construction. On any failure
 /// (archive missing, hash mismatch, missing `FiLM` inputs, CPU gate) this returns `NULL` — there
 /// is no base-model fallback.
@@ -459,8 +475,8 @@ mod tests {
         }
     }
 
-    /// Forces tier-2 (approved base DeepFilterNet3) by making `dev_pdfnet3_candidate` return `None`
-    /// through a *partial* env configuration (asset set, SHA unset). Restores the previous values on
+    /// Disables the model by making `archive_source` return `InvalidOverride` through a *partial*
+    /// env configuration (asset set, SHA unset). Restores the previous values on
     /// drop so subsequent tests see the original machine config.
     struct DisableProTier {
         prev_asset: Option<OsString>,
@@ -469,15 +485,15 @@ mod tests {
 
     impl DisableProTier {
         fn engage() -> Self {
-            let prev_asset = std::env::var_os("CLEARCORE_DEV_PDFNET3_ASSET");
-            let prev_sha = std::env::var_os("CLEARCORE_DEV_PDFNET3_SHA256");
+            let prev_asset = std::env::var_os(ENV_DEV_STATEFUL_ASSET);
+            let prev_sha = std::env::var_os(ENV_DEV_STATEFUL_SHA256);
             unsafe {
                 std::env::set_var(
-                    "CLEARCORE_DEV_PDFNET3_ASSET",
+                    ENV_DEV_STATEFUL_ASSET,
                     "/nonexistent/clearcore-tier1-disabled",
                 )
             };
-            unsafe { std::env::remove_var("CLEARCORE_DEV_PDFNET3_SHA256") };
+            unsafe { std::env::remove_var(ENV_DEV_STATEFUL_SHA256) };
             Self {
                 prev_asset,
                 prev_sha,
@@ -489,12 +505,12 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 match self.prev_asset.take() {
-                    Some(v) => std::env::set_var("CLEARCORE_DEV_PDFNET3_ASSET", v),
-                    None => std::env::remove_var("CLEARCORE_DEV_PDFNET3_ASSET"),
+                    Some(v) => std::env::set_var(ENV_DEV_STATEFUL_ASSET, v),
+                    None => std::env::remove_var(ENV_DEV_STATEFUL_ASSET),
                 }
                 match self.prev_sha.take() {
-                    Some(v) => std::env::set_var("CLEARCORE_DEV_PDFNET3_SHA256", v),
-                    None => std::env::remove_var("CLEARCORE_DEV_PDFNET3_SHA256"),
+                    Some(v) => std::env::set_var(ENV_DEV_STATEFUL_SHA256, v),
+                    None => std::env::remove_var(ENV_DEV_STATEFUL_SHA256),
                 }
             }
         }
@@ -552,11 +568,9 @@ mod tests {
         VoiceProfile::identity(id, "Speaker", "2026-10-05T12:00:00Z").expect("identity profile")
     }
 
-    /// `true` when this machine will resolve the pDFNet3 Pro v2 archive through tier 1.
+    /// `true` when the filter will resolve a stateful pDFNet3 archive (bundled or override).
     fn pro_archive_present() -> bool {
-        dev_pdfnet3_candidate()
-            .map(|(path, sha)| PdfNet3DevArchive::read(&path, &sha).is_ok())
-            .unwrap_or(false)
+        resolve_archive(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").as_path()).is_some()
     }
 
     #[test]
@@ -756,6 +770,26 @@ mod tests {
         assert_eq!(unsafe { clearcore_filter_clear_voice_profile(filter) }, 0);
         assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
         assert_eq!(unsafe { clearcore_filter_clear_voice_profile(std::ptr::null_mut()) }, -1);
+        unsafe { clearcore_filter_free(filter) };
+    }
+
+    #[test]
+    fn without_environment_the_bundled_pdfnet3_pro_is_loaded() {
+        let _env = lock_env();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        if std::env::var_os(ENV_DEV_STATEFUL_ASSET).is_some()
+            || std::env::var_os(ENV_DEV_STATEFUL_SHA256).is_some()
+        {
+            eprintln!("skipped: a development override is set in this environment");
+            return;
+        }
+        assert!(matches!(archive_source(&root), ArchiveSource::Bundled(_)));
+        let archive = resolve_archive(&root).expect("bundled stateful pDFNet3 Pro");
+        assert_eq!(archive.sha256(), pdfnet3_bundle::PDFNET3_PRO_STATEFUL_SHA256);
+        assert_eq!(archive.asset_id(), realtime_noise_model::PDFNET3_PRO_ASSET_ID);
+        let filter = create_filter();
+        assert!(!filter.is_null());
+        assert_eq!(unsafe { clearcore_filter_supports_voice_profile(filter) }, 1);
         unsafe { clearcore_filter_free(filter) };
     }
 
