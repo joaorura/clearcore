@@ -52,7 +52,7 @@ pub use ort_backend::{APPROVED_PRO_STATEFUL_DIGESTS, APPROVED_STATEFUL_DIGESTS, 
 #[cfg(any(feature = "tract", feature = "ort"))]
 pub use pdfnet3_bundle::{BundledModelError, PDFNET3_PRO_ASSET_ID};
 #[cfg(any(feature = "tract", feature = "ort"))]
-pub use pdfnet3_dev::{PDFNET3_DEV_ASSET_ID, PdfNet3DevArchive, PdfNet3DevError};
+pub use pdfnet3_dev::{ArchiveGraphs, PDFNET3_DEV_ASSET_ID, PdfNet3DevArchive, PdfNet3DevError};
 pub use profile_store::{ACTIVE_PROFILE_FILE_NAME, ProfileStore};
 pub use studio_backend::{StudioBackend, StudioResetHandle};
 #[cfg(feature = "tract")]

@@ -110,10 +110,13 @@ $hasOpenVinoGpu = $false
 $hasOpenVinoCpu = $false
 
 if ($hasIntelCpu -or $hasIntelGpu -or $hasIntelNpu) {
+    # Runtime embutido no pacote (resources\scripts -> resources\openvino), depois instalacoes manuais.
     $ovPaths = @(
+        (Join-Path $PSScriptRoot "..\openvino\openvino_c.dll"),
         "C:\Program Files (x86)\Intel\openvino*\runtime\bin\intel64\openvino.dll",
         "C:\openvino\runtime\bin\intel64\openvino.dll"
     )
+    if ($env:OPENVINO_LIB_PATH) { $ovPaths = @($env:OPENVINO_LIB_PATH) + $ovPaths }
     foreach ($op in $ovPaths) {
         if (Test-Path $op) {
             if ($hasIntelCpu) { $hasOpenVinoCpu = $true }
@@ -123,7 +126,8 @@ if ($hasIntelCpu -or $hasIntelGpu -or $hasIntelNpu) {
     }
 
     $npuDrv = Get-Service "intel-npu-driver" -ErrorAction SilentlyContinue
-    if ($hasIntelNpu -and ($npuDrv -or $hasOpenVinoCpu)) {
+    $npuPlugin = Test-Path (Join-Path $PSScriptRoot "..\openvino\openvino_intel_npu_plugin.dll")
+    if ($hasIntelNpu -and ($npuDrv -or $npuPlugin -or $hasOpenVinoCpu)) {
         $hasOpenVinoNpu = $true
     }
 }

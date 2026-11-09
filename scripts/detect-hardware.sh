@@ -22,6 +22,8 @@ set -euo pipefail
 #                           e "import tensorrt", separados por ':' (alem do python3 do PATH).
 #   CLEARCORE_PROBE_TIMEOUT segundos maximos de cada sonda Python (padrao 4).
 #   INTEL_OPENVINO_DIR      raiz de uma instalacao manual do OpenVINO (ex.: /opt/intel/openvino).
+#   OPENVINO_LIB_PATH       libopenvino_c.so* (ou o diretorio dela) que o daemon deve usar; o
+#                           runtime embutido no pacote (resources/openvino) e achado sozinho.
 #   LD_LIBRARY_PATH         diretorios adicionais onde libopenvino e os plugins podem estar.
 ROOT="${CLEARCORE_DETECT_ROOT:-}"
 PROBE_TIMEOUT="${CLEARCORE_PROBE_TIMEOUT:-4}"
@@ -196,6 +198,21 @@ HAS_OPENVINO_CPU=false
 # (/opt/intel/openvino*/runtime/lib/intel64), ${INTEL_OPENVINO_DIR} e LD_LIBRARY_PATH.
 OV_DIRS=()
 add_ov_dir() { [[ -d "$1" ]] && OV_DIRS+=("$1"); return 0; }
+# Runtime OpenVINO embutido no pacote do Clearcore (com os plugins CPU/GPU/NPU): este script
+# roda de <app>/resources/scripts, o runtime fica em <app>/resources/openvino. Mesma busca do
+# daemon (crates/runtime-openvino/src/ffi.rs: OPENVINO_LIB_PATH, embutido, sistema).
+DETECT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for d in "${DETECT_SCRIPT_DIR}/../openvino" "${DETECT_SCRIPT_DIR}/../resources/openvino" \
+         "${ROOT}"/opt/clearcore/resources/openvino "${ROOT}"/usr/lib/clearcore/resources/openvino; do
+    add_ov_dir "${d}"
+done
+if [[ -n "${OPENVINO_LIB_PATH:-}" ]]; then
+    if [[ -d "${OPENVINO_LIB_PATH}" ]]; then
+        add_ov_dir "${OPENVINO_LIB_PATH}"
+    else
+        add_ov_dir "$(dirname "${OPENVINO_LIB_PATH}")"
+    fi
+fi
 for d in "${ROOT}"/usr/lib64 "${ROOT}"/lib64 "${ROOT}"/usr/lib/x86_64-linux-gnu \
          "${ROOT}"/usr/lib64/openvino* "${ROOT}"/lib64/openvino* "${ROOT}"/usr/lib/x86_64-linux-gnu/openvino* \
          "${ROOT}"/opt/intel/openvino*/runtime/lib/intel64; do
@@ -225,7 +242,7 @@ has_ov_file() {
     return 1
 }
 
-if ldconfig -p 2>/dev/null | grep -q "libopenvino\.so" || has_ov_file 'libopenvino.so*'; then
+if ldconfig -p 2>/dev/null | grep -q "libopenvino\.so" || has_ov_file 'libopenvino.so*' || has_ov_file 'libopenvino_c.so*'; then
     HAS_OPENVINO_BASE=true
 fi
 

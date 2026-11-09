@@ -9,6 +9,12 @@
 //! | `erb_dec` | `h_in` `[2,1,256]`                            | `h_out`                                        |
 //! | `df_dec`  | `h_in` `[2,1,256]`, `c0_buf` `[1,64,4,96]`    | `h_out`, `c0_buf_out`                          |
 //!
+//! The pDFNet3 Pro stateful export (`pdfnet3-stateful-asset-v1.tar.gz`) has the same ports plus
+//! the `FiLM` speaker-conditioning inputs `gamma`/`beta` (`[1, S, 256]`) on `enc` and `df_dec`.
+//! They are detected at load time, pinned to `[1, 1, 256]`, bound once and rewritten in place by
+//! [`Dfn3Session::set_film`]; the identity (`gamma = 1`, `beta = 0`) is bound until then, which
+//! is what the tract backend feeds when no voice profile is active.
+//!
 //! [`Dfn3Session`] pins the time axis to `S = 1` (one 10 ms hop), compiles the graphs for one
 //! OpenVINO device with the Clearcore precision policy ([`crate::precision`]), and feeds every
 //! `*_out` state back into the matching `*_in` input after each hop.
@@ -36,6 +42,9 @@ pub const DF_COEFS_LEN: usize = NB_DF * DF_ORDER * 2;
 
 const EMB_DIM: i64 = 512;
 const GRU_HIDDEN: i64 = 256;
+/// Width of every `FiLM` vector (`gamma_enc`, `beta_enc`, `gamma_df`, `beta_df`).
+pub const FILM_DIM: usize = 256;
+const FILM_SHAPE: [i64; 3] = [1, 1, FILM_DIM as i64];
 
 /// Result of one streaming hop.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +78,14 @@ struct Stage {
     // The request must drop before the compiled model that created it.
     request: OpenVinoInferRequest,
     _compiled: OpenVinoCompiledModel,
+}
+
+/// `FiLM` tensors bound to `enc` and `df_dec` (present only when both graphs declare them).
+struct FilmTensors {
+    enc_gamma: OpenVinoTensor,
+    enc_beta: OpenVinoTensor,
+    df_gamma: OpenVinoTensor,
+    df_beta: OpenVinoTensor,
 }
 
 /// Static input shapes of the three graphs for `S = 1`.
@@ -110,6 +127,7 @@ pub struct Dfn3Session {
     df_c0: OpenVinoTensor,
     df_h: OpenVinoTensor,
     df_c0_buf: OpenVinoTensor,
+    film: Option<FilmTensors>,
     frames: u64,
 }
 
@@ -166,16 +184,27 @@ impl Dfn3Graphs {
     }
 }
 
+/// A compiled stage plus whether its graph declares the `FiLM` inputs.
+type CompiledStage = (OpenVinoCompiledModel, OpenVinoInferRequest, bool);
+
 fn compile_stage(
     core: &OpenVinoCore,
     graph: &[u8],
     pins: &[(&str, &[i64])],
     device: &str,
     precision: InferencePrecision,
-) -> Result<(OpenVinoCompiledModel, OpenVinoInferRequest), OpenVinoError> {
+) -> Result<CompiledStage, OpenVinoError> {
     let mut model: OpenVinoModel = core.read_model_from_memory(graph, None)?;
+    let inputs = model.input_names()?;
+    let declares = |name: &str| inputs.iter().any(|input| input == name);
+    let film = declares("gamma") && declares("beta");
     for (name, shape) in pins {
         model.reshape_input(name, shape)?;
+    }
+    if film {
+        // NPU needs every dimension static; `S = 1` like the feature inputs.
+        model.reshape_input("gamma", &FILM_SHAPE)?;
+        model.reshape_input("beta", &FILM_SHAPE)?;
     }
     let compiled = core.compile_model_with_properties(
         &model,
@@ -186,7 +215,7 @@ fn compile_stage(
         ],
     )?;
     let request = compiled.create_infer_request()?;
-    Ok((compiled, request))
+    Ok((compiled, request, film))
 }
 
 fn zeros(core: &OpenVinoCore, shape: &[i64]) -> Result<OpenVinoTensor, OpenVinoError> {
@@ -239,15 +268,48 @@ impl Dfn3Session {
     /// Compiles already-read graphs for `device` (see [`Self::load`]).
     pub fn load_graphs(graphs: &Dfn3Graphs, device: &str) -> Result<Self, OpenVinoError> {
         let core = OpenVinoCore::new()?;
-        if !core.is_device_available(device) {
-            return Err(OpenVinoError::DeviceNotFound(device.to_owned()));
+        let available = core.available_devices()?;
+        if !available.iter().any(|d| d.eq_ignore_ascii_case(device)) {
+            return Err(OpenVinoError::DeviceNotFound(format!(
+                "{device} (OpenVINO lists: {})",
+                available.join(", ")
+            )));
         }
         let precision = precision_for_device(device);
 
-        let (enc_c, mut enc_r) = compile_stage(&core, &graphs.enc, &ENC_PINS, device, precision)?;
-        let (erb_c, mut erb_r) =
+        let (enc_c, mut enc_r, enc_film) =
+            compile_stage(&core, &graphs.enc, &ENC_PINS, device, precision)?;
+        let (erb_c, mut erb_r, _) =
             compile_stage(&core, &graphs.erb_dec, &ERB_PINS, device, precision)?;
-        let (df_c, mut df_r) = compile_stage(&core, &graphs.df_dec, &DF_PINS, device, precision)?;
+        let (df_c, mut df_r, df_film) =
+            compile_stage(&core, &graphs.df_dec, &DF_PINS, device, precision)?;
+        if enc_film != df_film {
+            return Err(OpenVinoError::ShapeError(
+                "FiLM inputs (gamma/beta) are declared by only one of enc/df_dec".to_owned(),
+            ));
+        }
+        let film = if enc_film {
+            let ones = |core: &OpenVinoCore| {
+                OpenVinoTensor::from_slice_f32(
+                    &FILM_SHAPE,
+                    &[1.0; FILM_DIM],
+                    core.library().clone(),
+                )
+            };
+            let film = FilmTensors {
+                enc_gamma: ones(&core)?,
+                enc_beta: zeros(&core, &FILM_SHAPE)?,
+                df_gamma: ones(&core)?,
+                df_beta: zeros(&core, &FILM_SHAPE)?,
+            };
+            bind(&mut enc_r, "gamma", &film.enc_gamma)?;
+            bind(&mut enc_r, "beta", &film.enc_beta)?;
+            bind(&mut df_r, "gamma", &film.df_gamma)?;
+            bind(&mut df_r, "beta", &film.df_beta)?;
+            Some(film)
+        } else {
+            None
+        };
 
         let feat_erb = zeros(&core, &[1, 1, 1, NB_ERB as i64])?;
         let feat_spec = zeros(&core, &[1, 2, 1, NB_DF as i64])?;
@@ -312,6 +374,7 @@ impl Dfn3Session {
             df_c0,
             df_h,
             df_c0_buf,
+            film,
             frames: 0,
         })
     }
@@ -327,6 +390,9 @@ impl Dfn3Session {
         graphs: &Dfn3Graphs,
         devices: &[String],
     ) -> Result<Self, OpenVinoError> {
+        if let [device] = devices {
+            return Self::load_graphs(graphs, device);
+        }
         let mut failures = Vec::new();
         for device in devices {
             match Self::load_graphs(graphs, device) {
@@ -351,6 +417,45 @@ impl Dfn3Session {
     #[must_use]
     pub const fn precision(&self) -> InferencePrecision {
         self.precision
+    }
+
+    /// Whether the graphs declare the `FiLM` inputs (pDFNet3-style models).
+    #[must_use]
+    pub const fn supports_film(&self) -> bool {
+        self.film.is_some()
+    }
+
+    /// Replaces the `FiLM` conditioning between two hops (recurrent state untouched). Each slice
+    /// must hold [`FILM_DIM`] finite values; nothing is written unless all four are valid.
+    pub fn set_film(
+        &mut self,
+        gamma_enc: &[f32],
+        beta_enc: &[f32],
+        gamma_df: &[f32],
+        beta_df: &[f32],
+    ) -> Result<(), OpenVinoError> {
+        let Some(film) = &mut self.film else {
+            return Err(OpenVinoError::InvalidInput(
+                "the loaded graphs have no FiLM inputs".to_owned(),
+            ));
+        };
+        for (name, values) in [
+            ("gamma_enc", gamma_enc),
+            ("beta_enc", beta_enc),
+            ("gamma_df", gamma_df),
+            ("beta_df", beta_df),
+        ] {
+            if values.len() != FILM_DIM || values.iter().any(|v| !v.is_finite()) {
+                return Err(OpenVinoError::InvalidInput(format!(
+                    "{name} must hold {FILM_DIM} finite values"
+                )));
+            }
+        }
+        copy_slice(&mut film.enc_gamma, gamma_enc)?;
+        copy_slice(&mut film.enc_beta, beta_enc)?;
+        copy_slice(&mut film.df_gamma, gamma_df)?;
+        copy_slice(&mut film.df_beta, beta_df)?;
+        Ok(())
     }
 
     /// Number of hops processed since creation or the last [`Self::reset`].
@@ -467,6 +572,7 @@ impl std::fmt::Debug for Dfn3Session {
         f.debug_struct("Dfn3Session")
             .field("device", &self.device)
             .field("precision", &self.precision)
+            .field("film", &self.film.is_some())
             .field("frames", &self.frames)
             .finish_non_exhaustive()
     }

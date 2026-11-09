@@ -1,6 +1,6 @@
 //! Safe OpenVINO Model and CompiledModel abstractions.
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::sync::Arc;
 
 use crate::error::{OpenVinoError, check_status};
@@ -36,6 +36,51 @@ impl OpenVinoModel {
     #[must_use]
     pub fn as_ptr(&self) -> *const ov_model_t {
         self.ptr
+    }
+
+    /// Names (any tensor name) of the model inputs, in port order.
+    pub fn input_names(&self) -> Result<Vec<String>, OpenVinoError> {
+        let mut count = 0usize;
+        let status = unsafe { (self.lib.ov_model_inputs_size)(self.ptr, &raw mut count) };
+        check_status(status, &self.lib)?;
+        let mut names = Vec::with_capacity(count);
+        for index in 0..count {
+            let mut port = std::ptr::null_mut();
+            let status =
+                unsafe { (self.lib.ov_model_const_input_by_index)(self.ptr, index, &raw mut port) };
+            check_status(status, &self.lib)?;
+            if port.is_null() {
+                return Err(OpenVinoError::ShapeError(format!(
+                    "input port {index} is null"
+                )));
+            }
+            let mut name_ptr: *mut std::os::raw::c_char = std::ptr::null_mut();
+            let status = unsafe { (self.lib.ov_port_get_any_name)(port, &raw mut name_ptr) };
+            let result = check_status(status, &self.lib).map(|()| {
+                if name_ptr.is_null() {
+                    String::new()
+                } else {
+                    // SAFETY: non-null NUL-terminated string allocated by OpenVINO.
+                    unsafe { CStr::from_ptr(name_ptr) }
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            });
+            // SAFETY: both were allocated by OpenVINO for this call and are not used afterwards.
+            unsafe {
+                if !name_ptr.is_null() {
+                    (self.lib.ov_free)(name_ptr);
+                }
+                (self.lib.ov_output_const_port_free)(port);
+            }
+            names.push(result?);
+        }
+        Ok(names)
+    }
+
+    /// Whether the model declares an input with this tensor name.
+    pub fn has_input(&self, tensor_name: &str) -> Result<bool, OpenVinoError> {
+        Ok(self.input_names()?.iter().any(|name| name == tensor_name))
     }
 
     /// Pins one input (by tensor name) to a fully static shape.

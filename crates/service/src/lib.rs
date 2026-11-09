@@ -542,7 +542,8 @@ impl ServiceDaemon {
                         "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
                         "voice_profile_error": self.voice_profile_error,
                         // Whether the live backend can apply a conditioned profile at all
-                        // (`false` on NPU/OpenVINO and on a base model without FiLM inputs).
+                        // (`true` for the pDFNet3 Pro on tract and on OpenVINO, `false` on a
+                        // base model without FiLM inputs).
                         "voice_profile_supported": self.supervisor.supports_voice_profile(),
                         // The APPLIED profile carries a calibrated microphone EQ.
                         "neural_eq_calibrated": self
@@ -566,6 +567,21 @@ impl ServiceDaemon {
                         // when it is unavailable; the error is a fixed MODEL_* code, never a path.
                         "isolation_model": self.supervisor.isolation_model(),
                         "isolation_model_error": self.supervisor.isolation_model_error(),
+                        // Why the last selection did not get what was requested (e.g. an
+                        // OpenVINO device that failed to compile or missed the deadline, so the
+                        // pDFNet3 Pro runs on tract); null when it did.
+                        "backend_fallback": self
+                            .supervisor
+                            .last_resolution()
+                            .is_some_and(|info| info.is_fallback),
+                        "backend_fallback_reason": self
+                            .supervisor
+                            .last_resolution()
+                            .and_then(|info| info.fallback_reason.clone()),
+                        // The OpenVINO runtime this daemon would use: status is one of ok,
+                        // not_found, incompatible_version, load_failed, npu_plugin_missing,
+                        // npu_device_unavailable (probed once per process).
+                        "openvino_runtime": openvino_runtime_status(),
                         // Development override only: "pdfnet3-dev" while CLEARCORE_DEV_PDFNET3_*
                         // drives the live backend, "base" otherwise (kept for older clients).
                         "dev_base_model": self.supervisor.dev_base_model(),
@@ -1159,6 +1175,21 @@ fn restore_previous(
     }
 }
 
+/// `GetStatus.openvino_runtime`: the cached probe of the `OpenVINO` runtime.
+fn openvino_runtime_status() -> serde_json::Value {
+    let probe = realtime_noise_runtime_openvino::probe_runtime_cached();
+    json!({
+        "status": probe.state.code(),
+        "usable": probe.state.is_usable(),
+        "message": probe.message,
+        "version": probe.version,
+        "library": probe.library.as_ref().map(|path| path.display().to_string()),
+        "source": probe.source.map(realtime_noise_runtime_openvino::LibrarySource::as_str),
+        "devices": probe.devices,
+        "npu_hardware": probe.npu_hardware,
+    })
+}
+
 /// Single path for every backend selection (IPC `SetBackend` and `ServiceDaemon::select_backend`).
 fn select_backend_and_reapply(
     supervisor: &mut EngineSupervisor,
@@ -1291,7 +1322,22 @@ mod tests {
             let status = status_with(Ok(None), vec![repository_models()], request);
             assert_eq!(status["isolation_model"], "pdfnet3-pro", "{request}");
             assert_eq!(status["isolation_model_error"], serde_json::Value::Null);
-            assert_eq!(status["active_backend"], "tract", "{request}");
+            if request == "openvino-npu" && status["active_backend"] == "openvino-npu" {
+                // Host with a working OpenVINO NPU: the Pro runs there.
+                assert_eq!(status["backend_fallback"], false);
+                assert_eq!(status["backend_fallback_reason"], serde_json::Value::Null);
+            } else {
+                assert_eq!(status["active_backend"], "tract", "{request}");
+            }
+            if request == "openvino-npu" && status["active_backend"] == "tract" {
+                assert_eq!(status["backend_fallback"], true);
+                assert!(status["backend_fallback_reason"].is_string(), "{status}");
+            }
+            if request == "auto" || request == "tract" {
+                assert_eq!(status["backend_fallback"], false);
+                assert_eq!(status["backend_fallback_reason"], serde_json::Value::Null);
+            }
+            assert!(status["openvino_runtime"]["status"].is_string(), "{status}");
             assert_eq!(status["voice_profile_supported"], true, "{request}");
             assert_eq!(status["dev_base_model"], "base");
             assert_eq!(status["dev_base_model_error"], serde_json::Value::Null);

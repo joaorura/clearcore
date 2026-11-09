@@ -17,6 +17,7 @@ realtime-noise-ipc = { path = "../ipc" }
 realtime-noise-model = { path = "../model", features = ["ort", "tract"] }
 base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }
 realtime-noise-supervisor = { path = "../supervisor" }
+realtime-noise-runtime-openvino = { path = "../runtime-openvino" }
 serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.145", default-features = false, features = ["std"] }
 studio-dsp = { path = "../studio-dsp" }

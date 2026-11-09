@@ -250,19 +250,10 @@ impl HardwareScanner {
 
         // 2. Check Intel NPU
         if Self::has_intel_npu() {
-            let installed = Self::find_openvino_library();
-            let status = if let Some(path) = installed {
-                RuntimeStatus::Installed {
-                    runtime_name: "OpenVINO (NPU)".to_owned(),
-                    path: Some(path),
-                }
-            } else {
-                Self::missing_status(
-                    DetectedHardware::IntelNpu,
-                    "OpenVINO",
-                    "Execute `./scripts/install-openvino.sh` para instalar o OpenVINO e o driver Intel NPU.",
-                )
-            };
+            let status = Self::openvino_status(
+                realtime_noise_runtime_openvino::probe_runtime_cached(),
+                DetectedHardware::IntelNpu,
+            );
             audits.push(HardwareAudit {
                 hardware: DetectedHardware::IntelNpu,
                 device_name: "Intel NPU".to_owned(),
@@ -300,19 +291,10 @@ impl HardwareScanner {
 
         // 4. Check Intel GPU (Arc or iGPU)
         if Self::has_intel_gpu() {
-            let installed = Self::find_openvino_library();
-            let status = if let Some(path) = installed {
-                RuntimeStatus::Installed {
-                    runtime_name: "OpenVINO (GPU)".to_owned(),
-                    path: Some(path),
-                }
-            } else {
-                Self::missing_status(
-                    DetectedHardware::IntelGpu,
-                    "OpenVINO",
-                    "Execute `./scripts/install-openvino.sh` para habilitar aceleração de GPU Intel Arc / iGPU.",
-                )
-            };
+            let status = Self::openvino_status(
+                realtime_noise_runtime_openvino::probe_runtime_cached(),
+                DetectedHardware::IntelGpu,
+            );
             audits.push(HardwareAudit {
                 hardware: DetectedHardware::IntelGpu,
                 device_name: "Intel Arc / iGPU".to_owned(),
@@ -611,19 +593,54 @@ impl HardwareScanner {
         false
     }
 
-    /// Locates the OpenVINO runtime the same way `OpenVINOBackend` loads it (the C API library
-    /// `libopenvino_c`), falling back to the core library paths used by older installers.
-    fn find_openvino_library() -> Option<String> {
-        realtime_noise_runtime_openvino::locate_library()
-            .map(|path| path.display().to_string())
-            .or_else(|| {
-                Self::check_library(&[
-                    "/lib64/libopenvino.so.2510",
-                    "/usr/lib64/libopenvino.so",
-                    "/usr/lib/x86_64-linux-gnu/libopenvino.so",
-                    "openvino.dll",
-                ])
-            })
+    /// Status of the OpenVINO runtime for an Intel NPU or GPU, from the same probe the backend
+    /// uses (library discovery, version check, plugin enumeration), so the UI never claims a
+    /// runtime the daemon cannot load, nor "not installed" for one it can.
+    #[must_use]
+    pub fn openvino_status(
+        probe: &realtime_noise_runtime_openvino::RuntimeProbe,
+        hardware: DetectedHardware,
+    ) -> RuntimeStatus {
+        let device = if hardware == DetectedHardware::IntelNpu {
+            "NPU"
+        } else {
+            "GPU"
+        };
+        let listed = probe
+            .devices
+            .iter()
+            .any(|name| name.split('.').next() == Some(device));
+        let path = probe
+            .library
+            .as_ref()
+            .map(|library| library.display().to_string());
+        if probe.state.is_usable() && listed {
+            let version = probe.version.as_deref().unwrap_or("?");
+            return RuntimeStatus::Installed {
+                runtime_name: format!("OpenVINO {version} ({device})"),
+                path,
+            };
+        }
+        let detail = if probe.state.is_usable() {
+            if hardware == DetectedHardware::IntelNpu {
+                probe.message.clone()
+            } else {
+                "A runtime OpenVINO carregou, mas não listou a GPU Intel: confira o driver \
+                 intel-compute-runtime / level-zero e o acesso a /dev/dri (grupo render)."
+                    .to_owned()
+            }
+        } else {
+            probe.message.clone()
+        };
+        Self::missing_status(
+            hardware,
+            "OpenVINO",
+            &format!(
+                "[{}] {detail} Veja `./scripts/install-openvino.sh` para o diagnóstico e os \
+                 drivers.",
+                probe.state.code()
+            ),
+        )
     }
 
     fn check_library(candidates: &[&str]) -> Option<String> {
@@ -690,6 +707,70 @@ mod tests {
         let (script, instruction) = missing_parts(status).unwrap_or_default();
         assert_eq!(script, "scripts/install-openvino.sh");
         assert!(instruction.contains("install-openvino.sh"));
+    }
+
+    fn probe(
+        state: realtime_noise_runtime_openvino::RuntimeState,
+        devices: &[&str],
+    ) -> realtime_noise_runtime_openvino::RuntimeProbe {
+        realtime_noise_runtime_openvino::RuntimeProbe {
+            state,
+            library: Some(std::path::PathBuf::from(
+                "/opt/clearcore/resources/openvino/libopenvino_c.so.2641",
+            )),
+            source: Some(realtime_noise_runtime_openvino::LibrarySource::Embedded),
+            version: Some("2026.4.1-22982".to_owned()),
+            devices: devices.iter().map(|d| (*d).to_owned()).collect(),
+            npu_hardware: true,
+            message: format!("mensagem {}", state.code()),
+        }
+    }
+
+    #[test]
+    fn openvino_status_follows_the_runtime_probe() {
+        use realtime_noise_runtime_openvino::RuntimeState;
+        let ok = probe(RuntimeState::Ok, &["CPU", "GPU", "NPU"]);
+        for hardware in [DetectedHardware::IntelNpu, DetectedHardware::IntelGpu] {
+            let RuntimeStatus::Installed { runtime_name, path } =
+                HardwareScanner::openvino_status(&ok, hardware)
+            else {
+                unreachable!("{hardware:?} must be installed");
+            };
+            assert!(runtime_name.contains("2026.4.1"), "{runtime_name}");
+            assert!(
+                path.is_some_and(|p| p.ends_with("libopenvino_c.so.2641")),
+                "{hardware:?}"
+            );
+        }
+
+        // Fedora 2026.0: CPU/GPU only. The GPU is installed, the NPU says why it is not.
+        let no_npu = probe(RuntimeState::NpuPluginMissing, &["CPU", "GPU"]);
+        assert!(matches!(
+            HardwareScanner::openvino_status(&no_npu, DetectedHardware::IntelGpu),
+            RuntimeStatus::Installed { .. }
+        ));
+        let (_, instruction) = missing_parts(HardwareScanner::openvino_status(
+            &no_npu,
+            DetectedHardware::IntelNpu,
+        ))
+        .unwrap_or_default();
+        assert!(instruction.contains("npu_plugin_missing"), "{instruction}");
+
+        for state in [
+            RuntimeState::NotFound,
+            RuntimeState::IncompatibleVersion,
+            RuntimeState::LoadFailed,
+        ] {
+            let failed = probe(state, &[]);
+            let (script, instruction) = missing_parts(HardwareScanner::openvino_status(
+                &failed,
+                DetectedHardware::IntelNpu,
+            ))
+            .unwrap_or_default();
+            assert_eq!(script, "scripts/install-openvino.sh");
+            assert!(instruction.contains(state.code()), "{instruction}");
+            assert!(instruction.contains(&failed.message), "{instruction}");
+        }
     }
 
     #[test]

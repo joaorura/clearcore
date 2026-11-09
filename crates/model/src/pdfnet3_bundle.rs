@@ -197,6 +197,21 @@ mod tests {
     }
 
     #[test]
+    fn bundled_stateful_archive_yields_its_three_graphs() -> TestResult {
+        let archive = load_stateful_archive_from(&[repository_models()])?;
+        let graphs = archive.graphs()?;
+        for graph in [&graphs.enc, &graphs.erb_dec, &graphs.df_dec] {
+            // ONNX protobufs, 1.9-3.4 MB each.
+            assert!(
+                graph.len() > 1_000_000 && graph.len() < 4_000_000,
+                "{}",
+                graph.len()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn missing_bundle_is_not_found() -> TestResult {
         let dir = tempfile::tempdir()?;
         let error = load_tract_archive_from(&[dir.path().to_path_buf()]).unwrap_err();

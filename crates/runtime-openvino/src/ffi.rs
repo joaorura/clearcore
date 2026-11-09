@@ -123,6 +123,11 @@ pub struct ov_tensor_t {
     _private: [u8; 0],
 }
 
+#[repr(C)]
+pub struct ov_output_const_port_t {
+    _private: [u8; 0],
+}
+
 pub type FnOvCoreCreate = unsafe extern "C" fn(core: *mut *mut ov_core_t) -> ov_status_e;
 pub type FnOvCoreFree = unsafe extern "C" fn(core: *mut ov_core_t);
 pub type FnOvCoreGetAvailableDevices = unsafe extern "C" fn(
@@ -152,6 +157,19 @@ pub type FnOvCoreCompileModel = unsafe extern "C" fn(
     ...
 ) -> ov_status_e;
 pub type FnOvModelFree = unsafe extern "C" fn(model: *mut ov_model_t);
+pub type FnOvModelInputsSize =
+    unsafe extern "C" fn(model: *const ov_model_t, input_size: *mut usize) -> ov_status_e;
+pub type FnOvModelConstInputByIndex = unsafe extern "C" fn(
+    model: *const ov_model_t,
+    index: usize,
+    input_port: *mut *mut ov_output_const_port_t,
+) -> ov_status_e;
+pub type FnOvPortGetAnyName = unsafe extern "C" fn(
+    port: *const ov_output_const_port_t,
+    tensor_name: *mut *mut c_char,
+) -> ov_status_e;
+pub type FnOvOutputConstPortFree = unsafe extern "C" fn(port: *mut ov_output_const_port_t);
+pub type FnOvFree = unsafe extern "C" fn(content: *const c_char);
 pub type FnOvModelReshapeInputByName = unsafe extern "C" fn(
     model: *const ov_model_t,
     tensor_name: *const c_char,
@@ -231,6 +249,11 @@ pub struct OpenVinoLibrary {
     pub ov_core_read_model_from_memory_buffer: FnOvCoreReadModelFromMemoryBuffer,
     pub ov_core_compile_model: FnOvCoreCompileModel,
     pub ov_model_free: FnOvModelFree,
+    pub ov_model_inputs_size: FnOvModelInputsSize,
+    pub ov_model_const_input_by_index: FnOvModelConstInputByIndex,
+    pub ov_port_get_any_name: FnOvPortGetAnyName,
+    pub ov_output_const_port_free: FnOvOutputConstPortFree,
+    pub ov_free: FnOvFree,
     pub ov_model_reshape_input_by_name: FnOvModelReshapeInputByName,
     pub ov_partial_shape_create_static: FnOvPartialShapeCreateStatic,
     pub ov_partial_shape_free: FnOvPartialShapeFree,
@@ -259,51 +282,219 @@ pub struct OpenVinoLibrary {
 unsafe impl Send for OpenVinoLibrary {}
 unsafe impl Sync for OpenVinoLibrary {}
 
-/// Known locations (and sonames) of the OpenVINO C library, in lookup order.
-const LIBRARY_CANDIDATES: &[&str] = &[
-    "/lib64/libopenvino_c.so.2510",
-    "/usr/lib64/libopenvino_c.so.2510",
-    "/lib64/libopenvino_c.so.2025.1.0",
-    "/usr/lib64/libopenvino_c.so.2025.1.0",
-    "/lib64/libopenvino_c.so",
-    "/usr/lib64/libopenvino_c.so",
-    "/usr/local/lib64/libopenvino_c.so",
-    "libopenvino_c.so.2510",
-    "libopenvino_c.so",
+/// Environment override: the C library file itself, or a directory that contains it.
+pub const ENV_LIB_PATH: &str = "OPENVINO_LIB_PATH";
+
+/// Directory, relative to an application root, of the OpenVINO runtime the packages embed
+/// (`<app>/resources/openvino/`: C API, core, ONNX frontend, CPU/GPU/NPU plugins and TBB).
+pub const EMBEDDED_RUNTIME_DIR: &str = "openvino";
+
+/// Install prefixes of the packaged application whose `resources/openvino` is searched even when
+/// the executable is not inside them (the daemon may run from a symlink or a copied binary).
+const SYSTEM_APP_ROOTS: &[&str] = &[
+    "/opt/clearcore",
+    "/usr/lib/clearcore",
+    "/usr/share/clearcore",
 ];
 
-/// Finds the OpenVINO C library file on disk (`OPENVINO_LIB_PATH`, then known locations)
-/// without loading it. Bare sonames are only resolvable by `dlopen`, so they are not reported.
-#[must_use]
-pub fn locate_library() -> Option<PathBuf> {
-    std::env::var("OPENVINO_LIB_PATH")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|path| path.exists())
-        .or_else(|| {
-            LIBRARY_CANDIDATES
-                .iter()
-                .map(Path::new)
-                .find(|path| path.is_absolute() && path.exists())
-                .map(Path::to_path_buf)
-        })
+/// System library directories searched after the embedded runtime.
+#[cfg(unix)]
+const SYSTEM_LIBRARY_DIRS: &[&str] = &[
+    "/usr/lib64",
+    "/lib64",
+    "/usr/local/lib64",
+    "/usr/lib/x86_64-linux-gnu",
+    "/usr/lib",
+    "/usr/local/lib",
+];
+#[cfg(not(unix))]
+const SYSTEM_LIBRARY_DIRS: &[&str] = &[];
+
+/// Where a candidate library came from (reported by the runtime probe).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LibrarySource {
+    /// [`ENV_LIB_PATH`].
+    Environment,
+    /// The runtime embedded in the application package.
+    Embedded,
+    /// A system library directory.
+    System,
 }
 
-/// Release series the FFI layer is written against. The `ov_element_type_e` values mirrored in
-/// this crate are the 2025.1 enum; other series renumber or extend it, which would silently
-/// mis-type tensors, so any other series is rejected at load time.
-pub const SUPPORTED_MAJOR_VERSION: u32 = 2025;
+impl LibrarySource {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Environment => "env",
+            Self::Embedded => "embedded",
+            Self::System => "system",
+        }
+    }
+}
 
-/// Whether an `ov_version_t::build_number` (for example `2025.1.0-18503-6fec06580ab`) belongs to
-/// a supported release series.
+/// One directory to search, in priority order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchDir {
+    pub path: PathBuf,
+    pub source: LibrarySource,
+}
+
+/// Whether `name` is a file name of the OpenVINO C API library on this platform:
+/// `libopenvino_c.so` or any `libopenvino_c.so.<suffix>` on Unix, `openvino_c.dll` on Windows.
 #[must_use]
-pub fn is_supported_version(build_number: &str) -> bool {
+pub fn is_c_library_name(name: &str) -> bool {
+    if cfg!(windows) {
+        name.eq_ignore_ascii_case("openvino_c.dll")
+    } else {
+        name == "libopenvino_c.so"
+            || name
+                .strip_prefix("libopenvino_c.so.")
+                .is_some_and(|suffix| !suffix.is_empty())
+    }
+}
+
+/// Numeric sort key of a library file name: `libopenvino_c.so.2641` sorts after
+/// `libopenvino_c.so.2600`, and a bare `libopenvino_c.so` (usually a dev symlink) sorts last.
+fn version_key(name: &str) -> Vec<u64> {
+    name.split('.')
+        .filter_map(|part| part.parse::<u64>().ok())
+        .collect()
+}
+
+/// The OpenVINO C libraries found directly inside `dir` (no recursion), best candidate first:
+/// highest numeric suffix first, then the bare name. Dangling symlinks are skipped.
+#[must_use]
+pub fn libraries_in(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(Vec<u64>, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let path = entry.path();
+            (is_c_library_name(&name) && path.is_file()).then(|| (version_key(&name), path))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    found.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Application roots derived from the running executable: the executable directory and its
+/// first ancestors (the daemon lives in `<app>/resources/bin/`, the UI in `<app>/`).
+fn exe_app_roots() -> Vec<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .map(|dir| dir.ancestors().take(4).map(Path::to_path_buf).collect())
+        .unwrap_or_default()
+}
+
+/// Search directories in priority order: [`ENV_LIB_PATH`] (when it names a directory), the
+/// embedded runtime (`resources/openvino` or `openvino` under the executable's directory and its
+/// ancestors, then under the system install prefixes), then the system library directories.
+///
+/// Pure function of its inputs so the order can be tested without touching the process.
+#[must_use]
+pub fn search_dirs(env_value: Option<&str>, app_roots: &[PathBuf]) -> Vec<SearchDir> {
+    let mut dirs: Vec<SearchDir> = Vec::new();
+    let mut push = |path: PathBuf, source: LibrarySource| {
+        if !dirs.iter().any(|existing| existing.path == path) {
+            dirs.push(SearchDir { path, source });
+        }
+    };
+    if let Some(value) = env_value.filter(|value| !value.trim().is_empty()) {
+        let path = PathBuf::from(value);
+        if path.is_dir() {
+            push(path, LibrarySource::Environment);
+        } else if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            // A file path: its directory is searched first (the file itself is tried before any
+            // directory by `candidate_libraries`).
+            push(parent.to_path_buf(), LibrarySource::Environment);
+        }
+    }
+    let system_roots = SYSTEM_APP_ROOTS.iter().map(PathBuf::from);
+    for root in app_roots.iter().cloned().chain(system_roots) {
+        push(
+            root.join("resources").join(EMBEDDED_RUNTIME_DIR),
+            LibrarySource::Embedded,
+        );
+        push(root.join(EMBEDDED_RUNTIME_DIR), LibrarySource::Embedded);
+    }
+    for dir in SYSTEM_LIBRARY_DIRS {
+        push(PathBuf::from(dir), LibrarySource::System);
+    }
+    dirs
+}
+
+/// Every candidate library file, best first: the exact [`ENV_LIB_PATH`] file, then the
+/// libraries found in [`search_dirs`].
+#[must_use]
+pub fn candidate_libraries() -> Vec<(PathBuf, LibrarySource)> {
+    let env_value = std::env::var(ENV_LIB_PATH).ok();
+    let mut candidates = Vec::new();
+    if let Some(file) = env_value
+        .as_deref()
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+    {
+        candidates.push((file, LibrarySource::Environment));
+    }
+    for dir in search_dirs(env_value.as_deref(), &exe_app_roots()) {
+        for library in libraries_in(&dir.path) {
+            if !candidates.iter().any(|(existing, _)| *existing == library) {
+                candidates.push((library, dir.source));
+            }
+        }
+    }
+    candidates
+}
+
+/// Finds the OpenVINO C library file on disk without loading it (the first candidate of
+/// [`candidate_libraries`]).
+#[must_use]
+pub fn locate_library() -> Option<PathBuf> {
+    candidate_libraries()
+        .into_iter()
+        .next()
+        .map(|(path, _)| path)
+}
+
+/// Release series whose C ABI this crate's FFI layer matches.
+///
+/// Evidence (2026-11-09): the `ov_element_type_e`, `ov_status_e`, `ov_shape_t`,
+/// `ov_partial_shape_t`, `ov_dimension_t`, `ov_version_t` and `ov_available_devices_t`
+/// declarations are identical in the C headers shipped by the `openvino` 2025.4.0 and 2026.4.1
+/// wheels (`openvino/include/openvino/c/`; 2026 only drops the `UNDEFINED` alias of
+/// `DYNAMIC = 0` and adds non-variadic `*_props` functions). The exported `ov_*` symbol sets of
+/// `libopenvino_c.so.2540` (pip 2025.4), `.2600` (Fedora 2026.0) and `.2641` (pip 2026.4) are
+/// identical except for the functions 2026.4 adds; every symbol bound here exists in all three.
+/// The 2025.1 values mirrored in [`ov_element_type_e`] equal the 2025.4 header.
+pub const SUPPORTED_MAJOR_VERSIONS: &[u32] = &[2025, 2026];
+
+/// Major release of an `ov_version_t::build_number` (for example 2026 for
+/// `2026.4.1-22982-e213a147257-releases/2026/4`).
+#[must_use]
+pub fn major_version(build_number: &str) -> Option<u32> {
     build_number
         .trim()
         .split(['.', '-'])
         .next()
         .and_then(|major| major.parse::<u32>().ok())
-        == Some(SUPPORTED_MAJOR_VERSION)
+}
+
+/// Whether an `ov_version_t::build_number` belongs to a supported release series.
+#[must_use]
+pub fn is_supported_version(build_number: &str) -> bool {
+    major_version(build_number).is_some_and(|major| SUPPORTED_MAJOR_VERSIONS.contains(&major))
+}
+
+fn supported_series() -> String {
+    SUPPORTED_MAJOR_VERSIONS
+        .iter()
+        .map(|major| format!("{major}.x"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 static GLOBAL_LIB: OnceLock<Result<Arc<OpenVinoLibrary>, OpenVinoError>> = OnceLock::new();
@@ -316,59 +507,55 @@ impl OpenVinoLibrary {
             .clone()
     }
 
-    /// Attempts to dynamically load OpenVINO from standard known paths or `OPENVINO_LIB_PATH`.
+    /// Loads the first usable library of [`candidate_libraries`] (environment override, then the
+    /// embedded runtime, then the system), falling back to the bare soname for `dlopen`'s own
+    /// search path.
     pub fn load() -> Result<Self, OpenVinoError> {
-        if let Ok(env_path) = std::env::var("OPENVINO_LIB_PATH") {
-            let path = PathBuf::from(env_path);
-            if path.exists() {
-                return Self::load_from(&path);
-            }
-        }
-
         // A library that was found but is the wrong major version must be reported as such, not
         // masked by the generic "not found" at the end.
         let mut unsupported: Option<OpenVinoError> = None;
+        let mut other: Option<OpenVinoError> = None;
         let mut attempt = |path: &Path| match Self::load_from(path) {
             Ok(lib) => Some(lib),
             Err(error @ OpenVinoError::UnsupportedVersion(_)) => {
                 unsupported = Some(error);
                 None
             }
-            Err(_) => None,
+            Err(error) => {
+                other.get_or_insert(error);
+                None
+            }
         };
 
-        for &candidate in LIBRARY_CANDIDATES {
-            let p = Path::new(candidate);
-            if p.exists()
-                && let Some(lib) = attempt(p)
-            {
+        for (candidate, _) in candidate_libraries() {
+            if let Some(lib) = attempt(&candidate) {
                 return Ok(lib);
             }
         }
 
-        // Try naked library name load via linker search
+        // Last resort: the dynamic linker's own search path (LD_LIBRARY_PATH, ld.so.cache).
         #[cfg(unix)]
-        {
-            for name in ["libopenvino_c.so.2510", "libopenvino_c.so"] {
-                if let Some(lib) = attempt(Path::new(name)) {
-                    return Ok(lib);
-                }
+        for name in [
+            "libopenvino_c.so.2641",
+            "libopenvino_c.so.2600",
+            "libopenvino_c.so",
+        ] {
+            if let Some(lib) = attempt(Path::new(name)) {
+                return Ok(lib);
             }
         }
 
         #[cfg(windows)]
-        {
-            if let Some(lib) = attempt(Path::new("openvino_c.dll")) {
-                return Ok(lib);
-            }
+        if let Some(lib) = attempt(Path::new("openvino_c.dll")) {
+            return Ok(lib);
         }
 
-        Err(search_failure(unsupported))
+        Err(search_failure(unsupported, other))
     }
 
     /// Loads OpenVINO dynamically from an explicit file path.
     ///
-    /// The library is rejected unless it reports a [`SUPPORTED_MAJOR_VERSION`] release. The
+    /// The library is rejected unless it reports a [`SUPPORTED_MAJOR_VERSIONS`] release. The
     /// `dlopen` handle is released on every failure path.
     pub fn load_from(path: &Path) -> Result<Self, OpenVinoError> {
         let (handle, loaded_path) = Self::open_library(path)?;
@@ -417,6 +604,17 @@ impl OpenVinoLibrary {
             ),
             ov_core_compile_model: load_sym!(ov_core_compile_model, FnOvCoreCompileModel),
             ov_model_free: load_sym!(ov_model_free, FnOvModelFree),
+            ov_model_inputs_size: load_sym!(ov_model_inputs_size, FnOvModelInputsSize),
+            ov_model_const_input_by_index: load_sym!(
+                ov_model_const_input_by_index,
+                FnOvModelConstInputByIndex
+            ),
+            ov_port_get_any_name: load_sym!(ov_port_get_any_name, FnOvPortGetAnyName),
+            ov_output_const_port_free: load_sym!(
+                ov_output_const_port_free,
+                FnOvOutputConstPortFree
+            ),
+            ov_free: load_sym!(ov_free, FnOvFree),
             ov_model_reshape_input_by_name: load_sym!(
                 ov_model_reshape_input_by_name,
                 FnOvModelReshapeInputByName
@@ -498,8 +696,9 @@ impl OpenVinoLibrary {
             Ok(())
         } else {
             Err(OpenVinoError::UnsupportedVersion(format!(
-                "{} reports '{build}'; only {SUPPORTED_MAJOR_VERSION}.x is supported",
-                self.loaded_path.display()
+                "{} reports '{build}'; supported series: {}",
+                self.loaded_path.display(),
+                supported_series()
             )))
         }
     }
@@ -653,12 +852,24 @@ impl OpenVinoLibrary {
         let c_path = CString::new(path_str).map_err(|_| {
             OpenVinoError::LibraryNotFound(format!("path contains null byte: {:?}", path))
         })?;
+        // An absolute path is loaded with LOAD_WITH_ALTERED_SEARCH_PATH so its own dependencies
+        // (openvino.dll, tbb12.dll of the embedded runtime) resolve from the same directory
+        // instead of the application directory / PATH.
+        let flags = if path.is_absolute() {
+            windows_sys::Win32::System::LibraryLoader::LOAD_WITH_ALTERED_SEARCH_PATH
+        } else {
+            0
+        };
         let h_module = unsafe {
-            windows_sys::Win32::System::LibraryLoader::LoadLibraryA(c_path.as_ptr().cast())
+            windows_sys::Win32::System::LibraryLoader::LoadLibraryExA(
+                c_path.as_ptr().cast(),
+                std::ptr::null_mut(),
+                flags,
+            )
         };
         if h_module.is_null() {
             Err(OpenVinoError::LibraryNotFound(format!(
-                "LoadLibraryA failed for {}",
+                "LoadLibraryExA failed for {}",
                 path.display()
             )))
         } else {
@@ -733,11 +944,18 @@ impl Drop for OpenVinoLibrary {
 
 /// The error for a search that loaded nothing: the last wrong-version library that was found,
 /// or "not found" when no candidate was even present.
-fn search_failure(unsupported: Option<OpenVinoError>) -> OpenVinoError {
-    unsupported.unwrap_or_else(|| {
-        OpenVinoError::LibraryNotFound("libopenvino_c not found in search paths".to_owned())
-    })
+fn search_failure(
+    unsupported: Option<OpenVinoError>,
+    other: Option<OpenVinoError>,
+) -> OpenVinoError {
+    unsupported
+        .or(other)
+        .unwrap_or_else(|| OpenVinoError::LibraryNotFound(NOT_FOUND_MESSAGE.to_owned()))
 }
+
+/// Message of the "no candidate at all" failure (the probe tells it apart from a found library
+/// that failed to load).
+pub const NOT_FOUND_MESSAGE: &str = "libopenvino_c not found in search paths";
 
 #[cfg(test)]
 mod tests {
@@ -746,28 +964,137 @@ mod tests {
     #[test]
     fn a_found_but_unsupported_library_is_not_reported_as_missing() {
         let unsupported = OpenVinoError::UnsupportedVersion("2024.6.0".to_owned());
+        let unloadable = OpenVinoError::LibraryNotFound("dlopen failed for x".to_owned());
         assert!(matches!(
-            search_failure(Some(unsupported)),
+            search_failure(Some(unsupported), Some(unloadable.clone())),
             OpenVinoError::UnsupportedVersion(msg) if msg == "2024.6.0"
         ));
+        assert_eq!(search_failure(None, Some(unloadable.clone())), unloadable);
         assert!(matches!(
-            search_failure(None),
-            OpenVinoError::LibraryNotFound(_)
+            search_failure(None, None),
+            OpenVinoError::LibraryNotFound(msg) if msg == NOT_FOUND_MESSAGE
         ));
     }
 
     #[test]
-    fn accepts_only_the_2025_series() {
+    fn accepts_the_2025_and_2026_series_only() {
         assert!(is_supported_version(
             "2025.1.0-18503-6fec06580ab-releases/2025/1"
         ));
         assert!(is_supported_version("2025.4.1"));
         assert!(is_supported_version(" 2025.1.0 "));
+        assert!(is_supported_version("2026.0.0"));
+        assert!(is_supported_version(
+            "2026.4.1-22982-e213a147257-releases/2026/4"
+        ));
         assert!(!is_supported_version("2024.6.0-17404-4c0f47d2335"));
-        assert!(!is_supported_version("2026.0.0"));
+        assert!(!is_supported_version("2027.0.0"));
         assert!(!is_supported_version("20251.0"));
         assert!(!is_supported_version("unknown"));
         assert!(!is_supported_version(""));
+        assert_eq!(major_version("2026.4.1-22982"), Some(2026));
+        assert_eq!(supported_series(), "2025.x, 2026.x");
+    }
+
+    #[test]
+    fn only_the_c_api_library_names_are_candidates() {
+        if cfg!(windows) {
+            assert!(is_c_library_name("openvino_c.dll"));
+            assert!(!is_c_library_name("openvino.dll"));
+            return;
+        }
+        for name in [
+            "libopenvino_c.so",
+            "libopenvino_c.so.2510",
+            "libopenvino_c.so.2600",
+            "libopenvino_c.so.2641",
+            "libopenvino_c.so.2026.0.0",
+        ] {
+            assert!(is_c_library_name(name), "{name}");
+        }
+        for name in [
+            "libopenvino.so.2641",
+            "libopenvino_c.so.",
+            "libopenvino_c.a",
+            "libopenvino_c_extra.so",
+            "libopenvino_intel_npu_plugin.so",
+        ] {
+            assert!(!is_c_library_name(name), "{name}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn libraries_in_a_directory_are_ranked_newest_first() {
+        let dir = std::env::temp_dir().join(format!("ov-libs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in [
+            "libopenvino_c.so",
+            "libopenvino_c.so.2600",
+            "libopenvino_c.so.2641",
+            "libopenvino_c.so.2026.0.0",
+            "libopenvino.so.2641",
+            "libopenvino_intel_npu_plugin.so",
+        ] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        // A dangling symlink is not a candidate.
+        std::os::unix::fs::symlink(dir.join("missing"), dir.join("libopenvino_c.so.9999")).unwrap();
+        let names: Vec<String> = libraries_in(&dir)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            names,
+            // Numeric suffixes compare element-wise: the soname `.2641` (2026.4) outranks
+            // `.2600` (2026.0), whose real file `.2026.0.0` is the same library.
+            [
+                "libopenvino_c.so.2641",
+                "libopenvino_c.so.2600",
+                "libopenvino_c.so.2026.0.0",
+                "libopenvino_c.so"
+            ]
+        );
+        assert!(libraries_in(Path::new("/nonexistent/openvino")).is_empty());
+    }
+
+    #[test]
+    fn search_order_is_env_then_embedded_then_system() {
+        let env_dir = std::env::temp_dir();
+        let app = PathBuf::from("/srv/app/resources/bin");
+        let dirs = search_dirs(env_dir.to_str(), std::slice::from_ref(&app));
+        assert_eq!(dirs[0].path, env_dir);
+        assert_eq!(dirs[0].source, LibrarySource::Environment);
+        assert_eq!(dirs[1].path, app.join("resources/openvino"));
+        assert_eq!(dirs[2].path, app.join("openvino"));
+        assert_eq!(dirs[1].source, LibrarySource::Embedded);
+        let first_system = dirs.iter().position(|d| d.source == LibrarySource::System);
+        let last_embedded = dirs
+            .iter()
+            .rposition(|d| d.source == LibrarySource::Embedded)
+            .unwrap();
+        assert!(
+            dirs.iter()
+                .any(|d| d.path == Path::new("/opt/clearcore/resources/openvino"))
+        );
+        if cfg!(unix) {
+            let first_system = first_system.unwrap();
+            assert!(last_embedded < first_system);
+            for system in ["/usr/lib64", "/lib64", "/usr/local/lib64"] {
+                assert!(dirs.iter().any(|d| d.path == Path::new(system)), "{system}");
+            }
+        }
+        // An env value naming a file contributes its directory; an empty one is ignored.
+        let file = env_dir.join("libopenvino_c.so.2641");
+        let dirs = search_dirs(file.to_str(), &[]);
+        assert_eq!(dirs[0].path, env_dir);
+        let dirs = search_dirs(Some("  "), &[]);
+        assert_ne!(dirs[0].source, LibrarySource::Environment);
+        // Duplicates are dropped.
+        let dirs = search_dirs(None, &[app.clone(), app]);
+        let unique: std::collections::HashSet<_> = dirs.iter().map(|d| &d.path).collect();
+        assert_eq!(unique.len(), dirs.len());
     }
 
     #[cfg(target_os = "linux")]

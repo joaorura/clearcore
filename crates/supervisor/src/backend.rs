@@ -190,6 +190,22 @@ enum OpenVinoTarget {
     Device(String),
 }
 
+/// `OpenVINO` devices to try, in order, for a request that targets `OpenVINO` (`openvino` = every
+/// device `OpenVINO` lists, NPU then GPU then CPU; `openvino-npu`/`npu`/`intel-npu`,
+/// `openvino-gpu`/`intel-gpu`/`arc`/`gpu`, `openvino-cpu`/`intel-cpu` = that device), or `None`
+/// for any other request.
+#[must_use]
+pub fn openvino_devices_for_request(request: &str) -> Option<Vec<String>> {
+    let trimmed = request.trim();
+    if trimmed.eq_ignore_ascii_case("gpu") {
+        return Some(vec!["GPU".to_owned()]);
+    }
+    match parse_openvino_target(trimmed)? {
+        OpenVinoTarget::Auto => Some(OpenVINOBackend::available_devices()),
+        OpenVinoTarget::Device(device) => Some(vec![device]),
+    }
+}
+
 fn parse_openvino_target(request: &str) -> Option<OpenVinoTarget> {
     let lower = request.to_ascii_lowercase().replace('_', "-");
     match lower.as_str() {

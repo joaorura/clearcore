@@ -1677,13 +1677,21 @@ function queryHardwareBackends() {
   // Probe for OpenVINO runtime on host in fallback
   let hasOpenVinoRuntime = false;
   try {
-    if (isLinux) {
+    // Runtime embedded in the package (Linux x64 / Windows x64): resources/openvino.
+    const embeddedOv = process.resourcesPath ? path.join(process.resourcesPath, 'openvino') : null;
+    if (embeddedOv && fs.existsSync(embeddedOv)) {
+      const names = fs.readdirSync(embeddedOv);
+      if (names.some((n) => /^libopenvino_c\.so\.\d+$/.test(n) || /^openvino_c\.dll$/i.test(n))) {
+        hasOpenVinoRuntime = true;
+      }
+    }
+    if (!hasOpenVinoRuntime && isLinux) {
       const ldOut = require('child_process').execSync('ldconfig -p 2>/dev/null | grep -i libopenvino || true', { encoding: 'utf8' });
       if (ldOut.includes('libopenvino')) hasOpenVinoRuntime = true;
       if (!hasOpenVinoRuntime && (fs.existsSync('/usr/lib64/openvino') || fs.existsSync('/opt/intel/openvino'))) {
         hasOpenVinoRuntime = true;
       }
-    } else if (isWin) {
+    } else if (!hasOpenVinoRuntime && isWin) {
       if (fs.existsSync('C:\\Program Files (x86)\\Intel\\openvino') || fs.existsSync('C:\\Intel\\openvino')) {
         hasOpenVinoRuntime = true;
       }

@@ -203,10 +203,25 @@ fn scanner_agrees_with_the_runtime_discovery() {
             {
                 assert!(audit.is_runtime_installed(), "{audit:?}");
             }
-            DetectedHardware::IntelNpu | DetectedHardware::IntelGpu
-                if realtime_noise_runtime_openvino::locate_library().is_some() =>
-            {
-                assert!(audit.is_runtime_installed(), "{audit:?}");
+            // Intel NPU/GPU follow the same probe the OpenVINO backend uses: installed exactly
+            // when the runtime loads and lists that device (a runtime without the NPU plugin,
+            // like Fedora's 2026.0 package, leaves the NPU "missing" with the reason).
+            DetectedHardware::IntelNpu | DetectedHardware::IntelGpu => {
+                let probe = realtime_noise_runtime_openvino::probe_runtime_cached();
+                let device = if audit.hardware == DetectedHardware::IntelNpu {
+                    "NPU"
+                } else {
+                    "GPU"
+                };
+                let listed = probe
+                    .devices
+                    .iter()
+                    .any(|name| name.split('.').next() == Some(device));
+                assert_eq!(
+                    audit.is_runtime_installed(),
+                    probe.state.is_usable() && listed,
+                    "{audit:?}"
+                );
             }
             _ => {}
         }

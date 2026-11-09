@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 use crate::backend::{
-    BackendResolutionInfo, instantiate_backend_with_fallback, is_explicit_accelerator_request,
+    AUTO_QUALIFICATION_MAX_HOP_MS, BackendResolutionInfo, instantiate_backend_with_fallback,
+    is_explicit_accelerator_request, openvino_devices_for_request, qualify_backend_runtime,
 };
 use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
+use realtime_noise_accelerators::OpenVINOBackend;
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
 use realtime_noise_model::{
@@ -81,7 +83,17 @@ pub struct EngineSupervisor {
     isolation_model_required: bool,
     /// Fixed `MODEL_*` code while the required isolation model is unavailable.
     isolation_model_error: Option<&'static str>,
+    /// Where the pDFNet3 Pro stateful export (the graphs `OpenVINO` runs) comes from; `None` uses
+    /// the bundled archive (`pdfnet3_bundle::load_stateful_archive`).
+    stateful_source: Option<StatefulSource>,
+    /// The verified stateful export once loaded (or the `MODEL_*` code of why it is not).
+    stateful_archive: Option<Result<PdfNet3DevArchive, &'static str>>,
+    /// Resolution of the last [`Self::select_backend`] (`GetStatus` reports its fallback reason).
+    last_resolution: Option<BackendResolutionInfo>,
 }
+
+/// Loader of the pDFNet3 stateful export, injectable for tests.
+pub type StatefulSource = Box<dyn Fn() -> Result<PdfNet3DevArchive, &'static str> + Send + Sync>;
 
 /// `GetStatus.isolation_model` while the bundled pDFNet3 Pro drives the live backend.
 pub const ISOLATION_MODEL_PDFNET3_PRO: &str = "pdfnet3-pro";
@@ -122,7 +134,95 @@ impl EngineSupervisor {
             dev_base_model_error: None,
             isolation_model_required: false,
             isolation_model_error: None,
+            stateful_source: None,
+            stateful_archive: None,
+            last_resolution: None,
         }
+    }
+
+    /// Replaces the source of the pDFNet3 stateful export used by the `OpenVINO` backends (tests
+    /// and development); the cached archive is dropped.
+    pub fn set_stateful_source(&mut self, source: Option<StatefulSource>) {
+        self.stateful_source = source;
+        self.stateful_archive = None;
+    }
+
+    /// Resolution of the last backend selection (name, device, fallback and its reason).
+    #[must_use]
+    pub const fn last_resolution(&self) -> Option<&BackendResolutionInfo> {
+        self.last_resolution.as_ref()
+    }
+
+    /// The verified pDFNet3 stateful export, loaded once (fixed `MODEL_*` code on failure).
+    fn stateful_archive(&mut self) -> Result<PdfNet3DevArchive, &'static str> {
+        if self.stateful_archive.is_none() {
+            let loaded = self.stateful_source.as_ref().map_or_else(
+                || {
+                    realtime_noise_model::pdfnet3_bundle::load_stateful_archive()
+                        .map_err(realtime_noise_model::BundledModelError::code)
+                },
+                |source| source(),
+            );
+            self.stateful_archive = Some(loaded);
+        }
+        self.stateful_archive
+            .clone()
+            .unwrap_or(Err("MODEL_UNAVAILABLE"))
+    }
+
+    /// Compiles the pDFNet3 Pro stateful export on the first of `devices` that loads and meets
+    /// the real-time deadline. The error is the reason shown as `fallback_reason`.
+    fn instantiate_openvino_pdfnet3(
+        &mut self,
+        devices: &[String],
+    ) -> Result<(OpenVINOBackend, BackendResolutionInfo), String> {
+        let probe = realtime_noise_runtime_openvino::probe_runtime_cached();
+        if !probe.state.is_usable() {
+            return Err(format!(
+                "OpenVINO indisponível ({}): {}",
+                probe.state.code(),
+                probe.message
+            ));
+        }
+        if devices.is_empty() {
+            return Err("OpenVINO não listou nenhum dispositivo".to_owned());
+        }
+        let archive = self
+            .stateful_archive()
+            .map_err(|code| format!("export stateful do pDFNet3 Pro indisponível ({code})"))?;
+        let mut failures = Vec::new();
+        for device in devices {
+            let mut backend = match OpenVINOBackend::load_pdfnet3(&archive, device) {
+                Ok(backend) => backend,
+                Err(error) => {
+                    failures.push(format!("{device}: {error}"));
+                    continue;
+                }
+            };
+            if !qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
+                failures.push(format!(
+                    "{device}: excedeu o prazo de tempo real de {AUTO_QUALIFICATION_MAX_HOP_MS:.1} ms por hop"
+                ));
+                continue;
+            }
+            // Qualification ran silence through the network: start the stream clean.
+            if let Err(error) = backend.reset() {
+                failures.push(format!("{device}: {error}"));
+                continue;
+            }
+            let device = backend.device().to_owned();
+            let descriptor = backend.descriptor();
+            let info = BackendResolutionInfo {
+                name: format!("openvino-{}", device.to_ascii_lowercase()),
+                runtime: descriptor.runtime.to_owned(),
+                device,
+                is_hardware_accelerated: true,
+                is_fallback: false,
+                fallback_reason: None,
+            };
+            return Ok((backend, info));
+        }
+        Err(format!("OpenVINO falhou: {}", failures.join("; ")))
     }
 
     /// Production policy: `model` (the verified pDFNet3 archive, or the fixed `MODEL_*` code of
@@ -386,27 +486,59 @@ impl EngineSupervisor {
         repo_root: Option<&Path>,
     ) -> BackendResolutionInfo {
         self.requested_backend_name = request.to_string();
-        // The pDFNet3 (FiLM) overrides EVERY request: its graphs only run on tract here, and an
-        // accelerator would have to run another model, which could never apply a voice profile.
-        if let Some(archive) = &self.dev_base_model {
+        // The pDFNet3 (FiLM) overrides EVERY request. The bundled Pro runs on OpenVINO (its
+        // stateful export, FiLM inputs fed) when an OpenVINO backend is requested explicitly and
+        // works; everything else, and every OpenVINO failure, runs the tract export on the CPU.
+        // `auto` stays on tract: see docs/accelerators (the virtual microphone's filter runs ONNX
+        // Runtime on the CPU either way, and tract is the parity reference).
+        if let Some(archive) = self.dev_base_model.clone() {
+            let mut openvino_failure = None;
+            if let Some(devices) = openvino_devices_for_request(request) {
+                if archive.asset_id() == PDFNET3_PRO_ASSET_ID {
+                    match self.instantiate_openvino_pdfnet3(&devices) {
+                        Ok((backend, info)) => {
+                            self.dev_base_model_error = None;
+                            self.isolation_model_error = None;
+                            self.set_backend(Box::new(backend), &info.name);
+                            self.last_resolution = Some(info.clone());
+                            return info;
+                        }
+                        Err(reason) => {
+                            eprintln!("pDFNet3 Pro on OpenVINO unavailable: {reason}");
+                            openvino_failure = Some(reason);
+                        }
+                    }
+                } else {
+                    openvino_failure = Some(
+                        "o pDFNet3 de desenvolvimento (CLEARCORE_DEV_PDFNET3_*) roda só no tract"
+                            .to_owned(),
+                    );
+                }
+            }
             match archive.instantiate(CpuProfile::Avx2Minimum) {
                 Ok(backend) => {
                     self.dev_base_model_error = None;
                     self.isolation_model_error = None;
                     let accelerator = is_explicit_accelerator_request(request);
+                    let fallback_reason = match openvino_failure {
+                        Some(reason) => Some(format!("pDFNet3 Pro no tract (CPU): {reason}")),
+                        None if accelerator => Some(
+                            "The pDFNet3 Pro isolation model runs on the CPU (tract): this \
+                             accelerator backend cannot feed its FiLM voice-profile inputs"
+                                .to_string(),
+                        ),
+                        None => None,
+                    };
                     let info = BackendResolutionInfo {
                         name: "tract".to_string(),
                         runtime: "tract".to_string(),
                         device: "CPU".to_string(),
                         is_hardware_accelerated: false,
                         is_fallback: accelerator,
-                        fallback_reason: accelerator.then(|| {
-                            "The pDFNet3 Pro isolation model runs on the CPU (tract): the \
-                             accelerator backends cannot feed its FiLM voice-profile inputs"
-                                .to_string()
-                        }),
+                        fallback_reason,
                     };
                     self.set_backend(Box::new(backend), &info.name);
+                    self.last_resolution = Some(info.clone());
                     return info;
                 }
                 Err(error) => {
@@ -427,10 +559,13 @@ impl EngineSupervisor {
             }
         }
         if self.isolation_model_required {
-            return self.clear_backend_for_missing_model();
+            let info = self.clear_backend_for_missing_model();
+            self.last_resolution = Some(info.clone());
+            return info;
         }
         let (backend, info) = instantiate_backend_with_fallback(request, model_dir, repo_root);
         self.set_backend(backend, &info.name);
+        self.last_resolution = Some(info.clone());
         info
     }
 

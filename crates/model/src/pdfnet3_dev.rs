@@ -237,6 +237,68 @@ impl PdfNet3DevArchive {
     }
 }
 
+/// The three ONNX graphs of a verified archive (`enc`, `erb_dec`, `df_dec`).
+///
+/// For runtimes that compile them directly (`OpenVINO`), with the stateful export, whose graphs
+/// expose the recurrent state as ports.
+#[derive(Clone)]
+pub struct ArchiveGraphs {
+    pub enc: Vec<u8>,
+    pub erb_dec: Vec<u8>,
+    pub df_dec: Vec<u8>,
+}
+
+impl PdfNet3DevArchive {
+    /// Extracts the three graphs from the (already verified) archive bytes. The member list and
+    /// sizes were checked by [`Self::verify`]; this walk re-applies the same bounds.
+    pub fn graphs(&self) -> Result<ArchiveGraphs, PdfNet3DevError> {
+        let invalid = PdfNet3DevError::ArchiveInvalid;
+        let mut archive =
+            Archive::new(GzDecoder::new(&self.bytes[..]).take(MAX_DECOMPRESSED_BYTES));
+        let entries = archive
+            .entries()
+            .map_err(|_| invalid("unreadable archive"))?;
+        let (mut enc, mut erb_dec, mut df_dec) = (None, None, None);
+        for (index, entry) in entries.enumerate() {
+            if index >= MAX_ENTRIES {
+                return Err(invalid("too many entries"));
+            }
+            let entry = entry.map_err(|_| invalid("unreadable archive"))?;
+            let slot = {
+                let path = entry
+                    .path()
+                    .map_err(|_| invalid("member path is not valid"))?;
+                match path.to_str() {
+                    Some("enc.onnx") => &mut enc,
+                    Some("erb_dec.onnx") => &mut erb_dec,
+                    Some("df_dec.onnx") => &mut df_dec,
+                    _ => continue,
+                }
+            };
+            if slot.is_some() {
+                return Err(invalid("duplicate member"));
+            }
+            let mut bytes = Vec::new();
+            entry
+                .take(MAX_ONNX_MEMBER_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|_| invalid("member is unreadable"))?;
+            if bytes.len() as u64 > MAX_ONNX_MEMBER_BYTES {
+                return Err(invalid("member is too large"));
+            }
+            *slot = Some(bytes);
+        }
+        match (enc, erb_dec, df_dec) {
+            (Some(enc), Some(erb_dec), Some(df_dec)) => Ok(ArchiveGraphs {
+                enc,
+                erb_dec,
+                df_dec,
+            }),
+            _ => Err(invalid("missing member")),
+        }
+    }
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hex = String::with_capacity(64);
     for byte in Sha256::digest(bytes) {

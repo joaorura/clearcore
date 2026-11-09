@@ -1,6 +1,7 @@
 //! Intel OpenVINO Realtime Runtime for Clearcore.
 //!
-//! Provides a safe, idiomatic Rust API over Intel's OpenVINO C library (`libopenvino_c.so.2510`),
+//! Provides a safe, idiomatic Rust API over Intel's OpenVINO C library (`libopenvino_c`, release
+//! series 2025 and 2026: see [`ffi::SUPPORTED_MAJOR_VERSIONS`] for the ABI evidence),
 //! supporting accelerated neural inference on Intel NPU (Arrow Lake / Meteor Lake / Lunar Lake),
 //! Intel Arc & integrated GPUs (OpenCL/Level-Zero), and Intel CPUs (AVX2/AVX-512/AMX/VNNI).
 //!
@@ -20,15 +21,20 @@ pub mod ffi;
 pub mod infer;
 pub mod model;
 pub mod precision;
+pub mod probe;
 pub mod tensor;
 
 pub use core::OpenVinoCore;
 pub use dfn3::{Dfn3Graphs, Dfn3Output, Dfn3Session};
 pub use error::OpenVinoError;
-pub use ffi::{OpenVinoLibrary, locate_library, ov_element_type_e, ov_status_e};
+pub use ffi::{
+    LibrarySource, OpenVinoLibrary, SUPPORTED_MAJOR_VERSIONS, candidate_libraries, locate_library,
+    ov_element_type_e, ov_status_e,
+};
 pub use infer::OpenVinoInferRequest;
 pub use model::{OpenVinoCompiledModel, OpenVinoModel};
 pub use precision::{DeviceKind, InferencePrecision, fallback_order, precision_for_device};
+pub use probe::{RuntimeProbe, RuntimeState, probe_runtime, probe_runtime_cached};
 pub use tensor::OpenVinoTensor;
 
 /// Checks if the OpenVINO dynamic runtime library is installed and loadable on the host.
@@ -67,8 +73,8 @@ mod tests {
         let version = core.version().expect("Querying version failed");
         assert!(!version.is_empty(), "version should not be empty");
         assert!(
-            version.contains("2025") || version.contains("OpenVINO"),
-            "expected version 2025.x or OpenVINO, got: {version}"
+            ffi::is_supported_version(&version),
+            "expected a supported release series, got: {version}"
         );
 
         let devices = core

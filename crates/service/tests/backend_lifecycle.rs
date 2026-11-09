@@ -33,8 +33,9 @@ fn service_starts_with_the_bundled_pdfnet3_pro_on_auto() {
     assert_eq!(resp.payload["backend_device"], "CPU");
 }
 
-/// An accelerator request cannot run the pDFNet3 Pro (no FiLM inputs on those backends): it
-/// resolves to tract with the Pro model and says so, instead of loading the base `DFNet3`.
+/// An accelerator request runs the pDFNet3 Pro on OpenVINO when that works on this host, and
+/// otherwise resolves to tract with the Pro model and says why; it never loads the base `DFNet3`.
+/// TensorRT cannot feed the FiLM inputs at all.
 #[test]
 fn service_switches_backend_via_set_backend_ipc() {
     let mut daemon = ServiceDaemon::new();
@@ -53,14 +54,27 @@ fn service_switches_backend_via_set_backend_ipc() {
     for accelerator in ["openvino-npu", "tensorrt", "gpu"] {
         let resp = send(&mut daemon, IpcCommand::set_backend(accelerator));
         assert_eq!(resp.status, IpcStatus::Ok, "{accelerator}");
-        assert_eq!(resp.payload["active_backend"], "tract", "{accelerator}");
-        assert_eq!(resp.payload["is_hardware_accelerated"], false);
-        assert_eq!(resp.payload["fallback"], true, "{accelerator}");
-        assert!(resp.payload["fallback_reason"].is_string());
+        let active = resp.payload["active_backend"].as_str().unwrap_or_default();
+        if active.starts_with("openvino-") {
+            assert_ne!(accelerator, "tensorrt");
+            assert_eq!(resp.payload["fallback"], false, "{accelerator}");
+            assert_eq!(resp.payload["fallback_reason"], json!(null));
+        } else {
+            assert_eq!(active, "tract", "{accelerator}");
+            assert_eq!(resp.payload["is_hardware_accelerated"], false);
+            assert_eq!(resp.payload["fallback"], true, "{accelerator}");
+            assert!(resp.payload["fallback_reason"].is_string());
+        }
         let status = send(&mut daemon, IpcCommand::GetStatus);
+        assert_eq!(status.payload["active_backend"], active, "{accelerator}");
         assert_eq!(status.payload["isolation_model"], "pdfnet3-pro");
         assert_eq!(status.payload["voice_profile_supported"], true);
         assert_eq!(status.payload["requested_backend"], accelerator);
+        assert_eq!(status.payload["backend_fallback"], resp.payload["fallback"]);
+        assert_eq!(
+            status.payload["backend_fallback_reason"],
+            resp.payload["fallback_reason"]
+        );
     }
 }
 
@@ -68,10 +82,10 @@ fn service_switches_backend_via_set_backend_ipc() {
 fn service_falls_back_gracefully_when_requested_backend_fails() {
     let mut daemon = ServiceDaemon::new();
 
-    // Point model_dir to nonexistent path and request OpenVINO NPU
+    // Point model_dir to nonexistent path and request a backend that cannot run the Pro.
     daemon.set_model_dir(std::path::PathBuf::from("/nonexistent/clearcore/models"));
 
-    let resp = send(&mut daemon, IpcCommand::set_backend("openvino-npu"));
+    let resp = send(&mut daemon, IpcCommand::set_backend("tensorrt"));
     assert_eq!(resp.status, IpcStatus::Ok);
     assert_eq!(resp.payload["success"], true);
     assert_eq!(resp.payload["fallback"], true);

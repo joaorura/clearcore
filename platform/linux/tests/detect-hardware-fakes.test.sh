@@ -18,6 +18,8 @@
 #  S4) ldconfig ok mas Python sem openvino                  -> cpu_tract
 #  S5) JSON valido (e so JSON no stdout) mesmo com lixo no stderr do lspci
 #  S6) nenhum caminho fixo /home/<autor> no script
+#  S7) runtime embutido do pacote em /opt/clearcore/resources/openvino -> openvino_npu
+#  S8) OPENVINO_LIB_PATH apontando para a libopenvino_c.so.* de um wheel pip -> openvino_npu
 #
 # Uso: platform/linux/tests/detect-hardware-fakes.test.sh
 set -uo pipefail
@@ -173,6 +175,23 @@ check "S5: stdout nao contem o lixo" bash -c "! grep -q 'lixo no stderr' '${FAKE
 
 # ---- S6: sem caminhos fixos da maquina do autor ----------------------------------------------
 check "S6: script sem '/home/joaorura'" bash -c "! grep -q '/home/joaorura' '${SCRIPT_UNDER_TEST}'"
+
+# ---- S7: runtime embutido do pacote (resources/openvino) -------------------------------------
+reset_state
+mkdir -p "${FAKE_ROOT}/opt/clearcore/resources/openvino"
+: > "${FAKE_ROOT}/opt/clearcore/resources/openvino/libopenvino_c.so.2641"
+: > "${FAKE_ROOT}/opt/clearcore/resources/openvino/libopenvino_intel_npu_plugin.so"
+run_detect
+check "S7: runtime embutido, NPU runtime=True" test "$(npu_runtime)" = "True"
+check "S7: auto=openvino_npu" test "$(auto_id)" = "openvino_npu"
+
+# ---- S8: OPENVINO_LIB_PATH (arquivo da libopenvino_c de um wheel pip) --------------------------
+reset_state
+mkdir -p "${TMP_ROOT}/custom/pip/libs"
+: > "${TMP_ROOT}/custom/pip/libs/libopenvino_c.so.2641"
+: > "${TMP_ROOT}/custom/pip/libs/libopenvino_intel_npu_plugin.so"
+run_detect OPENVINO_LIB_PATH="${TMP_ROOT}/custom/pip/libs/libopenvino_c.so.2641"
+check "S8: OPENVINO_LIB_PATH, NPU runtime=True" test "$(npu_runtime)" = "True"
 
 echo
 echo "Resultado: ${PASS} ok, ${FAIL} falhas"

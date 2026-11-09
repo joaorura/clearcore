@@ -100,6 +100,9 @@ pub struct DspPipeline {
     rolling_spec_x: VecDeque<Vec<Complex32>>,
     rolling_spec_y: VecDeque<Vec<Complex32>>,
     spec_buf: Vec<Complex32>,
+    /// Per-bin linear factors applied to the enhanced spectrum right before the iSTFT (the voice
+    /// profile's EQ), exactly where `DfTract::set_spectral_eq_factors` applies them.
+    spectral_eq_factors: Option<Vec<f32>>,
 }
 
 impl DspPipeline {
@@ -135,7 +138,34 @@ impl DspPipeline {
             rolling_spec_x,
             rolling_spec_y,
             spec_buf,
+            spectral_eq_factors: None,
         })
+    }
+
+    /// FFT bins per ERB band (32 bands, 481 bins in total), as `DfTract::df_states[0].erb`.
+    #[must_use]
+    pub fn erb_band_widths(&self) -> &[usize] {
+        &self.state.erb
+    }
+
+    /// Sets (or clears with `None`) the per-bin spectral EQ factors (length [`N_FREQS`], finite,
+    /// non-negative). Applied after the attenuation limit and before the iSTFT, the same place as
+    /// `DfTract::set_spectral_eq_factors`, so a backend on this pipeline matches tract's EQ.
+    /// Survives [`Self::reset`] (it is conditioning, not state).
+    pub fn set_spectral_eq_factors(
+        &mut self,
+        factors: Option<Vec<f32>>,
+    ) -> Result<(), InferenceError> {
+        if let Some(values) = &factors
+            && (values.len() != N_FREQS || values.iter().any(|v| !v.is_finite() || *v < 0.0))
+        {
+            return Err(InferenceError::InputContract(format!(
+                "spectral EQ needs {N_FREQS} finite non-negative factors, got {}",
+                values.len()
+            )));
+        }
+        self.spectral_eq_factors = factors;
+        Ok(())
     }
 
     /// Resets all internal DSP states (memories, normalizers, rolling buffers).
@@ -266,6 +296,13 @@ impl DspPipeline {
         if let Some(lim) = self.attenuation_mix() {
             for (enh, &noisy) in self.spec_buf.iter_mut().zip(spec_noisy.iter()) {
                 *enh = *enh * (1.0 - lim) + noisy * lim;
+            }
+        }
+
+        // Spectral EQ of the voice profile (zero added latency).
+        if let Some(factors) = &self.spectral_eq_factors {
+            for (bin, &gain) in self.spec_buf.iter_mut().zip(factors) {
+                *bin *= gain;
             }
         }
 
@@ -841,6 +878,61 @@ mod tests {
         // Energy should be significantly attenuated compared to unattenuated input energy
         let in_energy = input.iter().map(|s| s * s).sum::<f32>();
         assert!(last_energy < in_energy * 0.1);
+        Ok(())
+    }
+
+    #[test]
+    fn spectral_eq_scales_the_output_and_rejects_bad_factors() -> Result<(), InferenceError> {
+        let prediction = ModelFrameOutput {
+            lsnr: 35.0,
+            erb_gains: None,
+            df_coefs: None,
+        };
+        let input = sine_frames(30, 1_000.0);
+        let reference = run_fixed(&prediction, &input)?;
+
+        let mut pipeline = DspPipeline::new(DspPipelineConfig::default())?;
+        assert_eq!(pipeline.erb_band_widths().len(), DEFAULT_NB_ERB);
+        assert_eq!(pipeline.erb_band_widths().iter().sum::<usize>(), N_FREQS);
+        assert!(
+            pipeline
+                .set_spectral_eq_factors(Some(vec![1.0; 10]))
+                .is_err()
+        );
+        assert!(
+            pipeline
+                .set_spectral_eq_factors(Some(vec![f32::NAN; N_FREQS]))
+                .is_err()
+        );
+        assert!(
+            pipeline
+                .set_spectral_eq_factors(Some(vec![-1.0; N_FREQS]))
+                .is_err()
+        );
+        pipeline.set_spectral_eq_factors(Some(vec![0.5; N_FREQS]))?;
+        // Conditioning survives a reset.
+        pipeline.reset();
+        let mut backend = FixedBackend(prediction);
+        let mut halved = Vec::new();
+        for frame in &input {
+            halved.extend(pipeline.process_frame(frame, &mut backend)?);
+        }
+        // The iSTFT is linear: a flat 0.5 EQ halves every output sample.
+        let worst = reference
+            .iter()
+            .zip(&halved)
+            .map(|(r, h)| (0.5 * r - h).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-5, "flat EQ is not a pure gain: {worst}");
+
+        // Clearing restores the unconditioned output bit for bit.
+        pipeline.set_spectral_eq_factors(None)?;
+        pipeline.reset();
+        let mut cleared = Vec::new();
+        for frame in &input {
+            cleared.extend(pipeline.process_frame(frame, &mut backend)?);
+        }
+        assert_eq!(cleared, reference);
         Ok(())
     }
 }

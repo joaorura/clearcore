@@ -8,9 +8,16 @@
 //! - **Detection**: [`OpenVINOBackend::is_available`] / [`OpenVINOBackend::available_devices`]
 //!   probe the native runtime through `realtime-noise-runtime-openvino` (dynamic loading, so
 //!   builds and hosts without OpenVINO are unaffected) and order the devices NPU, GPU, CPU.
-//! - **Loading**: [`OpenVINOBackend::load_stateful`] compiles the three explicit-state
-//!   DeepFilterNet3 graphs (`enc`, `erb_dec`, `df_dec`) for one device;
-//!   [`OpenVINOBackend::load_stateful_auto`] walks the fallback order until one device works.
+//! - **Loading**: [`OpenVINOBackend::load_pdfnet3`] compiles the bundled pDFNet3 Pro stateful
+//!   export (`pdfnet3-stateful-asset-v1.tar.gz`, verified by its whole-archive SHA-256 before it
+//!   reaches this module) for one device, with the `FiLM` inputs bound;
+//!   [`OpenVINOBackend::load_stateful`] compiles the base DeepFilterNet3 graphs of
+//!   `models/stateful/` (development and tests); the `*_with_fallback` / `*_auto` variants walk
+//!   the device order until one device works.
+//! - **Voice profile**: with the pDFNet3 Pro the backend applies a profile exactly like
+//!   `TractBackend`: `FiLM` vectors into `gamma`/`beta` (identity when no profile is active) and
+//!   the profile EQ as per-bin factors right before the iSTFT. The base graphs have no `FiLM`
+//!   inputs and refuse a non-neutral profile.
 //! - **Precision**: the Clearcore policy lives in `realtime_noise_runtime_openvino::precision`
 //!   (FP16 on NPU/GPU, FP32 on the x86 CPU baseline) and is applied through
 //!   `INFERENCE_PRECISION_HINT` at compile time.
@@ -31,9 +38,10 @@ use std::path::Path;
 use deep_filter::Complex32;
 use realtime_noise_contracts::AudioFrame;
 use realtime_noise_model::{
-    ALGORITHM_LATENCY_SAMPLES, AgnosticDspBackend, ApprovedAssetManifest, BackendDescriptor,
-    DspPipelineConfig, ExtractedFeatures, InferenceBackend, InferenceError, ModelFrameOutput,
-    ProcessedFrame, SpectralModelBackend,
+    ALGORITHM_LATENCY_SAMPLES, ApprovedAssetManifest, BackendDescriptor, BandGains, DspPipeline,
+    DspPipelineConfig, ExtractedFeatures, FiLMVectors, InferenceBackend, InferenceError,
+    ModelFrameOutput, PdfNet3DevArchive, ProcessedFrame, SpectralModelBackend, VoiceProfile,
+    spectral_eq,
 };
 use realtime_noise_runtime_openvino::dfn3::{
     DF_COEFS_LEN, DF_DEC_FILE, DF_ORDER, ENC_FILE, ERB_DEC_FILE, NB_DF,
@@ -44,7 +52,20 @@ use realtime_noise_runtime_openvino::{
 };
 use sha2::{Digest, Sha256};
 
-const BACKEND_VERSION: &str = "2025.1.0";
+const BACKEND_VERSION: &str = "openvino-c-api";
+
+const SPEAKER_CONDITIONING_UNSUPPORTED: &str =
+    "backend model does not support speaker conditioning";
+
+/// Build number of the loaded native runtime (`2026.4.1-22982-...`), computed once.
+fn native_runtime_version_static() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        realtime_noise_runtime_openvino::openvino_version()
+            .and_then(|version| version.split_whitespace().next().map(str::to_owned))
+            .unwrap_or_else(|| "unknown".to_owned())
+    })
+}
 
 /// Expected SHA-256 (lowercase hex) of each stateful DeepFilterNet3 graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +139,7 @@ fn descriptor_for(device: &str, asset_id: String, asset_sha256: String) -> Backe
         backend: "openvino",
         backend_version: BACKEND_VERSION,
         runtime,
-        runtime_version: BACKEND_VERSION,
+        runtime_version: native_runtime_version_static(),
         asset_id,
         asset_sha256,
         cpu_profile,
@@ -133,6 +154,23 @@ fn load_error(error: &OpenVinoError) -> InferenceError {
     match error {
         OpenVinoError::ModelReadFailed(message) => InferenceError::ModelCorruption(message.clone()),
         other => InferenceError::InferenceExecution(other.to_string()),
+    }
+}
+
+/// Per-bin EQ factors of a profile EQ, `None` when absent or neutral (same rule as tract).
+fn eq_factors(
+    eq: Option<&BandGains>,
+    band_widths: &[usize],
+) -> Result<Option<Vec<f32>>, InferenceError> {
+    match eq {
+        Some(gains) if !gains.is_neutral() => {
+            Ok(Some(spectral_eq::bin_factors(gains, band_widths)?))
+        }
+        Some(gains) => {
+            gains.validate()?;
+            Ok(None)
+        }
+        None => Ok(None),
     }
 }
 
@@ -182,7 +220,10 @@ enum Engine {
     /// No native session: frames pass through unchanged (simulation / mock).
     Passthrough,
     /// Real OpenVINO inference inside the shared DSP pipeline.
-    Neural(Box<AgnosticDspBackend<OpenVinoSpectralModel>>),
+    Neural {
+        pipeline: Box<DspPipeline>,
+        model: Box<OpenVinoSpectralModel>,
+    },
 }
 
 /// `OpenVINO` acceleration backend targeting Intel NPU, GPU (Arc / iGPU), or CPU devices.
@@ -191,6 +232,7 @@ pub struct OpenVINOBackend {
     device: String,
     engine: Engine,
     simulated_failure: bool,
+    active_profile: Option<VoiceProfile>,
 }
 
 impl std::fmt::Debug for OpenVINOBackend {
@@ -221,7 +263,102 @@ impl OpenVINOBackend {
             device: dev,
             engine: Engine::Passthrough,
             simulated_failure: false,
+            active_profile: None,
         }
+    }
+
+    /// Compiles the pDFNet3 Pro stateful export of `archive` for `device` (`"NPU"`, `"GPU"`,
+    /// `"CPU"`, ...). The archive must already be verified (its whole-archive SHA-256 is the trust
+    /// anchor, see `realtime_noise_model::pdfnet3_bundle`); its asset id and hash become the
+    /// provenance of every frame. Fails unless the graphs declare the `FiLM` inputs.
+    pub fn load_pdfnet3(archive: &PdfNet3DevArchive, device: &str) -> Result<Self, InferenceError> {
+        Self::load_pdfnet3_with_fallback(archive, &[device.to_owned()])
+    }
+
+    /// [`Self::load_pdfnet3`] over `devices` in order; the error lists every device that failed.
+    pub fn load_pdfnet3_with_fallback(
+        archive: &PdfNet3DevArchive,
+        devices: &[String],
+    ) -> Result<Self, InferenceError> {
+        let graphs = archive
+            .graphs()
+            .map_err(|error| InferenceError::ModelCorruption(error.to_string()))?;
+        let graphs = Dfn3Graphs {
+            enc: graphs.enc,
+            erb_dec: graphs.erb_dec,
+            df_dec: graphs.df_dec,
+        };
+        let session = Dfn3Session::load_graphs_with_fallback(&graphs, devices)
+            .map_err(|error| load_error(&error))?;
+        if !session.supports_film() {
+            return Err(InferenceError::ModelCorruption(
+                "the pDFNet3 stateful graphs declare no FiLM (gamma/beta) inputs".to_owned(),
+            ));
+        }
+        Self::from_session(
+            session,
+            archive.asset_id().to_owned(),
+            archive.sha256().to_owned(),
+        )
+    }
+
+    /// Whether the compiled graphs declare the `FiLM` inputs (pDFNet3 Pro), i.e. whether a voice
+    /// profile can be applied.
+    #[must_use]
+    pub fn supports_speaker_conditioning(&self) -> bool {
+        match &self.engine {
+            Engine::Passthrough => false,
+            Engine::Neural { model, .. } => model.session.supports_film(),
+        }
+    }
+
+    #[must_use]
+    pub const fn active_voice_profile(&self) -> Option<&VoiceProfile> {
+        self.active_profile.as_ref()
+    }
+
+    /// Activates `profile` (or removes conditioning with `None`) between two frames, with the
+    /// semantics of `TractBackend::set_voice_profile`: everything is validated before anything is
+    /// applied (on error the previous profile stays active), the recurrent state is preserved,
+    /// `FiLM` goes to `gamma`/`beta` (identity for `None`) and the profile EQ replaces the
+    /// spectral EQ. A non-neutral profile needs graphs with `FiLM` inputs.
+    pub fn set_voice_profile(
+        &mut self,
+        profile: Option<&VoiceProfile>,
+    ) -> Result<(), InferenceError> {
+        let Engine::Neural { pipeline, model } = &mut self.engine else {
+            return realtime_noise_model::reject_unsupported_voice_profile(profile);
+        };
+        let (film, eq) = match profile {
+            Some(profile) => {
+                profile.verify_integrity()?;
+                (Some(&profile.film), profile.eq.as_ref())
+            }
+            None => (None, None),
+        };
+        let film_supported = model.session.supports_film();
+        if !film_supported && film.is_some_and(|vectors| !vectors.is_identity()) {
+            return Err(InferenceError::InputContract(
+                SPEAKER_CONDITIONING_UNSUPPORTED.to_owned(),
+            ));
+        }
+        let eq_factors = eq_factors(eq, pipeline.erb_band_widths())?;
+        if film_supported {
+            let identity = FiLMVectors::identity();
+            let vectors = film.unwrap_or(&identity);
+            model
+                .session
+                .set_film(
+                    &vectors.gamma_enc,
+                    &vectors.beta_enc,
+                    &vectors.gamma_df,
+                    &vectors.beta_df,
+                )
+                .map_err(|error| InferenceError::InputContract(error.to_string()))?;
+        }
+        pipeline.set_spectral_eq_factors(eq_factors)?;
+        self.active_profile = profile.cloned();
+        Ok(())
     }
 
     /// Loads the stateful DeepFilterNet3 graphs from `model_dir` and compiles them for `device`
@@ -301,12 +438,16 @@ impl OpenVINOBackend {
             descriptor: descriptor.clone(),
             scratch: Box::new(Dfn3Output::new()),
         };
-        let pipeline = AgnosticDspBackend::new(model, DspPipelineConfig::default())?;
+        let pipeline = DspPipeline::new(DspPipelineConfig::default())?;
         Ok(Self {
             descriptor,
             device,
-            engine: Engine::Neural(Box::new(pipeline)),
+            engine: Engine::Neural {
+                pipeline: Box::new(pipeline),
+                model: Box::new(model),
+            },
             simulated_failure: false,
+            active_profile: None,
         })
     }
 
@@ -368,7 +509,7 @@ impl OpenVINOBackend {
     /// True when frames go through a compiled OpenVINO network; false for the passthrough stub.
     #[must_use]
     pub const fn executes_inference(&self) -> bool {
-        matches!(self.engine, Engine::Neural(_))
+        matches!(self.engine, Engine::Neural { .. })
     }
 
     /// Alias of [`Self::executes_inference`], kept for existing callers.
@@ -385,7 +526,10 @@ impl OpenVINOBackend {
     pub fn reset(&mut self) -> Result<(), InferenceError> {
         match &mut self.engine {
             Engine::Passthrough => Ok(()),
-            Engine::Neural(pipeline) => pipeline.reset(),
+            Engine::Neural { pipeline, model } => {
+                pipeline.reset();
+                model.reset()
+            }
         }
     }
 }
@@ -412,15 +556,23 @@ impl InferenceBackend for OpenVINOBackend {
             Engine::Passthrough => {
                 ProcessedFrame::checked(*input, ALGORITHM_LATENCY_SAMPLES, self.descriptor.clone())
             }
-            Engine::Neural(pipeline) => match pipeline.process(input) {
-                Ok(frame) => Ok(frame),
-                Err(error) => {
-                    // A failed hop leaves the recurrent state half-advanced; start clean so the
-                    // caller can fall back (or retry) without replaying a corrupted history.
-                    let _ = pipeline.reset();
-                    Err(error)
+            Engine::Neural { pipeline, model } => {
+                match pipeline.process_frame(input, model.as_mut()) {
+                    Ok(samples) => ProcessedFrame::checked(
+                        samples,
+                        ALGORITHM_LATENCY_SAMPLES,
+                        self.descriptor.clone(),
+                    ),
+                    Err(error) => {
+                        // A failed hop leaves the recurrent state half-advanced; start clean so
+                        // the caller can fall back (or retry) without replaying a corrupted
+                        // history.
+                        pipeline.reset();
+                        let _ = model.reset();
+                        Err(error)
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -428,14 +580,12 @@ impl InferenceBackend for OpenVINOBackend {
         ALGORITHM_LATENCY_SAMPLES
     }
 
-    fn set_voice_profile(
-        &mut self,
-        profile: Option<&realtime_noise_model::VoiceProfile>,
-    ) -> Result<(), realtime_noise_model::InferenceError> {
-        realtime_noise_model::reject_unsupported_voice_profile(profile)
+    fn set_voice_profile(&mut self, profile: Option<&VoiceProfile>) -> Result<(), InferenceError> {
+        Self::set_voice_profile(self, profile)
     }
 
+    /// Only the pDFNet3 graphs (with `FiLM` inputs) can apply a profile built by enrollment.
     fn supports_voice_profile(&self) -> bool {
-        false
+        self.supports_speaker_conditioning()
     }
 }
