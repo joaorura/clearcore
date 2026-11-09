@@ -11,7 +11,7 @@ InstallDir "$LOCALAPPDATA\Programs\Clearcore"
 InstallDirRegKey HKCU "Software\Clearcore" "Install_Dir"
 RequestExecutionLevel admin
 
-!define PRODUCT_VERSION "0.1.0-beta.2"
+!define PRODUCT_VERSION "0.1.0-beta.1"
 
 ; ------------------------------------------------------------------------------
 ; Interface Configuration

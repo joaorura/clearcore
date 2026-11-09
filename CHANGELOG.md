@@ -7,41 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual microphone powered by DeepFilterNet3 ONNX, ONNX Runtime (`ort` v2) neural streaming, Target Speaker Extraction (DFNet-TSE-MHCA), PipeWire C bridge (Linux), WaveRT PortCls kernel driver (Windows), CoreAudio HAL (macOS), and a resilient Rust supervisor daemon.
 
-## [0.1.0-beta.2] - 2026-11-09
+## [0.1.0-beta.1] - 2026-11-09
 
-### Fixed
-- Voice profile enrollment failed on every recording: the noisy-environment gate estimated the noise as the raw-minus-denoised difference, which counted the voice itself removed by the denoiser as noise. The gate now estimates the SNR on the raw signal (speech level against the noise floor of the pauses, with digital silence treated as a quiet environment) and logs `snr_db`.
-- The `ENROLL_NOISY_ENVIRONMENT` code was not recognized by the Electron layer and was shown as "O serviço não conseguiu processar o áudio". It now shows the correct noisy-environment message.
-- Building the voice profile always failed with `ENROLL_TOO_QUIET`: the enrollment gate measured the level over the whole take, pauses included, so takes accepted as samples fell under -40 dBFS. It now measures only the active speech, the same rule and threshold the sample ingest applies.
-- The UI lost track of the profile build job under React StrictMode and showed `ENROLL_BUSY` on repeated clicks. It now shows a loading state and resumes the job already running (`GetStatus` exposes `active_enrollment_jobs`).
-- The stored sample had dropouts where the denoiser gated weak speech away. A bounded part of the removed residual is mixed back, capping the attenuation at about 12 dB.
-- Recording: smoothed dBFS level meter, a low-speech-level warning and the label of the microphone in use, falling back to the system default microphone.
-
-## [0.1.0-beta.1] - 2026-10-13
+First beta release.
 
 ### Added
-- **Realtime AI Noise Suppression & Target Speaker Extraction (TSE)**:
-  - Neural engine powered by **ONNX Runtime (`ort` v2)** with explicit stateful graph execution (`enc.onnx`, `erb_dec.onnx`, `df_dec.onnx`) pinned at $S = 1$ (10 ms hop = 480 samples @ 48 kHz).
-  - Advanced **DFNet-TSE-MHCA** model: incorporates $K = 16$ multi-token speaker memory dictionary, sub-band cross-attention (MHCA, 4 heads, $D = 128$) with precomputed offline KV-caching (`precompute_kv`), and Staged Condition Injection (SCI) to completely eliminate same-sex speaker confusion.
-  - Trained and verified with unified multi-task loss including Additive Angular Margin Loss (**ArcFace**, $s = 32.0, m = 0.25$ rad), asymmetric formant preservation, and temporal DF regularizations.
-- **Zero-Allocation Audio Thread**:
-  - Pre-allocated I/O and state tensors with IO Binding guarantee **100% zero heap allocations (`0 bytes malloc`)** in the realtime audio callback.
-  - Fail-closed digital silence policy: outputs clean silence upon buffer underflow or invalid samples without leaking private acoustic data.
-- **Native OS Virtual Device Drivers**:
-  - **Linux (PipeWire)**: Native C bridge (`libclearcore_filter.so` + `pipewire_helper`) creating per-user `realtime-noise-source` node with dynamic profile hot-reloading (250 ms timer and `SIGUSR1`).
-  - **Windows (WaveRT / WASAPI)**: WaveRT PortCls SysVAD kernel-streaming driver (`RealtimeNoise.inf` / `RealtimeNoise.sys`) with localhost IPC bridge.
-  - **macOS (CoreAudio)**: AudioServerPlugIn HAL driver (`RealtimeNoiseHAL.driver`) and lock-free Swift ring buffers.
-- **Studio DSP Chain**:
-  - Integrated deterministic studio-grade finishing chain (`Natural`, `Podcast`, `Broadcast`, `Off`): high-pass filter, noise gate/expander, parametric EQ, de-esser, fast leveler, and transparent true-peak limiter.
-- **Voice Enrollment & Biometric Profiling**:
-  - 5-sample guided calibration workflow: records and denoises raw PCM in memory, calculates microphone acoustic EQ curves, and embeds speaker identity.
-  - Secure biometric storage: profiles encrypted and stored with owner-only permissions (`0600`/`0700`) under `~/.local/share/clearcore/profiles/`.
-- **Desktop Companion Application**:
-  - Self-contained desktop app (Electron / React) with system tray controls, real-time input/output VU metering, A/B audio recording comparison test card, and status telemetry.
+- **pDFNet3 Pro built in**: the isolation model (DeepFilterNet3 with FiLM speaker conditioning, checkpoint `pro-v2-mhca-k16-tse`, export `m3_deploy_pro_v3_20261013`) ships in every package under `models/pdfnet3/` and is loaded by default, with no path or environment variable: `pdfnet3-release-asset-v1.tar.gz` (daemon, tract) and `pdfnet3-stateful-asset-v1.tar.gz` (virtual microphone, ONNX Runtime). Both whole-file SHA-256 are pinned in `crates/model/src/pdfnet3_bundle.rs` and checked before loading (also by the package build and the release workflow). It is the only isolation model shipped; the paired enrollment model ships in `models/enrollment/`.
+- `GetStatus`: `isolation_model` (`pdfnet3-pro`, `pdfnet3-dev`, `none`) and `isolation_model_error` (fixed `MODEL_*` code, never a path); the profile tab shows the code when the model cannot be loaded.
+- **Voice enrollment and profile**: guided sample recording, profile build with microphone EQ, owner-only profile storage (`0600`/`0700`), voice isolation on/off and intensity, live profile reload in the virtual microphone.
+  - The noisy-environment gate estimates the SNR on the raw recording (speech level against the noise floor of the pauses) and logs `snr_db`; `ENROLL_NOISY_ENVIRONMENT` has its own message.
+  - The level gate measures only the active speech, with the same rule and threshold for sample ingest and profile build.
+  - Stored samples keep weak speech: a bounded part of the denoiser residual is mixed back (attenuation capped at about 12 dB).
+  - The UI follows the profile build job (loading state, resumes a running job; `GetStatus` exposes `active_enrollment_jobs`).
+  - Recording feedback: smoothed dBFS level meter, low-speech-level warning and the label of the microphone in use, falling back to the system default microphone.
+- **Native virtual microphone**: PipeWire bridge (`libclearcore_filter.so` + `pipewire_helper`) on Linux, WaveRT driver on Windows, CoreAudio HAL on macOS.
+- **Studio DSP chain**: `Natural`, `Podcast`, `Broadcast`, `Off` (high-pass, gate/expander, EQ, de-esser, leveler, true-peak limiter).
+- **Desktop app** (Electron/React): tray controls, level meters, A/B recording test, status telemetry.
 
-### Changed
-- Complete architecture migration to ONNX Runtime (`ort` v2), providing hardware-accelerated AVX2 / AVX-512 VNNI execution and sub-millisecond per-frame latency (< 0.28 ms).
-- Licensing: Released under PolyForm Noncommercial License 1.0.0 (source code) and CC BY-NC 4.0 (models and documentation).
+### Behavior
+- Every backend request runs the pDFNet3 Pro on tract (CPU); an accelerator request (OpenVINO, TensorRT) reports a CPU fallback with the reason, because those backends cannot feed the FiLM inputs.
+- No fallback model: if the bundled pDFNet3 Pro is missing or fails verification, the daemon loads no isolation model and reports `isolation_model: "none"` with the code, and the virtual-microphone filter is not created.
+- `voice_profile_supported` is true exactly when the live model can apply a profile; when false, building a profile is refused immediately with `ENROLL_BACKEND_UNSUPPORTED`.
+- Enrollment samples are denoised with the same pDFNet3 Pro in neutral conditioning.
+- The base DeepFilterNet3 (`models/stateful/`, its TensorRT engines, `vendor/approved/`) is not shipped; it stays in the repository for tests.
+- Requires an x86-64 CPU with AVX2 for the isolation model; on ARM64 builds it reports `MODEL_LOAD_FAILED` (known limitation of this beta).
+- Licensing: PolyForm Noncommercial License 1.0.0 (source code) and CC BY-NC 4.0 (models and documentation).
 
-[0.1.0-beta.2]: https://github.com/joaorura/clearcore/compare/v0.1.0-beta.1...v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/joaorura/clearcore/releases/tag/v0.1.0-beta.1

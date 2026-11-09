@@ -1,64 +1,20 @@
 # ClearCore v0.1.0-beta.1 — First Beta Release
 
-We are excited to announce the first official public beta release of **ClearCore (`v0.1.0-beta.1`)**!
+The first beta of **ClearCore (`v0.1.0-beta.1`)**: a cross-platform, realtime AI noise-suppression virtual microphone with voice isolation by speaker profile.
 
-ClearCore is a high-performance, cross-platform, realtime AI noise-suppression virtual microphone. Engineered for low latency, zero cloud dependency, and total audio confidentiality, ClearCore runs entirely offline on your local machine using DeepFilterNet3 neural models and optimized native audio engines.
+ClearCore runs entirely offline on your machine: no cloud, no account, no audio leaves the computer. Every package ships the **pDFNet3 Pro** isolation model built in, ready to use with no configuration.
 
 ---
 
 ## 🚀 Release Highlights
 
-- **DeepFilterNet3 Neural Suppression**: State-of-the-art voice enhancement driven by the DeepFilterNet3 ONNX model, isolating vocals and eliminating keyboard clicks, fan hum, dogs barking, and room reverberation.
-- **Ultra-Low Latency Inference**: Native C filter (`libclearcore_filter`) accelerated by Tract with AVX2 instruction optimizations, processing 10ms audio frames in **0.276 ms** (under 3% CPU frame budget).
-- **Physical Verification & Acoustics**: Verified in OBS Studio with real hardware audio capture, achieving **-70.3 dBFS** baseline silence during speech pauses and **-32.8 dB** of real-world ambient noise attenuation.
-- **First-Party Platform Audio Drivers**:
-  - **Linux (PipeWire)**: Native C helper (`pipewire_helper`) registers a per-user `realtime-noise-source` virtual node.
-  - **Windows (WaveRT PortCls)**: Dedicated kernel-mode driver (`RealtimeNoise.sys`) paired with a WASAPI host adapter.
-  - **macOS (CoreAudio HAL)**: AudioServerPlugIn (`RealtimeNoiseHAL.driver`) paired with a lock-free Swift ring buffer.
-- **Resilient Rust Daemon**: Supervisor daemon (`realtime-noise-service`) with automated crash detection, exponential backoff restart policy, and low-latency IPC control.
-- **Desktop Companion App**: Turnkey Electron/React application featuring system tray controls, autostart on boot, one-click mode switching (*Active*, *Bypass*, *Mute*), and real-time audio diagnostics.
-- **Deterministic Offline Quality Gate**: Automated regression test framework validating processed outputs against Golden Audio Reference vectors prior to packaging.
-- **Universal Clean Uninstallation**: Complete teardown suite (`uninstall.sh`, `uninstall.bat`, `uninstall.ps1`, `scripts/uninstall-*`) ensuring zero lingering drivers, daemons, or phantom audio nodes.
-
----
-
-## 🏗 Architecture Overview
-
-ClearCore operates in a multi-tier pipeline designed for maximum reliability and separation of concerns:
-
-```
-[ Physical Microphone ]
-          │
-          ▼
-┌────────────────────────────────────────────────────────┐
-│ Platform Audio Capture Bridge                          │
-│  - Linux: PipeWire C Helper (pipewire_helper)          │
-│  - Windows: WaveRT PortCls Driver (RealtimeNoise.sys)  │
-│  - macOS: CoreAudio HAL PlugIn (RealtimeNoiseHAL)      │
-└────────────────────────────────────────────────────────┘
-          │ (10ms PCM audio frames / 48kHz Float32)
-          ▼
-┌────────────────────────────────────────────────────────┐
-│ Neural Processing Core (libclearcore_filter)           │
-│  - Tract AVX2 Inference Engine                         │
-│  - DeepFilterNet3 ONNX Model Execution                 │
-│  - Latency: 0.276 ms / frame (Sub-millisecond)         │
-└────────────────────────────────────────────────────────┘
-          │ (Clean voice stream)
-          ▼
-┌────────────────────────────────────────────────────────┐
-│ Virtual Microphone Source Node                         │
-│ (realtime-noise-source / Clearcore Virtual Mic)        │
-└────────────────────────────────────────────────────────┘
-          │
-          ▼
-[ Target Apps: OBS Studio, Discord, Zoom, Teams, Meet ]
-
-══════════════════════════════════════════════════════════
-IPC Supervision:
-  [ realtime-noise-service ] ◄──(IPC Bridge)──► [ Electron Tray UI ]
-  (Crash recovery, health)                       (Modes, devices, status)
-```
+- **pDFNet3 Pro built in**: the isolation model (DeepFilterNet3 with FiLM speaker conditioning) ships inside every package, under `models/pdfnet3/`, and loads by default with no path or environment variable. Its SHA-256 is pinned in the code and checked before loading; if the file is missing or altered, the app says so instead of silently switching to another model. It is the only isolation model shipped.
+- **Voice profile (enrollment)**: record a few samples with your microphone, build your voice profile and the virtual microphone isolates your voice from other speakers and background noise. The profile is applied to the same pDFNet3 Pro model the virtual microphone runs.
+- **Reliable enrollment**: the noisy-environment check measures the signal-to-noise ratio on the raw recording; the level check measures only active speech (the same rule for samples and for the profile build); stored samples keep weak speech (denoiser attenuation capped at about 12 dB); clear messages for each rejection (noisy environment, too quiet, not enough speech).
+- **Build progress you can follow**: a loading state while the profile is built, and a build already running is resumed instead of reported as busy (`GetStatus` exposes `active_enrollment_jobs`).
+- **Recording feedback**: smoothed dBFS level meter, low-speech-level warning and the name of the microphone in use (falling back to the system default microphone).
+- **Studio DSP chain**: `Natural`, `Podcast`, `Broadcast` and `Off` presets (high-pass, gate/expander, EQ, de-esser, leveler, true-peak limiter).
+- **Native virtual microphone**: PipeWire bridge on Linux, WaveRT driver on Windows, CoreAudio HAL on macOS.
 
 ---
 
@@ -71,7 +27,7 @@ IPC Supervision:
 | **Linux (Universal)** | x86_64 / ARM64 | `.AppImage` / `.tar.gz` | `chmod +x Clearcore-*.AppImage && ./Clearcore-*.AppImage` |
 | **Windows** | x64 | `.exe` (NSIS / Inno) & `.zip` | `winget install joaorura.Clearcore` (or run `Clearcore-Setup.exe`) |
 | **Windows ARM64** | ARM64 (Snapdragon X) | `.zip` | Extract and run `Clearcore.exe` |
-| **macOS** | Intel x64 & Apple Silicon | `.dmg` & `.tar.gz` | Open `Clearcore.dmg` or run `./install.sh` |
+| **macOS** | Apple Silicon ARM64 | `.dmg` & `.tar.gz` | Open `Clearcore.dmg` or run `./install.sh` |
 
 ---
 
@@ -160,30 +116,24 @@ To ensure your downloaded binaries have not been corrupted or tampered with, ver
 - **Processor**: 64-bit x86 processor with **AVX2** support (Intel Haswell / AMD Zen or newer), or Apple Silicon (M1/M2/M3/M4 via Rosetta 2 or native HAL).
 - **RAM**: Minimum 512 MB free RAM (typical resident set size ~75 MB).
 - **Disk Space**: ~250 MB free disk space.
-- **Hardware Accelerators (Optional)**: Intel NPU / OpenVINO, AMD Ryzen AI NPU, or ROCm GPU acceleration supported when vendor runtimes are installed.
+- **CPU**: the pDFNet3 Pro runs on the CPU and requires x86-64 with AVX2. Known limitation of this beta: on ARM64 builds (Linux ARM64, Windows ARM64, macOS Apple Silicon) the isolation model does not load and the app reports `MODEL_LOAD_FAILED`. Hardware accelerators are not used by this release.
 
 ---
 
 ## 📋 Full Changelog for v0.1.0-beta.1
 
 ### Added
-- Realtime AI Noise Suppression virtual microphone powered by DeepFilterNet3 ONNX.
-- Native C library `libclearcore_filter.so` / `clearcore_filter.dll` with Tract AVX2 acceleration (0.276 ms latency per 10ms frame).
-- Linux PipeWire C helper (`pipewire_helper`) creating per-user `realtime-noise-source` node.
-- Windows WaveRT PortCls kernel driver (`RealtimeNoise.sys`) and WASAPI host adapter.
-- macOS CoreAudio HAL AudioServerPlugIn (`RealtimeNoiseHAL.driver`) and lock-free Swift ring buffer.
-- Rust supervisor daemon (`realtime-noise-service`) with exponential backoff and IPC control.
-- Cross-platform desktop companion application in Electron/React with system tray integration.
-- Universal cross-platform uninstaller suite (`uninstall.sh`, `uninstall.bat`, `uninstall.ps1`, `scripts/uninstall-*`) ensuring clean teardown of processes, drivers, services, and audio nodes.
-- Offline deterministic qualification gate with Golden Audio Reference verification.
+- pDFNet3 Pro (FiLM voice-profile conditioning) bundled as the only isolation model: `pdfnet3-release-asset-v1.tar.gz` (daemon, tract) and `pdfnet3-stateful-asset-v1.tar.gz` (virtual microphone, ONNX Runtime), SHA-256 pinned in the code, found automatically in the installation (`/opt/clearcore/models`, `/usr/share/clearcore/models`, next to the executable, `CLEARCORE_MODELS_DIR`). The enrollment model paired with it ships in `models/enrollment/`.
+- `GetStatus` reports `isolation_model` (`pdfnet3-pro`, or `none` when unavailable) and `isolation_model_error` (fixed `MODEL_*` code); the profile tab shows the code when the model cannot be loaded.
+- Voice enrollment: guided sample recording, profile build with microphone EQ, profile storage with owner-only permissions, voice isolation on/off and intensity.
+- Desktop app (Electron/React) with tray controls, level meters, A/B recording test and status telemetry.
 
-### Changed & Improved
-- Resolved PipeWire neural integration and verified physical audio capture in OBS Studio (-70.3 dBFS silence, -32.8 dB noise reduction).
-- Portable library discovery in `pipewire_helper.c` via `/proc/self/exe`.
-- Localhost TCP bridge on Windows (`127.0.0.1:49215`) for reliable IPC communication without external dependencies.
-- Exact process matching (`pkill -x`) in uninstaller scripts to avoid subshell interruption.
+### Behavior
+- With the pDFNet3 Pro loaded, every backend request runs it on the CPU (tract); requesting an accelerator (OpenVINO, TensorRT) reports a CPU fallback with the reason, since those backends cannot apply a voice profile.
+- `voice_profile_supported` is true exactly when the active model can apply a profile; when it is false, "build profile" is refused immediately with a clear message instead of failing at the end.
+- Enrollment samples are denoised with the same pDFNet3 Pro in neutral conditioning.
+- The base DeepFilterNet3 graphs and TensorRT engines are no longer shipped.
 
----
 
 ## 💬 Feedback & Bug Reports
 
