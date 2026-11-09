@@ -87,6 +87,15 @@ impl<T: Send + 'static> JobTable<T> {
     where
         F: FnOnce() -> Result<T, JobFailure> + Send + 'static,
     {
+        self.spawn_with_id(stage, move |_| work())
+    }
+
+    /// Like [`spawn`](Self::spawn), but the worker receives the id of its own job (the table's
+    /// inner id, without any client-facing prefix), e.g. to tag its log lines.
+    pub fn spawn_with_id<F>(&mut self, stage: &'static str, work: F) -> Result<String, JobFailure>
+    where
+        F: FnOnce(&str) -> Result<T, JobFailure> + Send + 'static,
+    {
         let running = self
             .jobs
             .values()
@@ -106,11 +115,14 @@ impl<T: Send + 'static> JobTable<T> {
         let spawned = std::thread::Builder::new()
             .name(format!("enroll-{job_id}"))
             .spawn(move || {
-                let result = catch_unwind(AssertUnwindSafe(work)).unwrap_or(Err(JobFailure {
-                    error_code: PANIC_ERROR_CODE,
-                    stage,
-                    remaining_seconds: None,
-                }));
+                let worker_id = thread_id.clone();
+                let result = catch_unwind(AssertUnwindSafe(move || work(&worker_id))).unwrap_or(
+                    Err(JobFailure {
+                        error_code: PANIC_ERROR_CODE,
+                        stage,
+                        remaining_seconds: None,
+                    }),
+                );
                 // The table may be gone already; nobody is left to hear the result.
                 let _ = tx.send(Completion {
                     job_id: thread_id,
@@ -206,6 +218,13 @@ impl<T: Send + 'static> JobTable<T> {
         self.jobs.get(job_id)
     }
 
+    /// Jobs currently in the Running state (unordered), with the stage they were spawned with.
+    pub fn running_jobs(&self) -> impl Iterator<Item = &JobInfo> {
+        self.jobs
+            .values()
+            .filter(|info| info.state == JobState::Running)
+    }
+
     /// Watchdog: every job still Running after `max_age` becomes Failed (`ENROLL_FAILED`,
     /// stage `timeout`), which frees its slot. Threads cannot be killed: the worker may keep
     /// running and its late result is discarded by `drain`.
@@ -280,6 +299,32 @@ mod tests {
         })
         .unwrap();
         id
+    }
+
+    #[test]
+    fn spawn_with_id_hands_the_registered_id_to_the_worker() {
+        let mut t = JobTable::<String>::new();
+        let id = t
+            .spawn_with_id("trim", |job_id| Ok(job_id.to_owned()))
+            .unwrap();
+        let got = wait_until(|| {
+            let d = t.drain();
+            (!d.is_empty()).then_some(d)
+        });
+        assert_eq!(got, vec![(id.clone(), id)]);
+    }
+
+    #[test]
+    fn running_jobs_lists_only_the_running_ones_with_their_stage() {
+        let mut t = JobTable::<u32>::new();
+        let a = t.register("denoise");
+        let b = t.register("trim");
+        t.mark_done(&a);
+        let running: Vec<(String, &'static str)> = t
+            .running_jobs()
+            .map(|info| (info.job_id.clone(), info.stage))
+            .collect();
+        assert_eq!(running, vec![(b, "trim")]);
     }
 
     #[test]

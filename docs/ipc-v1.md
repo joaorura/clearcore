@@ -95,6 +95,9 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
     "voice_profile_error": null,
     "voice_profile_supported": true,
     "neural_eq_calibrated": true,
+    "active_enrollment_jobs": [
+      {"job_id": "profile-job-3", "kind": "profile", "stage": "trim"}
+    ],
     "dev_base_model": "base",
     "dev_base_model_error": null
   }
@@ -112,6 +115,7 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
   | `voice_profile_error` | Generic, constant reason the stored profile is not applied (backend rejected it, file missing/unreadable, rollback failed), or `null`. Never carries profile data or backend error text. |
   | `voice_profile_supported` | `true` when the active backend can apply a voice profile at all. `false` on backends that reject every profile (OpenVINO NPU/GPU/CPU, DirectML, RyzenAI, TensorRT, Vulkan, CoreML, the mock tract) and on tract when the loaded model has no `FiLM` (`gamma`/`beta`) inputs, which is the case of the approved base DFNet3; `false` without a backend. While `false`, `BuildVoiceProfile` answers `ENROLL_BACKEND_UNSUPPORTED` immediately. Clients that do not find the field must treat support as unknown. |
   | `neural_eq_calibrated` | `true` when the **applied** profile (`active_voice_profile_id`) carries a microphone EQ; `false` without an applied profile or when it has no EQ. |
+  | `active_enrollment_jobs` | Additive. Enrollment jobs still running, as `{"job_id": string, "kind": "sample" \| "profile", "stage": string}` (`job_id` is the same id `AddVoiceSample`/`AddIntakeSuggestion`/`BuildVoiceProfile` returned and `GetEnrollmentJob` accepts; `sample` = ingest of a sample or take, `profile` = profile build). `stage` is the stage the job was spawned with (`denoise` or `trim`), as in `GetEnrollmentJob`. Empty array when nothing runs; a finished job leaves the list at the next request. Clients that do not find the field must treat it as an empty list. |
   | `dev_base_model` | Development only. `"pdfnet3-dev"` while the live backend runs the unsigned development pDFNet3 (FiLM) loaded through `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256` (§3.1.7); `"base"` otherwise (the default model, or no model). The pDFNet3 is the M2 checkpoint judged NO-GO: it lets the runtime accept a voice profile, it is not an approved model and no isolation benefit is claimed. |
   | `dev_base_model_error` | Fixed code when the development pDFNet3 was configured but is not in use, else `null`: `DEV_MODEL_CONFIG_INCOMPLETE` (only one of the two variables), `DEV_MODEL_CONFIG_INVALID` (relative or non-UTF-8 path, hash not 64 lowercase hex), `DEV_MODEL_ASSET_UNREADABLE`, `DEV_MODEL_ASSET_TOO_LARGE` (over 64 MiB), `DEV_MODEL_HASH_MISMATCH`, `DEV_MODEL_ARCHIVE_INVALID` (members other than exactly the four expected), `DEV_MODEL_LOAD_FAILED`, `DEV_MODEL_NO_FILM`. Never a path. The daemon then keeps the default model selection. |
 
@@ -163,7 +167,7 @@ Returns the backend to the neutral voice and removes the stored profile. Idempot
 
 Status: **development-integrated.** The pipeline runs on the service backend, but the packaged virtual microphone (`filter-capi` / helper) does not apply the profile yet, and there is no claim of improved isolation. The enrollment model is a development asset (section 3.1.7), not a distributed one.
 
-Overview: the app sends a recording with `AddVoiceSample`; the service denoises it with the base DFNet3 in memory, measures its quality, stores the **denoised** WAV (16-bit, 48 kHz, mono) and answers through a job. `BuildVoiceProfile` then joins the active samples of one microphone into a profile and applies it through the `SetVoiceProfile` transaction. The service never writes raw audio to disk (section 3.1.8).
+Overview: the app sends a recording with `AddVoiceSample`; the service denoises it with the base DFNet3 in memory, measures its quality, stores the **denoised** WAV (16-bit, 48 kHz, mono; 25% of what the denoiser removed is mixed back, capping its attenuation at about -12 dB so weak speech is never gated into digital silence) and answers through a job. `BuildVoiceProfile` then joins the active samples of one microphone into a profile and applies it through the `SetVoiceProfile` transaction. The service never writes raw audio to disk (section 3.1.8).
 
 #### 3.1.1 `AddVoiceSample`
 Stores one recording as a gallery sample. Replaces the previous embedding-carrying form.
@@ -183,7 +187,7 @@ Stores one recording as a gallery sample. Replaces the previous embedding-carryi
 
 - **Response Payload (immediate):** `{"success": true, "job_id": "sample-job-1"}`. Sample ingestion jobs use the `sample-job-N` id format. The final result is read with `GetEnrollmentJob`.
 - **Errors (immediate):** `INVALID_COMMAND` (status `InvalidCommand`, message `invalid sample metadata`) when `name` is empty or `name`, `device_label` or `device_id_hash` exceed 256 bytes; `ENROLL_INVALID_AUDIO` (a `sample_rate` other than `48000`, bad base64, empty or misaligned PCM); `ENROLL_PAYLOAD_TOO_LARGE` (more than 90 s of PCM); `ENROLL_BUSY` (two sample jobs already running; status `InternalError`); `ENROLL_MODEL_NOT_CONFIGURED` (status `InternalError`) when the service has no base denoiser (isolation model) available: the request is refused before the audio is decoded and nothing is stored. Errors found during processing (`ENROLL_CLIPPING`, `ENROLL_TOO_QUIET`, `ENROLL_BUDGET_EXCEEDED`, `ENROLL_FAILED`) arrive as the `failed` state of the job.
-- **Rules:** a raw peak of `0.99` or more is rejected as clipping; an RMS below -40 dBFS is rejected as too quiet; if the microphone's used speech plus the sample's speech would exceed 90 s (section 3.1.5), nothing is stored and the job fails with `ENROLL_BUDGET_EXCEEDED` carrying `remaining_seconds`.
+- **Rules:** a raw peak of `0.99` or more is rejected as clipping; an active-speech RMS (active frames only, pauses excluded; the profile build applies the same rule and threshold to the joined audio) below -40 dBFS is rejected as too quiet; if the microphone's used speech plus the sample's speech would exceed 90 s (section 3.1.5), nothing is stored and the job fails with `ENROLL_BUDGET_EXCEEDED` carrying `remaining_seconds`.
 
 #### 3.1.2 `BuildVoiceProfile`
 Builds a profile from the active samples of the **most recent sample's microphone** and applies it. Samples of other microphones stay in the gallery, flagged `other_microphone`, and are not used. Speech is trimmed (20 ms frames, 40 ms margin), levels are matched to the group median (gain limited to +/-12 dB), segments are joined with a 20 ms crossfade, the microphone EQ is estimated, the audio is resampled 48 to 16 kHz and enrolled with the development model.
@@ -270,7 +274,7 @@ Codes are fixed strings with no free text and no echo of the payload (`crates/ip
 | Code | Meaning |
 | :--- | :--- |
 | `ENROLL_CLIPPING` | The recording clips (raw peak at or above 0.99). Re-record at a lower input level. |
-| `ENROLL_TOO_QUIET` | The denoised speech is quieter than -40 dBFS RMS. |
+| `ENROLL_TOO_QUIET` | The active speech is quieter than -40 dBFS RMS (pauses excluded), at ingest or when the profile is built. |
 | `ENROLL_TOO_LITTLE_SPEECH` | Less than 6 s of speech in the recording group (or no group). Immediate response of `BuildVoiceProfile`; record more with the same microphone. |
 | `ENROLL_MODEL_NOT_CONFIGURED` | A model the pipeline needs is not available: the development enrollment model is absent, unreadable, oversized or its SHA-256 does not match (see below; reported by the build job, stage `enroll`), or the service has no base denoiser (isolation model) available (immediate response of `AddVoiceSample` and `AddIntakeSuggestion`). |
 | `ENROLL_BUDGET_EXCEEDED` | The microphone would exceed 90 s of speech. Delete audio first. |

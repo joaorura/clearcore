@@ -1,5 +1,6 @@
 //! Ingestion of enrollment samples: validate the raw take, run it through the base denoiser,
-//! measure the clean speech and encode the full clean take as the stored WAV.
+//! mix a bounded fraction of the removed residual back in, measure the result and encode the full
+//! take as the stored WAV.
 
 use realtime_noise_model::speech_trim::{active_rms_dbfs, estimate_snr_db, trim_speech};
 use realtime_noise_model::wav::{decode_wav_pcm16_mono, encode_wav_pcm16_mono};
@@ -16,6 +17,15 @@ pub const MAX_PEAK: f32 = 0.99;
 /// Minimum speech-over-background SNR (dB), estimated on the RAW take, below which the
 /// environment is considered too noisy to enroll.
 const MIN_SNR_DB: f32 = 5.0;
+/// Fraction of the signal the denoiser removed (`raw - clean`) that is put back into the stored
+/// take: `stored = clean + RESIDUAL_MIX * (raw - clean)`.
+///
+/// On weak speech the denoiser gates whole stretches (10-280 ms, below -70 dBFS) away inside the
+/// words, which leaves holes of digital silence in the stored voice. Mixing 25% of the residual
+/// back caps the attenuation of anything the denoiser removed at `20 * log10(0.25)` ~ -12 dB, so
+/// no stretch of speech can be erased, while the background it suppressed stays ~12 dB down.
+/// `raw` and `clean` are sample-aligned (the denoiser compensates its own latency).
+const RESIDUAL_MIX: f32 = 0.25;
 const SAMPLE_RATE: u32 = 48_000;
 
 #[derive(Debug, Clone)]
@@ -37,9 +47,10 @@ impl<B: AsMut<[f32]>> Drop for ZeroOnDrop<B> {
 }
 
 /// Steps: reject non-finite input (`InvalidAudio`) and a RAW peak >= 0.99 (`Clipping`); denoise;
-/// measure with `trim_speech`; reject active-speech RMS < -40 dBFS (`TooQuiet`) and zero trimmed
-/// speech (`TooLittleSpeech`); encode the DENOISED, UNTRIMMED take. `pcm48` is always zeroed
-/// before returning, on success and on error.
+/// mix the stored take (`clean + RESIDUAL_MIX * (raw - clean)`); reject a stored peak >= 0.99
+/// (`Clipping`); measure the stored take with `trim_speech`; reject active-speech RMS < -40 dBFS
+/// (`TooQuiet`) and zero trimmed speech (`TooLittleSpeech`); encode the stored, UNTRIMMED take.
+/// `pcm48` is always zeroed before returning, on success and on error.
 ///
 /// A pure-silence take is reported as `TooQuiet` (its active-speech RMS is the floor, far below
 /// the threshold), checked before the zero-speech test.
@@ -62,21 +73,32 @@ fn ingest_inner(denoiser: &mut dyn Denoiser, pcm48: &[f32]) -> Result<IngestResu
     if clean.0.len() != pcm48.len() || clean.0.iter().any(|v| !v.is_finite()) {
         return Err(EnrollError::Failed);
     }
-    if peak_of(&clean.0) >= MAX_PEAK {
+    // The stored take is the denoised one with a bounded part of the removed residual mixed back
+    // (see `RESIDUAL_MIX`); every measurement and gate below is taken on this mix.
+    let mixed = ZeroOnDrop(
+        clean
+            .0
+            .iter()
+            .zip(pcm48)
+            .map(|(c, r)| RESIDUAL_MIX.mul_add(r - c, *c))
+            .collect::<Vec<f32>>(),
+    );
+    if peak_of(&mixed.0) >= MAX_PEAK {
         return Err(EnrollError::Clipping);
     }
     // Everything is measured on the PCM16-quantized signal, i.e. exactly what the stored WAV
     // decodes to, so the ingest budget matches what the profile build re-measures from the files.
-    // The stored take is the full (untrimmed) denoised take: its size is bounded by the caller's
-    // payload limit, and trimming is recomputed at build time.
-    let wav_bytes = encode_wav_pcm16_mono(&clean.0, SAMPLE_RATE);
+    // The stored take is the full (untrimmed) mix: its size is bounded by the caller's payload
+    // limit, and trimming is recomputed at build time.
+    let wav_bytes = encode_wav_pcm16_mono(&mixed.0, SAMPLE_RATE);
     let (stored, rate) = decode_wav_pcm16_mono(&wav_bytes).map_err(|_| EnrollError::Failed)?;
     let stored = ZeroOnDrop(stored);
     if rate != SAMPLE_RATE {
         return Err(EnrollError::Failed);
     }
-    // The ingest threshold is strict (< -40 dBFS rejects); the enroll validator accepts <= -40
-    // on the joined audio, so the two leave a small slack on purpose.
+    // Same rule and threshold as the enroll validator (`active_rms_dbfs` over the take): the ingest
+    // rejects strictly below -40 dBFS, the validator at or below it, so they differ only by that
+    // boundary sample. Pauses never count against the level in either place.
     let rms_dbfs = active_rms_dbfs(&stored.0, SAMPLE_RATE);
     if rms_dbfs < MIN_SPEECH_RMS_DBFS {
         return Err(EnrollError::TooQuiet);
@@ -266,14 +288,55 @@ mod tests {
     }
 
     #[test]
-    fn stored_wav_reflects_the_denoised_signal() {
-        let raw = bursts(3.0, 0.4);
-        let mut pcm = raw;
+    fn stored_wav_is_the_denoised_signal_with_a_bounded_residual_mixed_back() {
+        // clean = 0.8 * raw, so the stored mix is clean + 0.25 * (raw - clean) = 0.85 * raw:
+        // neither the raw take (peak 0.40) nor the fully denoised one (peak 0.32).
+        let mut pcm = bursts(3.0, 0.4);
         let r = ingest_sample(&mut Gain(0.8), &mut pcm).unwrap();
         let (decoded, _) = decode_wav_pcm16_mono(&r.wav_bytes).unwrap();
         let peak = decoded.iter().fold(0.0_f32, |m, v| m.max(v.abs()));
-        assert!((peak - 0.32).abs() < 0.01, "peak {peak}");
-        assert!((r.peak - 0.32).abs() < 0.01);
+        assert!((peak - 0.34).abs() < 0.01, "peak {peak}");
+        assert!((r.peak - 0.34).abs() < 0.01);
+    }
+
+    /// Zeroes every other 10 ms frame, like a denoiser that gates weak speech away.
+    struct ZeroAlternateFrames;
+    impl Denoiser for ZeroAlternateFrames {
+        fn denoise(&mut self, pcm48: &[f32]) -> Result<Vec<f32>, EnrollError> {
+            let mut out = pcm48.to_vec();
+            for (i, frame) in out.chunks_mut(480).enumerate() {
+                if i % 2 == 0 {
+                    frame.fill(0.0);
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    fn frame_dbfs(frame: &[f32]) -> f32 {
+        let ms = frame.iter().map(|v| v * v).sum::<f32>() / frame.len() as f32;
+        10.0 * (ms + 1e-12).log10()
+    }
+
+    #[test]
+    fn stored_wav_has_no_digital_silence_where_the_raw_take_had_speech() {
+        let raw = bursts(3.0, 0.3);
+        let mut pcm = raw.clone();
+        let r = ingest_sample(&mut ZeroAlternateFrames, &mut pcm).unwrap();
+        let (decoded, _) = decode_wav_pcm16_mono(&r.wav_bytes).unwrap();
+        assert_eq!(decoded.len(), raw.len());
+        let mut speech_frames = 0;
+        for (raw_frame, stored_frame) in raw.chunks_exact(480).zip(decoded.chunks_exact(480)) {
+            if frame_dbfs(raw_frame) > -50.0 {
+                speech_frames += 1;
+                let level = frame_dbfs(stored_frame);
+                assert!(
+                    level >= -70.0,
+                    "stored frame at {level} dBFS over raw speech"
+                );
+            }
+        }
+        assert!(speech_frames > 100, "{speech_frames}");
     }
 
     #[test]

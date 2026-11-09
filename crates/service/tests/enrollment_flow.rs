@@ -81,8 +81,8 @@ impl InferenceBackend for ProfileBackend {
     }
 }
 
-/// Scales by `gain` (0.8 by default), so the stored WAV is provably the denoised signal and
-/// not the raw one.
+/// Scales by `gain` (0.8 by default), so the stored WAV is provably derived from the denoised
+/// signal (with the bounded residual mixed back, see `RESIDUAL_MIX`) and not the raw one.
 struct GainDenoiser {
     delay: Duration,
     gain: f32,
@@ -902,11 +902,13 @@ fn no_raw_audio_is_written_anywhere() {
     assert_eq!(rate, 48_000);
     assert_eq!(stored.len(), raw.len());
     let tolerance = 1.0 / 32_768.0 + 1e-6;
+    // The fake denoiser gives clean = 0.8 * raw; the stored take mixes 25% of the removed
+    // residual back (clean + 0.25 * (raw - clean) = 0.85 * raw), so it is neither raw nor clean.
     assert!(
         stored
             .iter()
             .zip(&raw)
-            .all(|(s, r)| (s - r * 0.8).abs() <= tolerance)
+            .all(|(s, r)| (s - r * 0.85).abs() <= tolerance)
     );
     assert!(stored.iter().zip(&raw).any(|(s, r)| (s - r).abs() > 0.01));
 }
@@ -1094,6 +1096,50 @@ fn deleting_a_group_sample_during_a_build_discards_its_result() {
     assert!(job["stage"] == "apply" || job["stage"] == "trim", "{job}");
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert!(status.payload["active_voice_profile_id"].is_null());
+}
+
+#[test]
+fn status_lists_the_running_profile_build_and_empties_when_it_finishes() {
+    let (_temp, mut daemon) = slow_build_daemon("enroll-active-profile");
+    let idle = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(idle.payload["active_enrollment_jobs"], json!([]));
+
+    let id = job_id(&build(&mut daemon));
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(
+        status.payload["active_enrollment_jobs"],
+        json!([{"job_id": id, "kind": "profile", "stage": "trim"}]),
+        "{}",
+        status.payload
+    );
+
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "done", "{job}");
+    let after = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(after.payload["active_enrollment_jobs"], json!([]));
+}
+
+#[test]
+fn status_lists_a_running_sample_job_with_kind_sample() {
+    let temp = TempDir::new("enroll-active-sample");
+    let (mut daemon, _) = daemon_with(
+        temp.path(),
+        Setup {
+            denoise_delay: Duration::from_millis(400),
+            ..Setup::default()
+        },
+    );
+    let id = job_id(&send(&mut daemon, add_cmd(&speech_pcm(2.0, 0.3), "mic-a")));
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(
+        status.payload["active_enrollment_jobs"],
+        json!([{"job_id": id, "kind": "sample", "stage": "denoise"}]),
+        "{}",
+        status.payload
+    );
+    assert_eq!(wait_job(&mut daemon, &id)["state"], "done");
+    let after = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(after.payload["active_enrollment_jobs"], json!([]));
 }
 
 #[test]

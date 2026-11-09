@@ -550,6 +550,19 @@ fn run_build(
     built.map_err(|e| map_build_error(&e))
 }
 
+/// One service-log line for the end of a `BuildVoiceProfile` worker: the client-facing job id and
+/// either `SUCCESS` or `FAILED` with the fixed error code and stage. Fixed codes only: never the
+/// profile, its name, audio, paths or error text.
+fn build_outcome_log<T>(job_id: &str, result: &Result<T, JobFailure>) -> String {
+    match result {
+        Ok(_) => format!("build_voice_profile job_id={job_id} SUCCESS"),
+        Err(f) => format!(
+            "build_voice_profile job_id={job_id} FAILED code={} stage={}",
+            f.error_code, f.stage
+        ),
+    }
+}
+
 /// `take_json` of `AddIntakeSuggestion`: the call take's audio and capture device.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1058,9 +1071,16 @@ impl ServiceDaemon {
         let factory = Arc::clone(&self.enrollment.model_factory);
         self.enrollment.bump_generation();
         let generation = self.enrollment.profile_generation;
-        let spawned = self.enrollment.profile_jobs.spawn("trim", move || {
-            run_build(&paths, &factory, &metadata).map(|profile| (generation, profile))
-        });
+        let spawned = self
+            .enrollment
+            .profile_jobs
+            .spawn_with_id("trim", move |inner_id| {
+                let result = run_build(&paths, &factory, &metadata);
+                let line = build_outcome_log(&format!("{PROFILE_JOB_PREFIX}{inner_id}"), &result);
+                eprintln!("{line}");
+                debug_voice_file_log(&line);
+                result.map(|profile| (generation, profile))
+            });
         match spawned {
             Ok(job_id) => {
                 self.enrollment.running_build = Some(job_id.clone());
@@ -1071,6 +1091,41 @@ impl ServiceDaemon {
             }
             Err(f) => busy_or_failed(REQUEST_ID, f),
         }
+    }
+
+    /// Jobs in the Running state for `GetStatus.active_enrollment_jobs`: sample ingests first,
+    /// then profile builds, each in id order. Empty when nothing runs. `stage` is the one the job
+    /// was spawned with (see [`job_json`]).
+    pub(crate) fn active_enrollment_jobs(&self) -> Vec<Value> {
+        let sample = self
+            .enrollment
+            .sample_jobs
+            .running_jobs()
+            .map(|info| ("sample", SAMPLE_JOB_PREFIX, info));
+        let profile = self
+            .enrollment
+            .profile_jobs
+            .running_jobs()
+            .map(|info| ("profile", PROFILE_JOB_PREFIX, info));
+        let mut jobs: Vec<(&str, &str, &JobInfo)> = sample.chain(profile).collect();
+        jobs.sort_by_key(|(kind, _, info)| {
+            (
+                *kind,
+                info.job_id
+                    .strip_prefix("job-")
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .unwrap_or(0),
+            )
+        });
+        jobs.into_iter()
+            .map(|(kind, prefix, info)| {
+                json!({
+                    "job_id": format!("{prefix}{}", info.job_id),
+                    "kind": kind,
+                    "stage": info.stage,
+                })
+            })
+            .collect()
     }
 
     /// `GetEnrollmentJob`: looks the id up in both job tables.
@@ -1360,6 +1415,22 @@ mod tests {
         for (error, code) in cases {
             assert_eq!(map_build_error(&error).error_code, code);
         }
+    }
+
+    #[test]
+    fn build_outcome_log_carries_the_job_id_and_the_error_code() {
+        let failed: Result<(), JobFailure> = Err(failure(codes::ENROLL_TOO_QUIET, "enroll"));
+        let line = build_outcome_log("profile-job-7", &failed);
+        assert!(line.contains("profile-job-7"), "{line}");
+        assert!(line.contains("FAILED"), "{line}");
+        assert!(line.contains(codes::ENROLL_TOO_QUIET), "{line}");
+        assert!(line.contains("enroll"), "{line}");
+        let ok: Result<(), JobFailure> = Ok(());
+        let line = build_outcome_log("profile-job-8", &ok);
+        assert!(
+            line.contains("profile-job-8") && line.contains("SUCCESS"),
+            "{line}"
+        );
     }
 
     #[test]

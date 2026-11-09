@@ -3,7 +3,7 @@
 //! The pipeline runs outside the real-time path:
 //!
 //! 1. [`validate_enrollment_audio`] checks the recording (rate, duration, clipping, level and the
-//!    fraction of active speech).
+//!    fraction of active speech; the level is the RMS over the active frames).
 //! 2. A [`SpeakerEmbeddingModel`] turns the audio into the four `FiLM` vectors
 //!    (`gamma_enc`, `beta_enc`, `gamma_df`, `beta_df`, 256 values each). The product model is the
 //!    signed `voice-enrollment-asset-v1` ONNX ([`OnnxEnrollmentModel`], feature `tract`).
@@ -15,6 +15,7 @@
 
 use std::fmt;
 
+use crate::speech_trim::active_rms_dbfs;
 use crate::voice_profile::{
     BandGains, FILM_HIDDEN_DIM, FiLMVectors, VoiceProfile, VoiceProfileError,
 };
@@ -36,7 +37,11 @@ pub const ENROLLMENT_MIN_SAMPLES: usize = 96_000;
 pub const ENROLLMENT_MAX_SAMPLES: usize = 1_440_000;
 /// Highest accepted absolute sample value; above it the recording is considered clipped.
 pub const ENROLLMENT_MAX_PEAK: f32 = 0.99;
-/// Minimum overall level (RMS, dBFS) so a silent recording is refused.
+/// Minimum level (RMS over the ACTIVE speech frames, dBFS) so a silent recording is refused.
+///
+/// Measured with [`crate::speech_trim::active_rms_dbfs`], the same rule and threshold the service
+/// applies when it accepts a sample: pauses between words must not push a take the ingest
+/// accepted under the limit (a whole-take mean square would).
 pub const ENROLLMENT_MIN_RMS_DBFS: f32 = -40.0;
 /// Minimum fraction of 20 ms frames classified as speech by the energy VAD.
 pub const ENROLLMENT_MIN_ACTIVE_FRACTION: f32 = 0.60;
@@ -127,6 +132,7 @@ pub struct EnrollmentAudio<'a> {
 pub struct EnrollmentReport {
     pub duration_secs: f32,
     pub peak: f32,
+    /// RMS over the active speech frames (dBFS).
     pub rms_dbfs: f32,
     pub active_speech_fraction: f32,
 }
@@ -175,7 +181,7 @@ pub fn validate_enrollment_audio(
     if peak > ENROLLMENT_MAX_PEAK {
         return Err(EnrollmentError::Clipping { peak });
     }
-    let rms_dbfs = mean_square_dbfs(samples);
+    let rms_dbfs = active_rms_dbfs(samples, audio.sample_rate);
     if rms_dbfs <= ENROLLMENT_MIN_RMS_DBFS {
         return Err(EnrollmentError::TooQuiet { rms_dbfs });
     }
@@ -696,6 +702,44 @@ mod tests {
         assert!(matches!(
             check(&vec![0.0; 96_000], RATE),
             Err(EnrollmentError::TooQuiet { .. })
+        ));
+    }
+
+    /// Active-speech RMS (dBFS) as the ingest measures it (`active_rms_dbfs`).
+    fn active_dbfs(samples: &[f32]) -> f32 {
+        crate::speech_trim::active_rms_dbfs(samples, RATE)
+    }
+
+    #[test]
+    fn level_gate_judges_active_speech_not_the_pauses() {
+        // Speech at about -38 dBFS over its active frames, 61% of the time, digital silence the
+        // rest: the whole-take mean square falls below -40 dBFS (the old gate rejected it), the
+        // active-speech level the ingest accepted (-38 >= -40) does not.
+        let amplitude = 10f32.powf(-38.0 / 20.0) * std::f32::consts::SQRT_2;
+        let samples = burst_speech(8.0, amplitude, 610, 390);
+        assert!(
+            mean_square_dbfs(&samples) <= ENROLLMENT_MIN_RMS_DBFS,
+            "precondition: the pauses pull the whole-take level under the threshold"
+        );
+        let active = active_dbfs(&samples);
+        assert!(active > ENROLLMENT_MIN_RMS_DBFS, "precondition: {active}");
+        let report = check(&samples, RATE).expect("accepted: the active speech is audible");
+        assert!(
+            (report.rms_dbfs - active).abs() < 0.01,
+            "{}",
+            report.rms_dbfs
+        );
+    }
+
+    #[test]
+    fn level_gate_rejects_quiet_active_speech() {
+        // Active speech at -45 dBFS (still above the -50 VAD floor, so the speech fraction is fine).
+        let amplitude = 10f32.powf(-45.0 / 20.0) * std::f32::consts::SQRT_2;
+        let samples = burst_speech(8.0, amplitude, 800, 200);
+        assert!(active_dbfs(&samples) <= ENROLLMENT_MIN_RMS_DBFS);
+        assert!(matches!(
+            check(&samples, RATE),
+            Err(EnrollmentError::TooQuiet { rms_dbfs }) if rms_dbfs <= ENROLLMENT_MIN_RMS_DBFS
         ));
     }
 

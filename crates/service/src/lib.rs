@@ -552,6 +552,9 @@ impl ServiceDaemon {
                         // A stored profile, not the obsolete averaged sample embedding.
                         "has_voice_profile": self.stored_voice_profile_id.is_some(),
                         "intake_pending_count": self.voice_intake.list_pending().len(),
+                        // Additive: enrollment jobs still running (ingest of a sample, build of
+                        // a profile) as `{job_id, kind: "sample"|"profile", stage}`; `[]` when idle.
+                        "active_enrollment_jobs": self.active_enrollment_jobs(),
                         "active_backend": self.supervisor.active_backend_name(),
                         "requested_backend": self.supervisor.requested_backend_name(),
                         "is_hardware_accelerated": self.supervisor.is_hardware_accelerated(),
