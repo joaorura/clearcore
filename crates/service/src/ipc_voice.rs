@@ -18,12 +18,11 @@ use crate::{ApplyError, ServiceDaemon};
 use base64::Engine as _;
 use realtime_noise_ipc::enrollment_codes as codes;
 use realtime_noise_ipc::{IpcResponse, IpcStatus};
-use realtime_noise_model::VoiceProfile;
-use realtime_noise_model::enrollment::{
-    EnrollmentError, ProfileMetadata, RawFilmVectors, SpeakerEmbeddingModel,
-    SpeakerEnrollmentEngine,
-};
-use realtime_noise_model::enrollment_builder::{BuildError, build_profile};
+use crate::voice_conditioning::VoiceConditioningTarget as _;
+use realtime_noise_model::VoiceProfileV2;
+use realtime_noise_model::enrollment::{EnrollmentError, ProfileMetadata};
+use realtime_noise_model::enrollment_builder::BuildError;
+use realtime_noise_model::enrollment_v3::{EmbeddingExtractor, build_profile_v2};
 use realtime_noise_model::resample::decimate_48k_to_16k;
 use realtime_noise_model::speech_trim::{
     active_rms_dbfs, apply_gain_limited, join_crossfade, trim_speech,
@@ -86,9 +85,9 @@ const PROFILE_JOB_PREFIX: &str = "profile-";
 pub type DenoiserFactory = Box<dyn Fn() -> Box<dyn Denoiser> + Send + Sync>;
 /// Loads the enrollment model on a job thread (test seam; production is the dev archive).
 pub type ModelFactory =
-    Box<dyn Fn() -> Result<Box<dyn SpeakerEmbeddingModel + Send>, EnrollError> + Send + Sync>;
+    Box<dyn Fn() -> Result<Box<dyn EmbeddingExtractor + Send>, EnrollError> + Send + Sync>;
 type SharedModelFactory =
-    Arc<dyn Fn() -> Result<Box<dyn SpeakerEmbeddingModel + Send>, EnrollError> + Send + Sync>;
+    Arc<dyn Fn() -> Result<Box<dyn EmbeddingExtractor + Send>, EnrollError> + Send + Sync>;
 
 /// Test seams for [`ServiceDaemon::with_enrollment_hooks`]. A daemon built with hooks is
 /// hermetic: it never reads the enrollment environment variables nor `$HOME`.
@@ -115,12 +114,12 @@ impl Drop for Pcm {
     }
 }
 
-/// Feeds a boxed model to `SpeakerEnrollmentEngine`, which is generic over the model.
-struct BoxedModel(Box<dyn SpeakerEmbeddingModel + Send>);
+/// Feeds a boxed model to `build_profile_v2`, which is generic over the extractor.
+struct BoxedModel(Box<dyn EmbeddingExtractor + Send>);
 
-impl SpeakerEmbeddingModel for BoxedModel {
-    fn extract(&mut self, samples_16khz: &[f32]) -> Result<RawFilmVectors, EnrollmentError> {
-        self.0.extract(samples_16khz)
+impl EmbeddingExtractor for BoxedModel {
+    fn extract_embedding(&mut self, samples_16khz: &[f32]) -> Result<Vec<f32>, EnrollmentError> {
+        self.0.extract_embedding(samples_16khz)
     }
 }
 
@@ -173,7 +172,7 @@ struct JobExtra {
 pub struct EnrollmentState {
     sample_jobs: JobTable<IngestOutcome>,
     /// Build results carry the `profile_generation` captured at spawn.
-    profile_jobs: JobTable<(u64, VoiceProfile)>,
+    profile_jobs: JobTable<(u64, VoiceProfileV2)>,
     extras: HashMap<String, JobExtra>,
     denoiser_factory: Option<DenoiserFactory>,
     model_factory: SharedModelFactory,
@@ -236,8 +235,14 @@ impl EnrollmentState {
 
 fn load_dev_model(
     config: &EnrollmentConfig,
-) -> Result<Box<dyn SpeakerEmbeddingModel + Send>, EnrollError> {
+) -> Result<Box<dyn EmbeddingExtractor + Send>, EnrollError> {
     use realtime_noise_model::enrollment::OnnxEnrollmentModel;
+    use realtime_noise_model::enrollment_v3::OnnxEmbeddingModel;
+    // The v3 asset: output `speaker_embedding`. A v1 asset (gamma/beta outputs) is refused at load.
+    let v3 = |model: OnnxEnrollmentModel| {
+        OnnxEmbeddingModel::from_enrollment_model(model)
+            .map_err(|_| EnrollError::ModelNotConfigured)
+    };
     if !config.is_configured() {
         return Err(EnrollError::ModelNotConfigured);
     }
@@ -249,7 +254,7 @@ fn load_dev_model(
     if path.extension().is_some_and(|ext| ext == "onnx") {
         let model = OnnxEnrollmentModel::from_file(path)
             .map_err(|_| EnrollError::ModelNotConfigured)?;
-        return Ok(Box::new(model));
+        return Ok(Box::new(v3(model)?));
     }
 
     let Some(ref sha) = config.expected_sha256 else {
@@ -262,7 +267,7 @@ fn load_dev_model(
     let model = OnnxEnrollmentModel::from_dev_archive(&bytes, sha)
         .map_err(|_| EnrollError::ModelNotConfigured);
     bytes.fill(0);
-    Ok(Box::new(model?))
+    Ok(Box::new(v3(model?)?))
 }
 
 /// Reads a regular file of at most `max` bytes; symlinks and anything else are refused.
@@ -362,7 +367,8 @@ const fn status_for(error: &EnrollError) -> IpcStatus {
         | EnrollError::PayloadTooLarge
         | EnrollError::JobNotFound
         | EnrollError::BudgetExceeded
-        | EnrollError::TooLittleSpeech => IpcStatus::InvalidCommand,
+        | EnrollError::TooLittleSpeech
+        | EnrollError::ProfileOutdated => IpcStatus::InvalidCommand,
         _ => IpcStatus::InternalError,
     }
 }
@@ -385,10 +391,13 @@ const fn message_for(error: &EnrollError) -> &'static str {
             "the active isolation model does not accept a voice profile"
         }
         EnrollError::NoisyEnvironment => "environment has too much background noise",
+        EnrollError::ProfileOutdated => {
+            "the stored voice profile is outdated; regenerate it from the saved samples"
+        }
     }
 }
 
-fn enroll_error(request_id: &str, error: &EnrollError) -> IpcResponse {
+pub(crate) fn enroll_error(request_id: &str, error: &EnrollError) -> IpcResponse {
     IpcResponse::error(
         request_id,
         status_for(error),
@@ -499,10 +508,31 @@ fn scale_down_to(samples: &mut [f32], measured_peak: f32, ceiling: f32) {
     }
 }
 
-/// Reads, trims and level-matches the group's WAVs (chronological order) into one take.
-fn load_group(paths: &[PathBuf]) -> Result<Vec<f32>, JobFailure> {
+/// The group's audio as the build needs it.
+struct LoadedGroup {
+    /// Trimmed, level-matched and crossfaded speech (48 kHz): input of the microphone EQ.
+    joined: Vec<f32>,
+    /// The stored WAVs exactly as they are on disk (clean mix, untrimmed, 48 kHz), in recording
+    /// order: input of the enrollment embedding (see `enrollment_v3::aggregate_samples`).
+    stored: Vec<Vec<f32>>,
+}
+
+impl LoadedGroup {
+    fn wipe(&mut self) {
+        self.joined.fill(0.0);
+        for part in &mut self.stored {
+            part.fill(0.0);
+        }
+        std::hint::black_box(&self.stored);
+    }
+}
+
+/// Reads the group's WAVs (chronological order); builds the EQ speech (trim + level-match) and
+/// keeps the stored audio untouched for the embedding.
+fn load_group(paths: &[PathBuf]) -> Result<LoadedGroup, JobFailure> {
     let mut parts: Vec<Vec<f32>> = Vec::with_capacity(paths.len());
     let mut levels = Vec::with_capacity(paths.len());
+    let mut stored: Vec<Vec<f32>> = Vec::with_capacity(paths.len());
     let result = (|| {
         for path in paths {
             let mut bytes = read_capped(path, MAX_SAMPLE_WAV_BYTES)
@@ -516,37 +546,46 @@ fn load_group(paths: &[PathBuf]) -> Result<Vec<f32>, JobFailure> {
             }
             let level = active_rms_dbfs(&pcm, CAPTURE_SAMPLE_RATE);
             let trimmed = trim_speech(&pcm, CAPTURE_SAMPLE_RATE);
-            pcm.fill(0.0);
-            // A sample with no active frame adds nothing (it is silence, not discarded speech).
+            // A sample with no active frame adds nothing to the EQ speech (it is silence, not
+            // discarded speech).
             if !trimmed.samples.is_empty() {
                 parts.push(trimmed.samples);
                 levels.push(level);
             }
+            stored.push(pcm);
         }
         Ok(level_and_join(&mut parts, &levels))
     })();
     for part in &mut parts {
         part.fill(0.0);
     }
-    result
+    match result {
+        Ok(joined) => Ok(LoadedGroup { joined, stored }),
+        Err(failure) => {
+            for part in &mut stored {
+                part.fill(0.0);
+            }
+            Err(failure)
+        }
+    }
 }
 
-/// Worker of `BuildVoiceProfile`: load the model, trim/level/join, enforce the 90 s cap, build.
+/// Worker of `BuildVoiceProfile`: load the model, read the group, enforce the 90 s cap, build.
 fn run_build(
     paths: &[PathBuf],
     model_factory: &SharedModelFactory,
     metadata: &ProfileMetadata,
-) -> Result<VoiceProfile, JobFailure> {
+) -> Result<VoiceProfileV2, JobFailure> {
     let model = model_factory().map_err(|e| failure(e.code(), "enroll"))?;
-    let mut joined = load_group(paths)?;
-    if joined.len() > MAX_JOINED_SAMPLES {
+    let mut group = load_group(paths)?;
+    if group.joined.len() > MAX_JOINED_SAMPLES {
         // Never drop audio silently: the user decides what to delete (spec 4.2 step 2).
-        joined.fill(0.0);
+        group.wipe();
         return Err(failure(codes::ENROLL_BUDGET_EXCEEDED, "trim"));
     }
-    let mut engine = SpeakerEnrollmentEngine::new(BoxedModel(model));
-    let built = build_profile(&mut engine, &joined, metadata);
-    joined.fill(0.0);
+    let mut model = BoxedModel(model);
+    let built = build_profile_v2(&mut model, &group.joined, &group.stored, metadata);
+    group.wipe();
     built.map_err(|e| map_build_error(&e))
 }
 
@@ -981,7 +1020,7 @@ impl ServiceDaemon {
             .mark_failed(job_id, failure(codes::ENROLL_FAILED, "apply"));
     }
 
-    fn apply_built_profile(&mut self, job_id: &str, profile: &VoiceProfile) {
+    fn apply_built_profile(&mut self, job_id: &str, profile: &VoiceProfileV2) {
         match self.apply_profile(profile) {
             Ok(()) => {
                 self.enrollment.extras.insert(
@@ -1015,6 +1054,18 @@ impl ServiceDaemon {
         }
     }
 
+    /// Stored speech (seconds) of the active samples that still have audio: what a regeneration
+    /// of an outdated profile could use.
+    pub(crate) fn regenerable_speech_seconds(&self) -> f32 {
+        self.voice_samples
+            .list_samples()
+            .iter()
+            .filter(|s| s.is_active && s.audio_path.is_some())
+            .map(|s| s.speech_seconds)
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .sum()
+    }
+
     /// `BuildVoiceProfile`: selects the device group and builds the profile on a job thread.
     pub(crate) fn build_voice_profile(&mut self, name: &str) -> IpcResponse {
         const REQUEST_ID: &str = "build-voice-profile-resp";
@@ -1023,7 +1074,7 @@ impl ServiceDaemon {
         }
         // Refused up front: a backend that cannot apply a profile would only fail the build at
         // the `apply` stage after the whole trim/EQ/embedding run.
-        if !self.supervisor.supports_voice_profile() {
+        if !self.supervisor.supports_voice_conditioning() {
             return enroll_error(REQUEST_ID, &EnrollError::BackendUnsupported);
         }
         if self.enrollment.build_running() {
@@ -1211,7 +1262,7 @@ impl ServiceDaemon {
             json!({
                 "samples": items,
                 "total_count": samples.len(),
-                "has_profile": self.stored_voice_profile_id.is_some(),
+                "has_profile": self.voice.stored_id.is_some(),
                 "selected_device_id_hash": selected,
                 "selected_device_label": selected_label,
                 "budget": {
@@ -1258,7 +1309,7 @@ impl ServiceDaemon {
                         "success": true,
                         "approved": true,
                         "sample_id": sample.id,
-                        "has_profile": self.stored_voice_profile_id.is_some(),
+                        "has_profile": self.voice.stored_id.is_some(),
                     }),
                 )
             }

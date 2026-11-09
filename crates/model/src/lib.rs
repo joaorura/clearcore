@@ -8,6 +8,7 @@ mod asset_manifest;
 pub mod dsp_pipeline;
 pub mod enrollment;
 pub mod enrollment_builder;
+pub mod enrollment_v3;
 mod error;
 mod golden;
 mod json;
@@ -28,6 +29,7 @@ mod studio_backend;
 #[cfg(feature = "tract")]
 mod tract_backend;
 pub mod voice_profile;
+pub mod voice_profile_v2;
 pub mod wav;
 
 use realtime_noise_contracts::AudioFrame;
@@ -54,6 +56,10 @@ pub use pdfnet3_bundle::{BundledModelError, PDFNET3_PRO_ASSET_ID};
 #[cfg(any(feature = "tract", feature = "ort"))]
 pub use pdfnet3_dev::{ArchiveGraphs, PDFNET3_DEV_ASSET_ID, PdfNet3DevArchive, PdfNet3DevError};
 pub use profile_store::{ACTIVE_PROFILE_FILE_NAME, ProfileStore};
+pub use voice_profile_v2::{
+    OutdatedProfile, PDFNET3_PRO_V3_MODEL_ID, PDFNET3_PRO_V3_MODEL_LABEL, SPEAKER_EMBEDDING_DIM,
+    SpeakerEmbedding, StoredProfile, VoiceProfileV2,
+};
 pub use studio_backend::{StudioBackend, StudioResetHandle};
 #[cfg(feature = "tract")]
 pub use tract_backend::TractBackend;

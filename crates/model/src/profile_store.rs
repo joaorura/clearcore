@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::voice_profile::{VoiceProfile, VoiceProfileError};
+use crate::voice_profile_v2::{StoredProfile, VoiceProfileV2};
 
 pub const ACTIVE_PROFILE_FILE_NAME: &str = "active_profile.json";
 
@@ -110,6 +111,25 @@ impl ProfileStore {
         let path = self.active_profile_path();
         match fs::symlink_metadata(&path) {
             Ok(_) => VoiceProfile::load_from_file_secure(&path).map(Some),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Atomically persists a v2 (pDFNet3 Pro v3) profile as the active profile (mode `0600`).
+    pub fn save_active_v2(&self, profile: &VoiceProfileV2) -> Result<(), VoiceProfileError> {
+        self.ensure_dir()?;
+        profile.save_to_file_secure(&self.active_profile_path())
+    }
+
+    /// Loads whatever the store holds: a valid v2 profile, or a valid v1 (`FiLM`) profile reported
+    /// as [`StoredProfile::Outdated`]. `Ok(None)` when nothing is stored; insecure permissions, a
+    /// bad integrity hash or an unknown version are errors (fail-closed).
+    pub fn load_active_any(&self) -> Result<Option<StoredProfile>, VoiceProfileError> {
+        self.refuse_symlinked_dir()?;
+        let path = self.active_profile_path();
+        match fs::symlink_metadata(&path) {
+            Ok(_) => StoredProfile::load_from_file_secure(&path).map(Some),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error.into()),
         }
@@ -260,6 +280,37 @@ mod tests {
         store.clear_active().expect("clear");
         assert_eq!(store.load_active().expect("load"), None);
         store.clear_active().expect("clear again");
+    }
+
+    #[test]
+    fn v2_roundtrip_and_v1_is_reported_outdated() {
+        use crate::voice_profile_v2::{SPEAKER_EMBEDDING_DIM, SpeakerEmbedding};
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = ProfileStore::new(temp.path().join("profiles"));
+        assert_eq!(store.load_active_any().expect("empty"), None);
+
+        // A v1 profile on disk is classified, never applied.
+        store.save_active(&profile("old")).expect("save v1");
+        assert!(matches!(
+            store.load_active_any().expect("any"),
+            Some(StoredProfile::Outdated(info)) if info.id == "old" && info.version == 1
+        ));
+
+        let mut raw = vec![0.0_f32; SPEAKER_EMBEDDING_DIM];
+        raw[3] = 1.0;
+        let embedding = SpeakerEmbedding::new(&raw).expect("embedding");
+        let v2 = VoiceProfileV2::new("new", "Voz", "2026-11-09T12:00:00Z", &embedding, None)
+            .expect("v2");
+        store.save_active_v2(&v2).expect("save v2");
+        assert!(matches!(
+            store.load_active_any().expect("any"),
+            Some(StoredProfile::Current(c)) if *c == v2
+        ));
+        // The legacy v1 loader refuses a v2 file (fail-closed for old consumers).
+        assert!(matches!(
+            store.load_active(),
+            Err(VoiceProfileError::UnsupportedVersion(2))
+        ));
     }
 
     #[test]
