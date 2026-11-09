@@ -150,3 +150,9 @@ Leitura:
 
 Na runtime 2026.0 do Fedora (`/usr/lib64`, sem plugin NPU) CPU e GPU dão os mesmos números (29,7 dB
 contra o tract) e a NPU falha com `OpenVINO device not found: NPU`, como esperado.
+
+## Filtro do microfone virtual
+
+Desde a branch `feat/pro-v3-filter` o `libclearcore_filter` também roda no OpenVINO (NPU → GPU → CPU
+conforme o `backend` do `settings.json`, com o ONNX Runtime CPU de reserva quente) e aplica a EQ do
+perfil. Detalhes, política de troca e medições em `docs/virtual-mic-filter.md`.
