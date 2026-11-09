@@ -591,6 +591,18 @@ static void release_instance_lock(void) {
     }
 }
 
+/* Logs the filter diagnostics (model, runtime, fallback, profile, latency) when the library
+ * exports clearcore_filter_status_json. Control thread only. */
+static void neural_log_status(pipewire_helper_context_t *ctx, const char *when) {
+    if (!ctx || !ctx->neural_filter || !ctx->neural_status_json_fn) {
+        return;
+    }
+    char status[1024];
+    if (ctx->neural_status_json_fn(ctx->neural_filter, status, sizeof(status)) >= 0) {
+        fprintf(stderr, "[pipewire_helper] [FILTER] %s: %s\n", when, status);
+    }
+}
+
 static void neural_filter_init(pipewire_helper_context_t *ctx) {
     if (!ctx) return;
     ctx->neural_lib_handle = NULL;
@@ -604,6 +616,7 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_reload_active_profile_fn = NULL;
     ctx->neural_supports_voice_profile_fn = NULL;
     ctx->neural_is_voice_profile_active_fn = NULL;
+    ctx->neural_status_json_fn = NULL;
     atomic_store_explicit(&ctx->applied_generation, 0, memory_order_relaxed);
 
     char exe_buf[PATH_MAX] = {0};
@@ -704,6 +717,8 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
         (clearcore_supports_voice_profile_fn_t)dlsym(lib, "clearcore_filter_supports_voice_profile");
     clearcore_is_voice_profile_active_fn_t is_voice_profile_active_fn =
         (clearcore_is_voice_profile_active_fn_t)dlsym(lib, "clearcore_filter_is_voice_profile_active");
+    clearcore_status_json_fn_t status_json_fn =
+        (clearcore_status_json_fn_t)dlsym(lib, "clearcore_filter_status_json");
     if (!reload_active_profile_fn || !supports_voice_profile_fn || !is_voice_profile_active_fn) {
         fprintf(stderr, "[pipewire_helper] Voice-profile C-ABI absent; running unconditioned denoiser.\n");
     }
@@ -757,6 +772,7 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_reload_active_profile_fn = reload_active_profile_fn;
     ctx->neural_supports_voice_profile_fn = supports_voice_profile_fn;
     ctx->neural_is_voice_profile_active_fn = is_voice_profile_active_fn;
+    ctx->neural_status_json_fn = status_json_fn;
 
     /* Reload persisted active profile from disk BEFORE warmup so the warmup hops exercise the
      * personalized conditioning path (rc: 1 loaded, 0 none/neutral, <0 error). Never on the audio
@@ -800,6 +816,7 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
                               atomic_load_explicit(&ctx->shared_state->generation, memory_order_relaxed),
                               memory_order_relaxed);
     }
+    neural_log_status(ctx, "startup");
     fprintf(stderr, "[pipewire_helper] ClearCore DeepFilterNet3 neural suppressor ACTIVE!\n");
 }
 
@@ -821,6 +838,7 @@ static void neural_filter_free(pipewire_helper_context_t *ctx) {
     ctx->neural_reload_active_profile_fn = NULL;
     ctx->neural_supports_voice_profile_fn = NULL;
     ctx->neural_is_voice_profile_active_fn = NULL;
+    ctx->neural_status_json_fn = NULL;
     ctx->applied_preset = CLEARCORE_PRESET_OFF;
 }
 
@@ -852,6 +870,7 @@ static void profile_check_and_reload(pipewire_helper_context_t *ctx) {
         }
         fprintf(stderr, "[pipewire_helper] [PROFILE] generation %u -> %u: %s (rc=%d)\n",
                 applied_gen, current_gen, kind, rc);
+        neural_log_status(ctx, "profile reload");
     }
     /* Accept the generation regardless of reload outcome: a failed reload (e.g. a profile still
      * being written) is retried on the next increment rather than re-attempted forever. */
