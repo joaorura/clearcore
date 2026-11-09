@@ -106,6 +106,18 @@ export interface VoiceProfileStatus {
   isolation_model?: 'pdfnet3-pro' | 'pdfnet3-dev' | 'base' | 'none';
   /** Service-reported fixed code (`MODEL_*`) while the isolation model is unavailable. */
   isolation_model_error?: string | null;
+  /**
+   * Service-reported (GetStatus, profile schema v2): `none`, `active`, `stored` (valid but not
+   * applied) or `outdated` (a v1 FiLM profile: regenerate it from the saved samples).
+   */
+  voice_profile_state?: 'none' | 'active' | 'stored' | 'outdated';
+  /** Service-reported: the stored profile is a v1 (gamma/beta) one and cannot be applied. */
+  voice_profile_outdated?: boolean;
+  /** Service-reported: an outdated profile can be regenerated from the stored samples. */
+  voice_profile_can_regenerate?: boolean;
+  /** Service-reported: id (`pdfnet3-pro-v3-full`) and label (`pDFNet3 Pro v3`) of the profile model. */
+  voice_profile_model_id?: string;
+  voice_profile_model_label?: string;
   /** Service-reported: whether voice isolation is enabled in settings. */
   voice_isolation_enabled?: boolean;
   /** Service-reported (GetStatus): voice isolation intensity level (0-100). */

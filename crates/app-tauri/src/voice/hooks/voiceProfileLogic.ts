@@ -38,8 +38,24 @@ export function voiceProfileErrorKey(code: unknown): VoiceProfileErrorKey {
     : 'errorUnknown';
 }
 
+/** Fixed service code of a stored v1 (FiLM) profile that cannot be applied. */
+export const PROFILE_OUTDATED_CODE = 'ENROLL_PROFILE_OUTDATED';
+
+/**
+ * A v1 (gamma/beta) profile is stored: it is not corrupted and not applied; the user regenerates
+ * it from the saved samples. The service reports it as `voice_profile_outdated` /
+ * `voice_profile_state: 'outdated'` / `voice_profile_error: ENROLL_PROFILE_OUTDATED`.
+ */
+export function isVoiceProfileOutdated(status: Partial<VoiceProfileStatus> | null | undefined): boolean {
+  if (!status || typeof status !== 'object') return false;
+  return status.voice_profile_outdated === true
+    || status.voice_profile_state === 'outdated'
+    || status.voice_profile_error === PROFILE_OUTDATED_CODE;
+}
+
 export function isVoiceProfileCorrupted(error: unknown): boolean {
   if (!error) return false;
+  if (error === PROFILE_OUTDATED_CODE) return false;
   if (error === 'errorLoadFailed' || error === 'errorInvalidProfile' || error === 'errorPersistFailed') {
     return true;
   }
@@ -71,12 +87,24 @@ export function isVoiceProfileCorrupted(error: unknown): boolean {
 export function hasServiceVoiceProfile(status: Partial<VoiceProfileStatus> | null | undefined): boolean {
   if (!status || typeof status !== 'object') return false;
   if (isVoiceProfileCorrupted(status.voice_profile_error)) return false;
+  if (isVoiceProfileOutdated(status)) return false;
   const storedId = status.stored_voice_profile_id;
   const activeId = status.active_voice_profile_id;
   return (typeof storedId === 'string' && storedId.length > 0)
     || (typeof activeId === 'string' && activeId.length > 0)
     || status.has_voice_profile === true
     || status.is_voice_profile_active === true;
+}
+
+const PROFILE_STATES: ReadonlySet<string> = new Set(['none', 'active', 'stored', 'outdated']);
+
+function profileState(v: unknown): VoiceProfileStatus['voice_profile_state'] {
+  return typeof v === 'string' && PROFILE_STATES.has(v) ? (v as VoiceProfileStatus['voice_profile_state']) : undefined;
+}
+
+/** Model id/label are short fixed strings from the service; anything else is dropped. */
+function fixedModelText(v: unknown): string | undefined {
+  return typeof v === 'string' && /^[A-Za-z0-9 ._()-]{1,64}$/.test(v) ? v : undefined;
 }
 
 export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
@@ -98,6 +126,11 @@ export function normalizeVoiceProfileStatus(res: unknown): VoiceProfileStatus {
     active_voice_profile_id: src.active_voice_profile_id,
     has_voice_profile: typeof src.has_voice_profile === 'boolean' ? src.has_voice_profile : undefined,
     voice_profile_supported: typeof src.voice_profile_supported === 'boolean' ? src.voice_profile_supported : undefined,
+    voice_profile_state: profileState(src.voice_profile_state),
+    voice_profile_outdated: typeof src.voice_profile_outdated === 'boolean' ? src.voice_profile_outdated : undefined,
+    voice_profile_can_regenerate: typeof src.voice_profile_can_regenerate === 'boolean' ? src.voice_profile_can_regenerate : undefined,
+    voice_profile_model_id: fixedModelText(src.voice_profile_model_id),
+    voice_profile_model_label: fixedModelText(src.voice_profile_model_label),
     dev_base_model: devBaseModel(src.dev_base_model),
     dev_base_model_error: devBaseModelError(src.dev_base_model_error),
     isolation_model: isolationModel(src.isolation_model),
@@ -140,9 +173,9 @@ export function voiceProfileUnsupported(status: Partial<VoiceProfileStatus> | nu
   return status?.voice_profile_supported === false;
 }
 
-export type VoiceProfileActivationState = 'active' | 'stored_not_applied' | 'corrupted' | 'none';
+export type VoiceProfileActivationState = 'active' | 'stored_not_applied' | 'corrupted' | 'outdated' | 'none';
 
-export type VoiceProfileStatusLabelKey = 'active' | 'storedNotApplied' | 'corrupted' | 'none';
+export type VoiceProfileStatusLabelKey = 'active' | 'storedNotApplied' | 'corrupted' | 'outdated' | 'none';
 
 /** Only 'active' may be shown as active; a profile the service holds but did not apply is neutral. */
 export function voiceProfileStatusLabelKey(status: VoiceProfileStatus): VoiceProfileStatusLabelKey {
@@ -150,11 +183,13 @@ export function voiceProfileStatusLabelKey(status: VoiceProfileStatus): VoicePro
   if (state === 'active') return 'active';
   if (state === 'stored_not_applied') return 'storedNotApplied';
   if (state === 'corrupted') return 'corrupted';
+  if (state === 'outdated') return 'outdated';
   return 'none';
 }
 
 /** Stored must never be presented as applied: 'active' needs explicit confirmation. */
 export function voiceProfileActivationState(status: VoiceProfileStatus): VoiceProfileActivationState {
+  if (isVoiceProfileOutdated(status)) return 'outdated';
   if (isVoiceProfileCorrupted(status.voice_profile_error)) return 'corrupted';
   if (status.is_voice_profile_active === true) return 'active';
   return hasServiceVoiceProfile(status) ? 'stored_not_applied' : 'none';
@@ -169,6 +204,8 @@ const SERVICE_STATUS_KEYS_IN_RESPONSE = [
   'neural_eq_calibrated',
   'voice_isolation_enabled',
   'voice_isolation_intensity',
+  'voice_profile_state',
+  'voice_profile_outdated',
 ] as const;
 
 export function mergeVoiceProfileStatus(
@@ -195,6 +232,11 @@ export function mergeVoiceProfileStatus(
     active_voice_profile_id: prof.active_voice_profile_id,
     has_voice_profile: prof.has_voice_profile,
     voice_profile_supported: prof.voice_profile_supported,
+    voice_profile_state: prof.voice_profile_state,
+    voice_profile_outdated: prof.voice_profile_outdated,
+    voice_profile_can_regenerate: prof.voice_profile_can_regenerate,
+    voice_profile_model_id: prof.voice_profile_model_id,
+    voice_profile_model_label: prof.voice_profile_model_label,
     dev_base_model: prof.dev_base_model,
     dev_base_model_error: prof.dev_base_model_error,
     isolation_model: prof.isolation_model,
@@ -221,6 +263,11 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'isolation_model_error',
   'voice_isolation_enabled',
   'voice_isolation_intensity',
+  'voice_profile_state',
+  'voice_profile_outdated',
+  'voice_profile_can_regenerate',
+  'voice_profile_model_id',
+  'voice_profile_model_label',
 ] as const;
 
 /** Service-owned fields: the renderer never resends nor inherits them. */
@@ -255,6 +302,11 @@ export function applySetVoiceProfileResult(
     voice_profile_selected: svc.voice_profile_selected,
     active_voice_profile_id: svc.active_voice_profile_id,
     voice_profile_supported: svc.voice_profile_supported,
+    voice_profile_state: svc.voice_profile_state,
+    voice_profile_outdated: svc.voice_profile_outdated,
+    voice_profile_can_regenerate: svc.voice_profile_can_regenerate,
+    voice_profile_model_id: svc.voice_profile_model_id,
+    voice_profile_model_label: svc.voice_profile_model_label,
     neural_eq_calibrated: svc.neural_eq_calibrated,
     dev_base_model: svc.dev_base_model,
     dev_base_model_error: svc.dev_base_model_error,
@@ -274,7 +326,7 @@ const ENROLLMENT_ERROR_KEYS = [
   'ENROLL_CLIPPING', 'ENROLL_TOO_QUIET', 'ENROLL_TOO_LITTLE_SPEECH', 'ENROLL_MODEL_NOT_CONFIGURED',
   'ENROLL_BUDGET_EXCEEDED', 'ENROLL_INVALID_AUDIO', 'ENROLL_PAYLOAD_TOO_LARGE',
   'ENROLL_JOB_NOT_FOUND', 'ENROLL_BUSY', 'ENROLL_FAILED', 'SERVICE_UNAVAILABLE', 'SERVICE_OUTDATED', 'UNKNOWN',
-  'ENROLL_BACKEND_UNSUPPORTED',
+  'ENROLL_BACKEND_UNSUPPORTED', 'ENROLL_PROFILE_OUTDATED',
 ] as const satisfies ReadonlyArray<keyof EnrollmentLabels['errors']>;
 
 /** Fills every EnrollmentLabels field from i18n (`voiceProfile.enrollment.*`). */

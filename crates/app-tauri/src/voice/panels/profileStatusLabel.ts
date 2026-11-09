@@ -6,6 +6,7 @@ const LABEL_PATH = {
   storedNotApplied: 'voiceProfile.storedNotApplied',
   none: 'voiceProfile.statusNone',
   corrupted: 'voiceProfile.statusCorrupted',
+  outdated: 'voiceProfile.statusOutdated',
 } as const;
 
 /** Only a status the service confirmed as active is shown as active. */
