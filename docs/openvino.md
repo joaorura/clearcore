@@ -150,3 +150,27 @@ Leitura:
 
 Na runtime 2026.0 do Fedora (`/usr/lib64`, sem plugin NPU) CPU e GPU dão os mesmos números (29,7 dB
 contra o tract) e a NPU falha com `OpenVINO device not found: NPU`, como esperado.
+
+## pDFNet3 Pro v3 completo: executor genérico (um export para todos os runtimes)
+
+- **Asset**: `models/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz` (SHA-256 do arquivo inteiro e
+  dos três grafos fixados em `crates/model/src/pdfnet3_bundle.rs`), `manifest.json` + `enc`/`erb_dec`/`df_dec`
+  (opset 12, `S = 1`). Condicionamento: `speaker_embedding` [1,192] (ECAPA L2) e `speaker_present` [1]
+  (zeros/0 sem perfil), dentro do `enc` e do `df_dec`.
+- **Executor** (`crates/model/src/stateful_graph.rs`): resolve tudo por nome — features, condicionamento,
+  pares de estado `<x>_in`/`<x>_out` (ou `<x>`/`<x>_out`, legado), valores entre grafos (ordem topológica,
+  conferida contra `manifest.routing`) e as saídas `m`/`coefs`/`lsnr`. Roda os três grafos em **todo** hop e
+  avança todos os estados sempre; a seleção de estágio pelo `lsnr` (`DspPipeline::apply_stages`) replica
+  `emulate_gating_offline` (`clearcore-train/src/cctrain/eval/runtime_path.py:342-360`). Silêncio digital
+  (RMS < 1e-7) dá saída zero sem avançar STFT nem modelo; a EQ do perfil vai antes da iSTFT.
+- **Runtimes** (`GraphSession`): tract (`tract_graph.rs`), ONNX Runtime (`ort_graph.rs`) e OpenVINO
+  (`crates/runtime-openvino/src/graph.rs`, portas descobertas com `ov_model_const_{input,output}_by_index` +
+  `ov_port_get_partial_shape`, toda dimensão dinâmica fixada em 1 com `reshape` antes de compilar).
+- **Ops no tract 0.19.16**: GRU, Einsum, MatMul/Gemm, Softmax, Erf, Exp, Conv/ConvTranspose registrados;
+  `LayerNormalization` (opset 17) **não** — exportar em opset ≤ 16 (o Pro v3 usa opset 12).
+- **Paridade medida** (300 hops sintéticos de fala + ruído, perfil = embedding + EQ em rampa):
+  tract × ORT 128,8 / 125,0 dB (neutro / perfil); OpenVINO × tract: CPU 130,1 / 117,4 dB, GPU 130,9 / 119,5 dB,
+  NPU 41,2 / 48,4 dB (FP16). Latência por hop (p50 / máx): CPU 0,66 / 3,96 ms, GPU 0,85 / 4,01 ms,
+  NPU 2,03 / 21,85 ms.
+- **Seleção**: com o arquivo de manifesto como modelo de isolamento, `auto`/`tract` usam o executor no tract e
+  os pedidos OpenVINO usam o executor no OpenVINO com o MESMO arquivo (não há mais export separado).
