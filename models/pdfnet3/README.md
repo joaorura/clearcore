@@ -39,9 +39,14 @@ export tract) e `CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET`/`_SHA256` (filtro, export
 
 ## Aceleradores
 
-Os backends OpenVINO/TensorRT não alimentam as entradas FiLM; com o pDFNet3 Pro o daemon sempre usa tract
-(CPU) e um pedido de acelerador volta como `fallback: true` com o motivo. O microfone virtual roda em ONNX
-Runtime na CPU.
+O daemon roda o pDFNet3 Pro no **OpenVINO** (NPU, GPU ou CPU Intel) quando um backend OpenVINO é
+pedido nas configurações (`openvino-npu`, `openvino-gpu`, `openvino-cpu`, `openvino`): ele compila o
+export **stateful** (o mesmo do filtro), fixa as dimensões em `S = 1` (a NPU exige shapes estáticos),
+alimenta `gamma`/`beta` (identidade `1`/`0` sem perfil, os vetores do perfil quando há um) e aplica a
+EQ do perfil antes da iSTFT, como o tract. Qualquer falha (runtime ausente, plugin ou dispositivo
+faltando, compilação, prazo de tempo real) volta para o tract com o motivo em
+`GetStatus.backend_fallback_reason`. O `auto` continua no tract (ver `docs/openvino.md`). O microfone
+virtual (`libclearcore_filter`) continua no ONNX Runtime na CPU.
 
 ## Licença
 

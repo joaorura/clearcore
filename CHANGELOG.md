@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual microphone powered by DeepFilterNet3 ONNX, ONNX Runtime (`ort` v2) neural streaming, Target Speaker Extraction (DFNet-TSE-MHCA), PipeWire C bridge (Linux), WaveRT PortCls kernel driver (Windows), CoreAudio HAL (macOS), and a resilient Rust supervisor daemon.
 
+## [Unreleased]
+
+### Added
+- **pDFNet3 Pro on OpenVINO (Intel NPU, GPU, CPU)**: selecting `openvino-npu`, `openvino-gpu`, `openvino-cpu` or `openvino` runs the bundled pDFNet3 Pro stateful export on OpenVINO with static shapes, the FiLM `gamma`/`beta` inputs fed (identity without a profile) and the profile EQ applied like tract; `voice_profile_supported` stays `true`. Any failure (runtime, plugin, device, compilation, real-time qualification) installs tract and reports the reason. `auto` stays on tract (see `docs/openvino.md`).
+- Linux x64 and Windows x64 packages embed the OpenVINO 2026.4.1 runtime (CPU/GPU/NPU plugins, from the PyPI wheel pinned by SHA-256 in `packaging/openvino/openvino-runtime.lock`) under `resources/openvino` (+147 MiB unpacked, +49 MB in the tar.gz).
+- `GetStatus`: `openvino_runtime` (`status`: `ok`, `not_found`, `incompatible_version`, `load_failed`, `npu_plugin_missing`, `npu_device_unavailable`; version, library, devices) and `backend_fallback` / `backend_fallback_reason`.
+
+### Changed
+- The OpenVINO loader accepts the 2025 and 2026 series (C ABI checked against the 2025.4 and 2026.4 headers and the exported symbols of 2025.4, 2026.0 and 2026.4) and finds `libopenvino_c.so*` by glob in `OPENVINO_LIB_PATH`, the embedded runtime, `/usr/lib64`, `/lib64` and `/usr/local/lib64`.
+- `scripts/install-openvino.sh` only diagnoses and lists the NPU/GPU driver packages that exist on each distribution; `detect-hardware` recognizes the embedded runtime.
+
 ## [0.1.0-beta.1] - 2026-11-09
 
 First beta release.
