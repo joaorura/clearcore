@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual microphone powered by DeepFilterNet3 ONNX, ONNX Runtime (`ort` v2) neural streaming, Target Speaker Extraction (DFNet-TSE-MHCA), PipeWire C bridge (Linux), WaveRT PortCls kernel driver (Windows), CoreAudio HAL (macOS), and a resilient Rust supervisor daemon.
 
-## [0.1.0-beta.2] - 2026-10-15
+## [0.1.0-beta.2] - 2026-11-09
 
 ### Fixed
 - Voice profile enrollment failed on every recording: the noisy-environment gate estimated the noise as the raw-minus-denoised difference, which counted the voice itself removed by the denoiser as noise. The gate now estimates the SNR on the raw signal (speech level against the noise floor of the pauses, with digital silence treated as a quiet environment) and logs `snr_db`.
 - The `ENROLL_NOISY_ENVIRONMENT` code was not recognized by the Electron layer and was shown as "O serviço não conseguiu processar o áudio". It now shows the correct noisy-environment message.
+- Building the voice profile always failed with `ENROLL_TOO_QUIET`: the enrollment gate measured the level over the whole take, pauses included, so takes accepted as samples fell under -40 dBFS. It now measures only the active speech, the same rule and threshold the sample ingest applies.
+- The UI lost track of the profile build job under React StrictMode and showed `ENROLL_BUSY` on repeated clicks. It now shows a loading state and resumes the job already running (`GetStatus` exposes `active_enrollment_jobs`).
+- The stored sample had dropouts where the denoiser gated weak speech away. A bounded part of the removed residual is mixed back, capping the attenuation at about 12 dB.
+- Recording: smoothed dBFS level meter, a low-speech-level warning and the label of the microphone in use, falling back to the system default microphone.
 
 ## [0.1.0-beta.1] - 2026-10-13
 

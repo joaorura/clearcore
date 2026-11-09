@@ -10,6 +10,10 @@ ClearCore is a high-performance, cross-platform, realtime AI noise-suppression v
 
 - **Voice profile enrollment fixed**: recording a voice profile no longer fails on every recording. The noisy-environment check now measures the signal-to-noise ratio on the raw recording, so the speech removed by the denoiser is no longer counted as noise.
 - **Clear noisy-environment message**: when a recording is rejected for background noise, the application now says so, instead of reporting that the service could not process the audio.
+- **Voice profile build fixed**: building the profile no longer fails with "too quiet" on recordings that were accepted as samples. The level check now measures only the active speech, ignoring the pauses between words.
+- **Build progress you can follow**: the application shows a loading state while the profile is being built and picks up a build already in progress instead of reporting that the service is busy.
+- **No more dropouts in stored samples**: the denoiser can no longer erase stretches of weak speech; its attenuation of the stored take is capped at about 12 dB.
+- **Better recording feedback**: a smoothed dBFS level meter, a warning when the speech is too low, and the name of the microphone in use (falling back to the system default microphone).
 
 ---
 
@@ -120,6 +124,10 @@ To ensure your downloaded binaries have not been corrupted or tampered with, ver
 ### Fixed
 - Voice profile enrollment failed on every recording: the noisy-environment gate estimated the noise as the raw-minus-denoised difference, which counted the voice itself removed by the denoiser as noise. The gate now estimates the SNR on the raw signal and logs `snr_db`.
 - The `ENROLL_NOISY_ENVIRONMENT` code was not recognized by the Electron layer and was shown as "O serviço não conseguiu processar o áudio". It now shows the correct noisy-environment message.
+- Building the voice profile always failed with `ENROLL_TOO_QUIET`: the enrollment gate measured the whole take, pauses included. It now measures only the active speech, the same rule and threshold as the sample ingest.
+- The UI lost track of the profile build job under React StrictMode and showed `ENROLL_BUSY` on repeated clicks. It now shows a loading state and resumes the running job (`GetStatus` exposes `active_enrollment_jobs`).
+- Stored samples had dropouts from the denoiser; its attenuation is now limited to about 12 dB.
+- Smoothed dBFS level meter, low-speech-level warning and display of the microphone in use, with fallback to the system default microphone.
 
 ---
 
