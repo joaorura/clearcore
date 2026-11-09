@@ -142,9 +142,19 @@ OPENVINO_LIB_PATH=<.../openvino/libs> cargo test --release -p realtime-noise-fil
 # latência e concordância entre runtimes (asset real opcional):
 CLEARCORE_V3_BENCH_ASSET=<tar.gz> CLEARCORE_V3_BENCH_SHA256=<sha> OPENVINO_LIB_PATH=... \
   cargo test --release -p realtime-noise-filter-capi -- --ignored --nocapture bench runtimes_agree
-# paridade contra o daemon (input.f32/output.f32 LE, profile.json opcional):
-CLEARCORE_FILTER_PARITY_DIR=<dir> cargo test --release -p realtime-noise-filter-capi -- --ignored parity
+# paridade contra o daemon (manifest.json, input.f32, expected_daemon_{neutral,profile}.f32,
+# conditioning.json; asset em ../pro-v3-full/ ou CLEARCORE_V3_BENCH_ASSET/_SHA256):
+CLEARCORE_FILTER_PARITY_DIR=<dir> OPENVINO_LIB_PATH=... \
+  cargo test --release -p realtime-noise-filter-capi -- --ignored --nocapture parity
 ```
+
+Paridade contra o daemon (tract, executor stateful genérico), 600 hops de `mix_0002`, hops 0–20 e
+300–320 zerados, embedding ECAPA real + EQ em rampa −3..+3 dB, arquivo inteiro:
+
+| Runtime do filtro | neutro | com perfil |
+| :--- | :--- | :--- |
+| ORT CPU | 131,4 dB (max \|erro\| 2,5e-7) | 129,8 dB (3,3e-7) |
+| OpenVINO CPU | 130,4 dB (2,7e-7) | 125,5 dB (4,8e-7) |
 
 O fixture `crates/filter-capi/tests/fixtures/pdfnet3-pro-v3-full-synthetic.tar.gz` (158 KB, gerado por
 `make_synth_v3.py` no mesmo diretório) tem o formato e os nomes do asset real com pesos aleatórios.

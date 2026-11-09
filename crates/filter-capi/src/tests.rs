@@ -709,9 +709,12 @@ fn runtimes_agree_on_the_v3_model() {
     }
 }
 
-/// Parity against the daemon reference in `CLEARCORE_FILTER_PARITY_DIR` (input.f32 / output.f32
-/// raw little-endian mono 48 kHz, optional profile.json, optional asset.tar.gz + asset.sha256):
-/// SNR >= 60 dB. Run with `--ignored --nocapture`.
+/// Parity against the daemon reference in `CLEARCORE_FILTER_PARITY_DIR` (format of the daemon
+/// hand-off: `manifest.json`, `input.f32`, `expected_daemon_neutral.f32`,
+/// `expected_daemon_profile.f32` raw LE f32 mono 48 kHz, `conditioning.json` with
+/// `speaker_embedding` [192], `eq_gains_db` [32], `intensity_percent`). Both cases, on ONNX Runtime
+/// and OpenVINO CPU (when found); SNR over the whole file >= 60 dB. The asset is the manifest's
+/// `asset` next to the parity dir (`../pro-v3-full/`) unless `CLEARCORE_V3_BENCH_ASSET`/`_SHA256`.
 #[test]
 #[ignore = "needs the daemon parity vectors"]
 fn parity_against_the_daemon_reference() {
@@ -719,6 +722,9 @@ fn parity_against_the_daemon_reference() {
     let dir = PathBuf::from(
         std::env::var_os("CLEARCORE_FILTER_PARITY_DIR").expect("set CLEARCORE_FILTER_PARITY_DIR"),
     );
+    let json = |name: &str| -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(dir.join(name)).expect(name)).expect(name)
+    };
     let read_f32 = |name: &str| -> Vec<f32> {
         std::fs::read(dir.join(name))
             .expect(name)
@@ -726,39 +732,87 @@ fn parity_against_the_daemon_reference() {
             .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
             .collect()
     };
-    if let (Some(a), Some(s)) = (
+    let floats = |v: &serde_json::Value| -> Vec<f32> {
+        #[allow(clippy::cast_possible_truncation)]
+        v.as_array()
+            .expect("array")
+            .iter()
+            .map(|x| x.as_f64().expect("number") as f32)
+            .collect()
+    };
+    let manifest = json("manifest.json");
+    let conditioning = json("conditioning.json");
+    match (
         std::env::var_os("CLEARCORE_V3_BENCH_ASSET"),
         std::env::var_os("CLEARCORE_V3_BENCH_SHA256"),
     ) {
-        env.set(ENV_DEV_V3_ASSET, a);
-        env.set(ENV_DEV_V3_SHA256, s);
-    }
-    let mut filter = ClearcoreFilter::new(
-        &repo_root(),
-        std::env::var("CLEARCORE_FILTER_BACKEND").ok().as_deref(),
-    )
-    .expect("filter");
-    if let Ok(json) = std::fs::read_to_string(dir.join("profile.json")) {
-        filter
-            .apply_profile(&StoredProfile::from_json(&json).expect("profile"), 100)
-            .expect("apply");
+        (Some(a), Some(s)) => {
+            env.set(ENV_DEV_V3_ASSET, a);
+            env.set(ENV_DEV_V3_SHA256, s);
+        }
+        _ => {
+            let asset = manifest["asset"].as_str().expect("asset");
+            env.set(ENV_DEV_V3_ASSET, dir.join("../pro-v3-full").join(asset));
+            env.set(
+                ENV_DEV_V3_SHA256,
+                manifest["asset_sha256"].as_str().expect("sha"),
+            );
+        }
     }
     let input = read_f32("input.f32");
-    let expected = read_f32("output.f32");
-    let mut out = Vec::new();
-    for hop in input.chunks_exact(480) {
-        let mut frame = [0.0f32; 480];
-        frame.copy_from_slice(hop);
-        out.extend(filter.core.process(&frame).expect("hop"));
+    let embedding = floats(&conditioning["speaker_embedding"]);
+    let eq = BandGains::from_slice(&floats(&conditioning["eq_gains_db"])).expect("eq");
+    let intensity = conditioning["intensity_percent"].as_u64().unwrap_or(100);
+    let mut backends = vec![None];
+    if ov_devices().iter().any(|d| d == "CPU") {
+        backends.push(Some("openvino-cpu"));
     }
-    let n = out.len().min(expected.len());
-    let snr = snr_db(&expected[..n], &out[..n]);
-    println!(
-        "parity: {} samples, SNR {snr:.2} dB, {}",
-        n,
-        filter.status_json()
-    );
-    assert!(snr >= 60.0, "parity SNR {snr:.2} dB < 60 dB");
+    let mut failures = Vec::new();
+    for backend in backends {
+        for (case, expected_file) in [
+            ("neutral", "expected_daemon_neutral.f32"),
+            ("profile", "expected_daemon_profile.f32"),
+        ] {
+            let mut filter = ClearcoreFilter::new(&repo_root(), backend).expect("filter");
+            assert_eq!(filter.model_kind(), ModelKind::V3Full);
+            if case == "profile" {
+                filter
+                    .core
+                    .set_conditioning(Conditioning {
+                        embedding: (intensity > 0).then(|| embedding.clone()),
+                        film: None,
+                    })
+                    .expect("conditioning");
+                filter.core.set_eq(Some(eq.clone())).expect("eq");
+            }
+            let mut out = Vec::with_capacity(input.len());
+            for hop in input.chunks_exact(480) {
+                let mut frame = [0.0f32; 480];
+                frame.copy_from_slice(hop);
+                out.extend(filter.core.process(&frame).expect("hop"));
+            }
+            let expected = read_f32(expected_file);
+            assert_eq!(expected.len(), out.len(), "{expected_file} length");
+            let snr = snr_db(&expected, &out);
+            let worst = expected
+                .iter()
+                .zip(&out)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            println!(
+                "parity {:<8} {case:<8}: SNR {snr:.2} dB, max |err| {worst:.2e}, silent hops {}",
+                filter.core.engine.label(),
+                filter.core.silent_hops()
+            );
+            if snr < 60.0 {
+                failures.push(format!(
+                    "{} {case}: {snr:.2} dB",
+                    filter.core.engine.label()
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "parity below 60 dB: {failures:?}");
 }
 
 // ------------------------------------------------------------------ v2 (bundled) --------
