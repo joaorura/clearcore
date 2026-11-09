@@ -906,8 +906,8 @@ impl<S: GraphSession> StatefulGraphBackend<S> {
         Ok(())
     }
 
-    /// Conditions the Pro v3 full graph on a speaker (`speaker_embedding`, `speaker_present =
-    /// intensity / 100`, the profile's EQ), or returns to the neutral voice with `None` (zeros,
+    /// Conditions the Pro v3 full graph on a speaker (`speaker_embedding`, `speaker_present` 1.0,
+    /// or 0.0 at intensity 0 — binary, never fractional — and the profile's EQ), or returns to the neutral voice with `None` (zeros,
     /// `0.0`, no EQ). Validated first; on error the previous conditioning stays. State is kept.
     pub fn set_speaker_conditioning(
         &mut self,

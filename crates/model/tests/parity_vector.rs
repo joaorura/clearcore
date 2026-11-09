@@ -183,7 +183,7 @@ fn write_parity_vector() {
             "stage_selection": "lsnr < -10 -> zero; lsnr > 30 -> unprocessed; 20 < lsnr <= 30 -> ERB only; else ERB+DF (emulate_gating_offline, runtime_path.py:342-360)",
             "digital_silence": "hop RMS < 1e-7 -> zero output, neither STFT nor model advance",
             "eq": "profile EQ (32 ERB gains dB -> per-bin factors) applied right before the iSTFT",
-            "conditioning": "speaker_embedding = embedding, speaker_present = intensity/100 (1.0); neutral: zeros and 0.0",
+            "conditioning": "speaker_embedding = embedding, speaker_present binary: 0.0 at intensity 0, 1.0 otherwise (here 1.0); neutral: zeros and 0.0",
         },
         "acceptance": "SNR(expected, filter output) >= 60 dB over the whole file, for both outputs",
     });

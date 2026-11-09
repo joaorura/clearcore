@@ -226,6 +226,16 @@ fn conditioning_api_is_coherent_with_the_graph() -> TestResult {
     backend.set_speaker_conditioning(Some(&zero))?;
     backend.reset()?;
     assert_eq!(run(&mut backend, &input), neutral);
+    // speaker_present is binary: any intensity > 0 is the full speaker (same output as 100).
+    backend.set_speaker_conditioning(Some(&conditioning(7)))?;
+    backend.reset()?;
+    let full = run(&mut backend, &input);
+    let mut half = conditioning(7);
+    half.intensity_percent = 50;
+    assert_eq!(half.speaker_present(), 1.0);
+    backend.set_speaker_conditioning(Some(&half))?;
+    backend.reset()?;
+    assert_eq!(run(&mut backend, &input), full);
     // Removing the conditioning restores the neutral output.
     backend.set_speaker_conditioning(None)?;
     assert!(backend.active_speaker_conditioning().is_none());

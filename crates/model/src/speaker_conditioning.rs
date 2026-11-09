@@ -21,7 +21,8 @@ pub struct SpeakerConditioning {
     pub speaker_embedding: [f32; SPEAKER_EMBEDDING_LEN],
     /// Spectral EQ applied right before the iSTFT (32 ERB gains in dB), or none.
     pub eq: Option<BandGains>,
-    /// 0-100: drives `speaker_present` (`intensity / 100`; 0 is the neutral voice).
+    /// 0-100. Only gates the speaker: 0 → `speaker_present = 0.0` (neutral voice), anything else
+    /// → `1.0` with the whole embedding (binary, as the training mask; the same rule as the filter).
     pub intensity_percent: u8,
 }
 
@@ -66,9 +67,14 @@ impl SpeakerConditioning {
         Ok(())
     }
 
-    /// Value fed to `speaker_present`.
+    /// Value fed to `speaker_present`: binary (`0.0` at intensity 0, `1.0` otherwise); a
+    /// fractional value would be outside the training distribution (the mask is 0/1).
     #[must_use]
     pub fn speaker_present(&self) -> f32 {
-        f32::from(self.intensity_percent.min(100)) / 100.0
+        if self.intensity_percent == 0 {
+            0.0
+        } else {
+            1.0
+        }
     }
 }
