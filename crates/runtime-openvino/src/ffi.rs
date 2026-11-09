@@ -164,6 +164,17 @@ pub type FnOvModelConstInputByIndex = unsafe extern "C" fn(
     index: usize,
     input_port: *mut *mut ov_output_const_port_t,
 ) -> ov_status_e;
+pub type FnOvModelOutputsSize =
+    unsafe extern "C" fn(model: *const ov_model_t, output_size: *mut usize) -> ov_status_e;
+pub type FnOvModelConstOutputByIndex = unsafe extern "C" fn(
+    model: *const ov_model_t,
+    index: usize,
+    output_port: *mut *mut ov_output_const_port_t,
+) -> ov_status_e;
+pub type FnOvPortGetPartialShape = unsafe extern "C" fn(
+    port: *const ov_output_const_port_t,
+    partial_shape: *mut ov_partial_shape_t,
+) -> ov_status_e;
 pub type FnOvPortGetAnyName = unsafe extern "C" fn(
     port: *const ov_output_const_port_t,
     tensor_name: *mut *mut c_char,
@@ -252,6 +263,9 @@ pub struct OpenVinoLibrary {
     pub ov_model_inputs_size: FnOvModelInputsSize,
     pub ov_model_const_input_by_index: FnOvModelConstInputByIndex,
     pub ov_port_get_any_name: FnOvPortGetAnyName,
+    pub ov_model_outputs_size: FnOvModelOutputsSize,
+    pub ov_model_const_output_by_index: FnOvModelConstOutputByIndex,
+    pub ov_port_get_partial_shape: FnOvPortGetPartialShape,
     pub ov_output_const_port_free: FnOvOutputConstPortFree,
     pub ov_free: FnOvFree,
     pub ov_model_reshape_input_by_name: FnOvModelReshapeInputByName,
@@ -610,6 +624,15 @@ impl OpenVinoLibrary {
                 FnOvModelConstInputByIndex
             ),
             ov_port_get_any_name: load_sym!(ov_port_get_any_name, FnOvPortGetAnyName),
+            ov_model_outputs_size: load_sym!(ov_model_outputs_size, FnOvModelOutputsSize),
+            ov_model_const_output_by_index: load_sym!(
+                ov_model_const_output_by_index,
+                FnOvModelConstOutputByIndex
+            ),
+            ov_port_get_partial_shape: load_sym!(
+                ov_port_get_partial_shape,
+                FnOvPortGetPartialShape
+            ),
             ov_output_const_port_free: load_sym!(
                 ov_output_const_port_free,
                 FnOvOutputConstPortFree

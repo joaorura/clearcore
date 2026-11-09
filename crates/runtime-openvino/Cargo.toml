@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 realtime-noise-contracts = { path = "../contracts" }
-realtime-noise-model = { path = "../model" }
+realtime-noise-model = { path = "../model", features = ["tract"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "=0.2.189", default-features = false }
@@ -18,3 +18,7 @@ windows-sys = { version = "=0.61.2", default-features = false, features = ["Win3
 
 [lints.rust]
 unsafe_code = "allow"
+
+[dev-dependencies]
+realtime-noise-contracts = { path = "../contracts" }
+sha2 = { version = "=0.10.9", default-features = false, features = ["std"] }

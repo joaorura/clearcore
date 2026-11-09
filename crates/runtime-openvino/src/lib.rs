@@ -18,6 +18,7 @@ pub mod core;
 pub mod dfn3;
 pub mod error;
 pub mod ffi;
+pub mod graph;
 pub mod infer;
 pub mod model;
 pub mod precision;
@@ -27,6 +28,7 @@ pub mod tensor;
 pub use core::OpenVinoCore;
 pub use dfn3::{Dfn3Graphs, Dfn3Output, Dfn3Session};
 pub use error::OpenVinoError;
+pub use graph::{OpenVinoGraphSession, build_openvino_executor};
 pub use ffi::{
     LibrarySource, OpenVinoLibrary, SUPPORTED_MAJOR_VERSIONS, candidate_libraries, locate_library,
     ov_element_type_e, ov_status_e,

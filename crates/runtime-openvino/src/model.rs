@@ -78,6 +78,81 @@ impl OpenVinoModel {
         Ok(names)
     }
 
+    /// Name and dimensions (`None` = dynamic) of every input (`outputs == false`) or output
+    /// port, in port order.
+    pub fn ports(&self, outputs: bool) -> Result<Vec<(String, Vec<Option<i64>>)>, OpenVinoError> {
+        let mut count = 0usize;
+        let status = unsafe {
+            if outputs {
+                (self.lib.ov_model_outputs_size)(self.ptr, &raw mut count)
+            } else {
+                (self.lib.ov_model_inputs_size)(self.ptr, &raw mut count)
+            }
+        };
+        check_status(status, &self.lib)?;
+        let mut ports = Vec::with_capacity(count);
+        for index in 0..count {
+            let mut port = std::ptr::null_mut();
+            let status = unsafe {
+                if outputs {
+                    (self.lib.ov_model_const_output_by_index)(self.ptr, index, &raw mut port)
+                } else {
+                    (self.lib.ov_model_const_input_by_index)(self.ptr, index, &raw mut port)
+                }
+            };
+            check_status(status, &self.lib)?;
+            if port.is_null() {
+                return Err(OpenVinoError::ShapeError(format!("port {index} is null")));
+            }
+            let mut name_ptr: *mut std::os::raw::c_char = std::ptr::null_mut();
+            let name_status = unsafe { (self.lib.ov_port_get_any_name)(port, &raw mut name_ptr) };
+            let name = check_status(name_status, &self.lib).map(|()| {
+                if name_ptr.is_null() {
+                    String::new()
+                } else {
+                    // SAFETY: non-null NUL-terminated string allocated by OpenVINO.
+                    unsafe { CStr::from_ptr(name_ptr) }
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            });
+            let mut partial = ov_partial_shape_t {
+                rank: ov_dimension_t { min: 0, max: 0 },
+                dims: std::ptr::null_mut(),
+            };
+            let shape_status =
+                unsafe { (self.lib.ov_port_get_partial_shape)(port, &raw mut partial) };
+            let dims = check_status(shape_status, &self.lib).and_then(|()| {
+                if partial.rank.min != partial.rank.max || partial.rank.min < 0 {
+                    return Err(OpenVinoError::ShapeError(format!(
+                        "port {index} has a dynamic rank"
+                    )));
+                }
+                let rank = usize::try_from(partial.rank.min)
+                    .map_err(|_| OpenVinoError::ShapeError("rank overflows".to_owned()))?;
+                let mut dims = Vec::with_capacity(rank);
+                for d in 0..rank {
+                    // SAFETY: `dims` holds `rank` entries allocated by OpenVINO.
+                    let dim = unsafe { *partial.dims.add(d) };
+                    dims.push((dim.min == dim.max && dim.min >= 0).then_some(dim.min));
+                }
+                Ok(dims)
+            });
+            // SAFETY: allocated by OpenVINO for this call and not used afterwards.
+            unsafe {
+                if !name_ptr.is_null() {
+                    (self.lib.ov_free)(name_ptr);
+                }
+                if shape_status == crate::ffi::ov_status_e::OK {
+                    (self.lib.ov_partial_shape_free)(&raw mut partial);
+                }
+                (self.lib.ov_output_const_port_free)(port);
+            }
+            ports.push((name?, dims?));
+        }
+        Ok(ports)
+    }
+
     /// Whether the model declares an input with this tensor name.
     pub fn has_input(&self, tensor_name: &str) -> Result<bool, OpenVinoError> {
         Ok(self.input_names()?.iter().any(|name| name == tensor_name))
