@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 PackageIdentifier: joaorura.Clearcore
-PackageVersion: 0.1.0-beta.2
+PackageVersion: 0.1.0-beta.1
 Platform:
   - Windows.Desktop
 MinimumOSVersion: 10.0.17763.0
@@ -11,7 +11,7 @@ InstallModes:
   - silent
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.2/Clearcore-Setup.exe
-    InstallerSha256: 62a12321e922711d2a1d6d7f4cbd67db0ccd49da6650250721197739598dcea3
+    InstallerUrl: https://github.com/joaorura/clearcore/releases/download/v0.1.0-beta.1/Clearcore-Setup.exe
+    InstallerSha256: 6456b87314f5e560e1aa69f795128bb289387bd3a996ac521ed5b26d4e675d3b
 ManifestType: installer
 ManifestVersion: 1.6.0
