@@ -44,6 +44,20 @@ Requires:       nss-util
 Requires:       pango
 Requires:       pipewire-libs
 Requires:       systemd-libs
+# The x86_64 bundle embeds the OpenVINO runtime (CPU/GPU/NPU plugins, TBB) under
+# /opt/clearcore/resources/openvino, taken from the pinned `openvino` wheel (see
+# packaging/openvino/openvino-runtime.lock). Its libraries carry RPATH $ORIGIN and the daemon
+# dlopens libopenvino_c by absolute path, so nothing goes to ld.so.conf and AutoReqProv stays
+# off (the bundled .so files must not be provided to, or required from, the system). Their
+# external needs are glibc/libstdc++/libgcc (already required) and, for the GPU plugin,
+# libOpenCL.so.1. The NPU/GPU drivers are optional: without them OpenVINO uses the CPU or the
+# daemon stays on tract.
+%ifarch x86_64
+Recommends:     OpenCL-ICD-Loader
+Recommends:     intel-npu-driver
+Recommends:     oneapi-level-zero
+Recommends:     intel-level-zero
+%endif
 
 %description
 Clearcore is a first-party realtime noise-suppression virtual microphone

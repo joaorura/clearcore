@@ -1,144 +1,190 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Clearcore / Hippocamp - Guia de Instalacao da Runtime Intel OpenVINO & NPU
+# Clearcore - Diagnostico do OpenVINO (Intel NPU / iGPU / CPU) e guia de drivers
 # ==============================================================================
-# Este script orienta o usuario na instalacao da runtime OpenVINO para:
-# - Intel NPU (Tier 2: Core Ultra 100/200 series, Arrow Lake, Lunar Lake, Meteor Lake)
-# - Intel Arc / iGPU (Tier 3: Xe / Arc Graphics)
-# - Intel CPU (Tier 4: Otimizacao AMX / AVX-VNNI)
+# Os pacotes do Clearcore para Linux x64 (tar.gz, AppImage, RPM, DEB) ja trazem a
+# runtime OpenVINO com os plugins CPU, GPU e NPU em <app>/resources/openvino. Nada
+# precisa ser instalado para o OpenVINO em si; a NPU e a GPU Intel dependem apenas
+# dos DRIVERS do sistema (kernel + user space), que este script verifica e orienta.
+#
+# Este script NAO instala nada nem usa sudo: ele mostra o que falta e o comando.
+#
+# Busca da libopenvino_c (mesma ordem do daemon, crates/runtime-openvino/src/ffi.rs):
+#   1. OPENVINO_LIB_PATH (arquivo libopenvino_c.so* ou diretorio)
+#   2. runtime embutido: <app>/resources/openvino (este script fica em resources/scripts)
+#      e /opt/clearcore/resources/openvino
+#   3. /usr/lib64, /lib64, /usr/local/lib64, /usr/lib/x86_64-linux-gnu
+# Series aceitas: 2025.x e 2026.x.
+#
+# Uso: install-openvino.sh            (diagnostico + guia)
+#      install-openvino.sh --check    (so o diagnostico; sai 0 se a NPU/GPU presentes tem runtime)
 # ==============================================================================
 
-set -euo pipefail
+set -uo pipefail
+
+CHECK_ONLY=false
+[[ "${1:-}" == "--check" ]] && CHECK_ONLY=true
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=========================================================="
-echo " Clearcore / Hippocamp - Instalador OpenVINO & Intel NPU"
+echo " Clearcore - OpenVINO (Intel NPU / iGPU / CPU)"
 echo "=========================================================="
 
-# 1. Detectar hardware Intel
-echo "[1/4] Verificando presenca fisica de hardware Intel..."
+# 1. Hardware Intel
 HAS_INTEL_NPU=false
 HAS_INTEL_GPU=false
 HAS_INTEL_CPU=false
-
-if command -v lspci >/dev/null 2>&1; then
-    if lspci -nn 2>/dev/null | grep -qi "8086:7d1d\|8086:7d1e\|8086:643e"; then
-        HAS_INTEL_NPU=true
-        echo "  -> Intel NPU detectada via barramento PCI (8086:7d1d/7d1e)."
-    fi
-    if lspci -nn 2>/dev/null | grep -qi "8086:.*\[030"; then
-        HAS_INTEL_GPU=true
-        echo "  -> Intel Arc / iGPU detectada via barramento PCI."
-    fi
-fi
-
-if [[ -e /dev/accel/accel0 || -d /sys/class/accel ]]; then
+if compgen -G "/dev/accel/accel*" >/dev/null; then
     HAS_INTEL_NPU=true
-    echo "  -> Driver de kernel de aceleracao NPU (/dev/accel) ativo."
 fi
-
+if command -v lspci >/dev/null 2>&1; then
+    if lspci -nn 2>/dev/null | grep -qiE "8086:(7d1d|7d1e|643e|ad1d|b03e)"; then
+        HAS_INTEL_NPU=true
+    fi
+    if lspci -nn 2>/dev/null | grep -iE "VGA|Display|3D" | grep -qi "8086:"; then
+        HAS_INTEL_GPU=true
+    fi
+fi
 if grep -qi "GenuineIntel" /proc/cpuinfo 2>/dev/null; then
     HAS_INTEL_CPU=true
-    echo "  -> Processador Intel detectado."
 fi
+echo "[1/3] Hardware: NPU Intel=${HAS_INTEL_NPU}  GPU Intel=${HAS_INTEL_GPU}  CPU Intel=${HAS_INTEL_CPU}"
 
-# 2. Verificar se OpenVINO ja esta instalado
-echo "[2/4] Verificando instalacao atual do OpenVINO..."
-OPENVINO_LIB=""
-for loc in \
-    "/lib64/libopenvino.so.2510" \
-    "/usr/lib64/libopenvino.so" \
-    "/lib64/libopenvino.so" \
-    "/usr/lib/x86_64-linux-gnu/libopenvino.so" \
-    "/opt/intel/openvino/runtime/lib/intel64/libopenvino.so" \
-    "${INTEL_OPENVINO_DIR:-/nonexistent}/runtime/lib/intel64/libopenvino.so" \
-    /opt/intel/openvino*/runtime/lib/intel64/libopenvino.so; do
-    if [[ -e "${loc}" ]]; then
-        OPENVINO_LIB="${loc}"
+# 2. Runtime OpenVINO
+OV_DIRS=()
+if [[ -n "${OPENVINO_LIB_PATH:-}" ]]; then
+    if [[ -d "${OPENVINO_LIB_PATH}" ]]; then
+        OV_DIRS+=("${OPENVINO_LIB_PATH}")
+    else
+        OV_DIRS+=("$(dirname "${OPENVINO_LIB_PATH}")")
+    fi
+fi
+OV_DIRS+=("${SCRIPT_DIR}/../openvino" "${SCRIPT_DIR}/../resources/openvino"
+          /opt/clearcore/resources/openvino /usr/lib64 /lib64 /usr/local/lib64
+          /usr/lib/x86_64-linux-gnu)
+
+OV_LIB=""
+for d in "${OV_DIRS[@]}"; do
+    [[ -d "${d}" ]] || continue
+    # Maior sufixo numerico primeiro (libopenvino_c.so.2641 antes de .2600).
+    cand="$(find "${d}" -maxdepth 1 -name 'libopenvino_c.so*' \( -type f -o -type l \) 2>/dev/null \
+        | sort -V -r | head -n1)"
+    if [[ -n "${cand}" && -e "${cand}" ]]; then
+        OV_LIB="$(cd "$(dirname "${cand}")" && pwd)/$(basename "${cand}")"
         break
     fi
 done
 
-if [[ -z "${OPENVINO_LIB}" ]] && command -v ldconfig >/dev/null 2>&1; then
-    OPENVINO_LIB=$(ldconfig -p 2>/dev/null | grep "libopenvino\.so" | awk '{print $NF}' | head -n1 || true)
+OV_NPU_PLUGIN=false
+OV_GPU_PLUGIN=false
+if [[ -z "${OV_LIB}" ]]; then
+    echo "[2/3] OpenVINO: NAO encontrado (status not_found)."
+    echo "      O pacote do Clearcore traz a runtime em resources/openvino; reinstale o pacote"
+    echo "      ou aponte OPENVINO_LIB_PATH para uma libopenvino_c.so.* (2025.x ou 2026.x)."
+else
+    OV_DIR="$(dirname "${OV_LIB}")"
+    SUFFIX="${OV_LIB##*.so.}"
+    echo "[2/3] OpenVINO: ${OV_LIB}"
+    case "${SUFFIX}" in
+        25*|26*|2025.*|2026.*) echo "      serie suportada (sufixo ${SUFFIX})" ;;
+        "${OV_LIB}") echo "      sem sufixo de versao; o daemon confere a versao ao carregar" ;;
+        *) echo "      [AVISO] serie possivelmente incompativel (sufixo ${SUFFIX}); aceitas: 2025.x, 2026.x" ;;
+    esac
+    # Plugins ao lado da biblioteca (wheel pip, runtime embutido) ou em openvino-<versao>/
+    # (pacote do Fedora: /usr/lib64/openvino-2026.0.0/).
+    for pd in "${OV_DIR}" "${OV_DIR}"/openvino-*; do
+        [[ -e "${pd}/libopenvino_intel_npu_plugin.so" ]] && OV_NPU_PLUGIN=true
+        [[ -e "${pd}/libopenvino_intel_gpu_plugin.so" ]] && OV_GPU_PLUGIN=true
+    done
+    echo "      plugin NPU=${OV_NPU_PLUGIN}  plugin GPU=${OV_GPU_PLUGIN}"
+    if [[ "${HAS_INTEL_NPU}" == "true" && "${OV_NPU_PLUGIN}" == "false" ]]; then
+        echo "      [AVISO] esta runtime nao tem o plugin NPU (status npu_plugin_missing)."
+        echo "      O pacote 'openvino' do Fedora (2026.0) so traz CPU/GPU; o Clearcore usa a"
+        echo "      runtime embutida (resources/openvino), que tem o plugin NPU."
+    fi
 fi
 
-if [[ -n "${OPENVINO_LIB}" ]]; then
-    echo "  [OK] OpenVINO encontrado em: ${OPENVINO_LIB}"
-    echo "  Status do driver Intel NPU (Level Zero):"
-    if [[ -e /dev/accel/accel0 ]]; then
-        echo "    -> Dispositivo /dev/accel/accel0 pronto para inferencia NPU!"
+# 3. Drivers e permissoes
+echo "[3/3] Drivers:"
+DRIVER_OK=true
+if [[ "${HAS_INTEL_NPU}" == "true" ]]; then
+    if compgen -G "/usr/lib*/libze_intel_npu.so*" >/dev/null || compgen -G "/usr/lib/x86_64-linux-gnu/libze_intel_npu.so*" >/dev/null; then
+        echo "      NPU: driver user space (level-zero NPU) presente"
     else
-        echo "    -> [AVISO] /dev/accel/accel0 nao encontrado. Para NPU, certifique-se"
-        echo "       de que o driver NPU (Fedora: 'intel-npu-driver') e o modulo 'intel_vpu' estao carregados."
+        echo "      NPU: [FALTA] driver user space da NPU (libze_intel_npu)"
+        DRIVER_OK=false
     fi
+    for node in /dev/accel/accel*; do
+        [[ -e "${node}" ]] || continue
+        if [[ -r "${node}" && -w "${node}" ]]; then
+            echo "      NPU: ${node} acessivel"
+        else
+            echo "      NPU: [SEM ACESSO] ${node} (adicione o usuario ao grupo render)"
+            DRIVER_OK=false
+        fi
+    done
+fi
+if [[ "${HAS_INTEL_GPU}" == "true" ]]; then
+    if compgen -G "/usr/lib*/libze_intel_gpu.so*" >/dev/null || compgen -G "/usr/lib*/intel-opencl/libigdrcl.so" >/dev/null \
+       || compgen -G "/usr/lib/x86_64-linux-gnu/libze_intel_gpu.so*" >/dev/null; then
+        echo "      GPU: compute runtime Intel presente"
+    else
+        echo "      GPU: [FALTA] compute runtime Intel (level-zero / OpenCL)"
+        DRIVER_OK=false
+    fi
+    if ! compgen -G "/usr/lib*/libOpenCL.so.1" >/dev/null && ! compgen -G "/usr/lib/x86_64-linux-gnu/libOpenCL.so.1" >/dev/null; then
+        echo "      GPU: [FALTA] libOpenCL.so.1 (o plugin GPU do OpenVINO depende dela)"
+        DRIVER_OK=false
+    fi
+fi
+
+if [[ -z "${OV_LIB}" ]] || [[ "${HAS_INTEL_NPU}" == "true" && "${OV_NPU_PLUGIN}" == "false" ]]; then
+    DRIVER_OK=false
+fi
+
+if [[ "${CHECK_ONLY}" == "true" ]]; then
+    [[ -n "${OV_LIB}" && "${DRIVER_OK}" == "true" ]] && exit 0
+    exit 1
+fi
+
+if [[ "${DRIVER_OK}" == "true" && -n "${OV_LIB}" ]]; then
+    echo "----------------------------------------------------------"
+    echo "Tudo pronto. Escolha 'Intel OpenVINO (NPU)' ou '(iGPU)' nas configuracoes do Clearcore;"
+    echo "o GetStatus do daemon mostra active_backend e, se cair para o tract, o motivo"
+    echo "(backend_fallback_reason)."
     exit 0
 fi
-
-echo "  -> OpenVINO NAO encontrado no sistema."
-
-# 3. Instrucoes detalhadas por distribuicao
-echo "[3/4] Guia de instalacao para seu sistema operacional:"
-echo "----------------------------------------------------------"
 
 OS_ID="linux"
 if [[ -f /etc/os-release ]]; then
     # shellcheck disable=SC1091
-    source /etc/os-release
-    OS_ID="${ID:-linux}"
+    OS_ID="$(. /etc/os-release && echo "${ID:-linux}")"
 fi
 
+echo "----------------------------------------------------------"
+echo "Como instalar os drivers (${OS_ID}):"
 case "${OS_ID}" in
-    fedora|rhel|centos)
-        echo "Instrucoes para Fedora / RHEL / CentOS:"
-        echo ""
-        echo "  1. Instalar o runtime OpenVINO, os plugins (inclui o plugin NPU) e o driver NPU via dnf:"
-        echo "     sudo dnf install -y openvino openvino-plugins intel-npu-driver intel-npu-compiler oneapi-level-zero"
-        echo "     # O plugin libopenvino_intel_npu_plugin.so vem no pacote 'openvino-plugins'."
-        echo "     # Os nomes dos pacotes podem variar entre versoes do Fedora; confira com:"
-        echo "     #   dnf search openvino    e    dnf search intel-npu"
-        echo "     # (intel-driver-compiler-npu e intel-level-zero-npu NAO existem no Fedora)"
-        echo "     # Para a iGPU Intel, instale tambem: sudo dnf install -y intel-compute-runtime"
-        echo ""
-        echo "  2. Repositorio Oficial Intel OpenVINO (opcional, para versao mais recente):"
-        echo "     sudo tee /etc/yum.repos.d/intel-openvino.repo << 'EOF'"
-        echo "[intel-openvino]"
-        echo "name=Intel OpenVINO Repository"
-        echo "baseurl=https://yum.repos.intel.com/openvino/2025"
-        echo "enabled=1"
-        echo "gpgcheck=1"
-        echo "gpgkey=https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB"
-        echo "EOF"
-        echo "     sudo dnf install -y openvino"
-        echo ""
-        echo "  3. Instalacao manual (pacote/arquivo da Intel, sem RPM) tambem e reconhecida:"
-        echo "     /opt/intel/openvino*/runtime/lib/intel64, a pasta indicada em INTEL_OPENVINO_DIR,"
-        echo "     diretorios de LD_LIBRARY_PATH ou um Python com o modulo 'openvino' importavel"
-        echo "     (informe interpretadores extras em CLEARCORE_PYTHON, separados por ':')."
+    fedora|rhel|centos|rocky|almalinux)
+        echo "  NPU: sudo dnf install -y intel-npu-driver intel-npu-firmware oneapi-level-zero"
+        echo "  GPU: sudo dnf install -y intel-compute-runtime intel-level-zero OpenCL-ICD-Loader"
+        echo "  (o pacote 'openvino' do Fedora nao e necessario: o Clearcore traz a propria runtime)"
         ;;
-    ubuntu|debian|pop)
-        echo "Instrucoes para Ubuntu / Debian / Pop!_OS:"
-        echo ""
-        echo "  1. Instale os pacotes oficiais OpenVINO da Intel:"
-        echo "     wget https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB"
-        echo "     sudo gpg --dearmor --output /usr/share/keyrings/oneapi-archive-keyring.gpg GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB"
-        echo "     echo 'deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/openvino/2025 ubuntu24 main' | sudo tee /etc/apt/sources.list.d/intel-openvino-2025.list"
-        echo "     sudo apt-get update"
-        echo "     sudo apt-get install -y openvino intel-level-zero-npu intel-opencl-icd"
+    ubuntu|debian|pop|linuxmint)
+        echo "  NPU: instale os .deb do driver em https://github.com/intel/linux-npu-driver/releases"
+        echo "       (intel-driver-compiler-npu, intel-fw-npu, intel-level-zero-npu) e: sudo apt install -y libze1"
+        echo "  GPU: sudo apt install -y intel-opencl-icd libze-intel-gpu1 libze1 ocl-icd-libopencl1"
         ;;
-    arch|manjaro)
-        echo "Instrucoes para Arch Linux / Manjaro:"
-        echo ""
-        echo "  yay -S openvino intel-npu-driver-bin intel-compute-runtime"
+    arch|manjaro|endeavouros)
+        echo "  NPU: yay -S intel-npu-driver-bin    (AUR) e sudo pacman -S level-zero-loader"
+        echo "  GPU: sudo pacman -S --needed intel-compute-runtime level-zero-loader ocl-icd"
         ;;
     *)
-        echo "Instrucoes genericas Linux:"
-        echo "  Acesse https://software.intel.com/content/www/us/en/develop/tools/openvino-toolkit/download.html"
-        echo "  e instale o OpenVINO Runtime Archive."
+        echo "  NPU: https://github.com/intel/linux-npu-driver/releases"
+        echo "  GPU: https://github.com/intel/compute-runtime/releases"
         ;;
 esac
-
-echo "----------------------------------------------------------"
-echo "[4/4] Permissoes para NPU (/dev/accel):"
-echo "  Certifique-se de que seu usuario tem acesso ao grupo de aceleradores:"
-echo "    sudo usermod -aG render \$USER"
+echo "  Acesso a /dev/accel e /dev/dri: sudo usermod -aG render \$USER  (e abra uma nova sessao)"
+echo "  Kernel: o modulo intel_vpu (NPU) vem no kernel Linux >= 6.8."
 echo "=========================================================="
+exit 0

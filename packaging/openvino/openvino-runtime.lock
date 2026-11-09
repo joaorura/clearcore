@@ -1,0 +1,16 @@
+# OpenVINO runtime embedded in the Clearcore packages (<app>/resources/openvino).
+# Source: the official `openvino` wheel on PyPI (Apache-2.0). Only its native libraries are
+# shipped (C API, core, ONNX/IR frontends, CPU/GPU/NPU plugins, TBB): no Python code.
+# Read by scripts/fetch-openvino-runtime.sh (Linux), scripts/fetch-openvino-runtime.ps1
+# (Windows) and crates/app-tauri/scripts/openvino-runtime.mjs. KEY=VALUE, no quotes.
+# Hashes: PyPI JSON API (https://pypi.org/pypi/openvino/2026.4.1/json), checked on 2026-11-09.
+OPENVINO_VERSION=2026.4.1
+OPENVINO_BUILD=22982
+LINUX_X64_WHEEL=openvino-2026.4.1-22982-cp312-cp312-manylinux_2_28_x86_64.whl
+LINUX_X64_URL=https://files.pythonhosted.org/packages/ec/3a/2a173ac1ad749ff0b041788eefc1ade0d410231fedfc43f77474f3b806cc/openvino-2026.4.1-22982-cp312-cp312-manylinux_2_28_x86_64.whl
+LINUX_X64_SIZE=59144434
+LINUX_X64_SHA256=6b4375c17ddcac83a5180349e2e2bb811185c261066e2a920659892d58ef0e3b
+WINDOWS_X64_WHEEL=openvino-2026.4.1-22982-cp312-cp312-win_amd64.whl
+WINDOWS_X64_URL=https://files.pythonhosted.org/packages/d0/44/66a61b7cfccea1dfa20e95a04b4157f07a0e4dc3f7e894b22a92abb8822b/openvino-2026.4.1-22982-cp312-cp312-win_amd64.whl
+WINDOWS_X64_SIZE=84964415
+WINDOWS_X64_SHA256=4e04316abff1b99e29b8cbd38deaef9bde4739eba216d982d4b3981e456ecd87

@@ -31,6 +31,8 @@ build/
 
 repo-site/
 release-assets/
+# Runtime OpenVINO montado por crates/app-tauri/scripts/openvino-runtime.mjs (binarios de terceiros)
+third_party/openvino-runtime/
 
 # Orca IDE runtime markers e logs
 .orca/

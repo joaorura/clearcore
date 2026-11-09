@@ -56,7 +56,19 @@ jobs:
       - name: Install Application Dependencies
         run: cd crates/app-tauri && npm ci
 
+      - name: Fetch Pinned OpenVINO Runtime (NPU/GPU/CPU)
+        run: |
+          set -euo pipefail
+          # Wheel URL, size and SHA-256 pinned in packaging/openvino/openvino-runtime.lock;
+          # the script refuses anything else before extracting it.
+          node crates/app-tauri/scripts/openvino-runtime.selftest.mjs
+          node crates/app-tauri/scripts/openvino-runtime.mjs fetch --platform linux-x64 \
+            --out third_party/openvino-runtime/linux-x64
+          node crates/app-tauri/scripts/openvino-runtime.mjs verify --dir third_party/openvino-runtime/linux-x64
+
       - name: Package Linux Standalone Application
+        env:
+          CLEARCORE_REQUIRE_OPENVINO: "1"
         run: ./package.sh
 
       - name: Verify Linux Package Contents
@@ -95,6 +107,18 @@ jobs:
             ls -l "${EXTRACT_DIR}/Clearcore-linux-x64/resources/bin/" || true
             exit 1
           fi
+          # Embedded OpenVINO runtime: C API, core, ONNX frontend, CPU/GPU/NPU plugins, TBB.
+          OV_DIR="${EXTRACT_DIR}/Clearcore-linux-x64/resources/openvino"
+          for pattern in 'libopenvino_c.so.*' 'libopenvino.so.*' 'libopenvino_onnx_frontend.so.*' \
+                         libopenvino_intel_cpu_plugin.so libopenvino_intel_gpu_plugin.so \
+                         libopenvino_intel_npu_plugin.so 'libtbb.so.*'; do
+            if ! compgen -G "${OV_DIR}/${pattern}" >/dev/null; then
+              echo "::error::resources/openvino/${pattern} ausente em ${TARBALL}"
+              exit 1
+            fi
+          done
+          node crates/app-tauri/scripts/openvino-runtime.mjs verify --dir "${OV_DIR}"
+          du -sh "${OV_DIR}"
           (cd "${EXTRACT_DIR}/Clearcore-linux-x64/models/pdfnet3" && printf '%s\n' \
             "1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8  pdfnet3-release-asset-v1.tar.gz" \
             "d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5  pdfnet3-stateful-asset-v1.tar.gz" \
@@ -251,6 +275,14 @@ jobs:
           cd crates\app-tauri
           npm ci
 
+      - name: Fetch Pinned OpenVINO Runtime (NPU/GPU/CPU)
+        shell: powershell
+        run: |
+          node crates\app-tauri\scripts\openvino-runtime.mjs fetch --platform win32-x64 --out third_party\openvino-runtime\win32-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node crates\app-tauri\scripts\openvino-runtime.mjs verify --dir third_party\openvino-runtime\win32-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
@@ -285,6 +317,8 @@ jobs:
 
       - name: Package Windows Standalone Application
         shell: powershell
+        env:
+          CLEARCORE_REQUIRE_OPENVINO: "1"
         run: .\package.ps1
 
       - name: Build Windows Installers (NSIS and Inno Setup)
@@ -519,7 +553,8 @@ jobs:
                 "- **Windows x64**: Single-click installer (\`Clearcore-Setup.exe\`, \`Clearcore-Inno-Setup.exe\`) with WaveRT virtual audio driver and portable zip (\`.zip\`)." \
                 "- **Windows ARM64 (Snapdragon X Elite / Copilot+)**: Standalone ARM64 package (\`.zip\`)." \
                 "- **macOS (Apple Silicon ARM64)**: Application bundle with CoreAudio HAL driver (\`.tar.gz\` and \`.dmg\`)." \
-                "- **Isolation model**: pDFNet3 Pro (FiLM voice-profile conditioning) bundled in every package under \`models/pdfnet3/\`." > "${NOTES_FILE}"
+                "- **Isolation model**: pDFNet3 Pro (FiLM voice-profile conditioning) bundled in every package under \`models/pdfnet3/\`." \
+                "- **OpenVINO**: Linux x64 and Windows x64 packages embed the OpenVINO runtime (CPU/GPU/NPU plugins) under \`resources/openvino/\`; the pDFNet3 Pro runs on an Intel NPU/GPU when selected in the settings." > "${NOTES_FILE}"
             fi
           fi
 

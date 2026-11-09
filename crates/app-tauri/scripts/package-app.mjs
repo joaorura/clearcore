@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { createHash } from 'crypto';
+import { bundleInto, embedsOpenVino, MANIFEST as OPENVINO_MANIFEST } from './openvino-runtime.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -172,6 +173,31 @@ if (platform === 'linux') {
     }
   }
 
+}
+
+// 7b. Bundle the OpenVINO runtime (Linux x64 and Windows x64) into resources/openvino.
+// Built by `node scripts/openvino-runtime.mjs fetch` from the wheel pinned (URL, size, SHA-256) in
+// packaging/openvino/openvino-runtime.lock; every file is re-checked against the manifest the
+// fetch wrote. The daemon finds it relative to its own executable (resources/bin -> resources/
+// openvino) and dlopens libopenvino_c by absolute path; plugins resolve next to libopenvino.
+// ARM64 and macOS are not embedded (they run the pDFNet3 Pro on tract).
+if (embedsOpenVino(platform, arch)) {
+  const openvinoSrc = process.env.CLEARCORE_OPENVINO_RUNTIME_DIR
+    || path.join(repoRoot, 'third_party', 'openvino-runtime', `${platform}-${arch}`);
+  if (fs.existsSync(path.join(openvinoSrc, OPENVINO_MANIFEST))) {
+    try {
+      const { manifest, bytes } = bundleInto(openvinoSrc, path.join(resourcesDir, 'openvino'));
+      console.log(`✓ Bundled OpenVINO ${manifest.version} runtime (${Object.keys(manifest.files).length} files, ${(bytes / 1048576).toFixed(1)} MiB) into resources/openvino`);
+    } catch (err) {
+      console.error(`❌ OpenVINO runtime at ${openvinoSrc} failed verification: ${err.message}`);
+      process.exit(1);
+    }
+  } else if (process.env.CLEARCORE_REQUIRE_OPENVINO === '1') {
+    console.error(`❌ OpenVINO runtime not found at ${openvinoSrc} (run scripts/openvino-runtime.mjs fetch)`);
+    process.exit(1);
+  } else {
+    console.warn(`⚠️ OpenVINO runtime not found at ${openvinoSrc}; the package will run the pDFNet3 Pro on tract only.`);
+  }
 }
 
 // 8. Bundle Neural Models (All Platforms)

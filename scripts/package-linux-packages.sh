@@ -80,6 +80,7 @@ License:        PolyForm Noncommercial 1.0.0
 URL:            https://github.com/joaorura/clearcore
 AutoReqProv:    no
 Requires:       pipewire >= 0.3.0
+TARGET_OPENVINO_RECOMMENDS
 
 %description
 Clearcore is a first-party realtime noise-suppression virtual microphone
@@ -171,6 +172,14 @@ EOF
     sed -i "s|TARGET_BUNDLE_DIR|${BUNDLE_DIR}|g" "${RPM_TOPDIR}/SPECS/clearcore.spec"
     sed -i "s|TARGET_ICON_FILE|${ICON_SOURCE}|g" "${RPM_TOPDIR}/SPECS/clearcore.spec"
     sed -i "s|TARGET_VERSION|${CLEAN_VERSION}|g" "${RPM_TOPDIR}/SPECS/clearcore.spec"
+    # The x64 bundle embeds OpenVINO (resources/openvino, RPATH $ORIGIN, dlopen by absolute path):
+    # only the optional GPU/NPU drivers are recommended.
+    if [[ -d "${BUNDLE_DIR}/resources/openvino" ]]; then
+        OV_RECOMMENDS='Recommends:     OpenCL-ICD-Loader\nRecommends:     intel-npu-driver\nRecommends:     oneapi-level-zero\nRecommends:     intel-level-zero'
+    else
+        OV_RECOMMENDS=''
+    fi
+    sed -i "s|TARGET_OPENVINO_RECOMMENDS|${OV_RECOMMENDS}|" "${RPM_TOPDIR}/SPECS/clearcore.spec"
 
     rpmbuild --define "_topdir ${RPM_TOPDIR}" --target "${ARCH}" -bb "${RPM_TOPDIR}/SPECS/clearcore.spec"
     
@@ -213,13 +222,19 @@ if command -v dpkg-deb >/dev/null 2>&1; then
         cp "${BUNDLE_DIR}/clearcore.desktop" "${DEB_ROOT}/usr/share/applications/clearcore.desktop"
     fi
 
+    # Embedded OpenVINO (resources/openvino): the GPU plugin needs libOpenCL.so.1; the Intel GPU
+    # compute runtime and Level Zero are optional (the NPU driver ships outside the archive).
+    DEB_OPENVINO_FIELDS=""
+    if [[ -d "${BUNDLE_DIR}/resources/openvino" ]]; then
+        DEB_OPENVINO_FIELDS=$'Recommends: ocl-icd-libopencl1\nSuggests: intel-opencl-icd, libze1\n'
+    fi
     cat << EOF > "${DEB_ROOT}/DEBIAN/control"
 Package: clearcore
 Version: ${VERSION}
 Architecture: ${DEB_ARCH}
 Maintainer: João Messias Lima Pereira <jmessiaslp856@gmail.com>
 Depends: pipewire (>= 0.3.0)
-Section: sound
+${DEB_OPENVINO_FIELDS}Section: sound
 Priority: optional
 Homepage: https://github.com/joaorura/clearcore
 Description: Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)

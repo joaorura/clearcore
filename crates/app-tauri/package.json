@@ -17,6 +17,7 @@
     "electron": "electron electron/main.cjs",
     "electron:tray": "electron electron/main.cjs --tray",
     "test": "vitest run",
+    "test:openvino-runtime": "node scripts/openvino-runtime.selftest.mjs",
     "test:electron-state": "node scripts/clearcore-state.selftest.cjs && node scripts/voice-profile-merge.selftest.cjs && node scripts/daemon-binary.selftest.cjs && node scripts/enrollment-ipc.selftest.cjs && node scripts/voice-profile-ipc.selftest.cjs",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
     "package": "node scripts/package-app.mjs",
