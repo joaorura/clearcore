@@ -224,7 +224,7 @@ For complete uninstallation details, see [docs/uninstall.md](docs/uninstall.md).
 
 ## License
 
-ClearCore is **non-commercial** (source-available, not OSI open source) from the release after `v0.1.0-beta.2` onward.
+ClearCore is **non-commercial** (source-available, not OSI open source). The bundled pDFNet3 model is for non-commercial use only.
 
 | What | License |
 | --- | --- |
@@ -232,9 +232,9 @@ ClearCore is **non-commercial** (source-available, not OSI open source) from the
 | Model weights authored by ClearCore (pDFNet3, neural EQ, voice enrollment) | [CC BY-NC 4.0](LICENSE-MODELS) ([legal code](https://creativecommons.org/licenses/by-nc/4.0/legalcode)) |
 | Documentation and media authored by ClearCore | [CC BY-NC 4.0](LICENSE-DOCS) ([legal code](https://creativecommons.org/licenses/by-nc/4.0/legalcode)) |
 
-- **Previous releases are unchanged.** Releases already published, up to and including `v0.1.0-beta.2`, remain under the
+- **Earlier distributions are unchanged.** Copies distributed before the move to the non-commercial licenses remain under the
   licenses they were published with (Apache-2.0 for ClearCore's own code; MIT OR Apache-2.0 for the DeepFilterNet-derived
-  components). The license files in those tags (`git show v0.1.0-beta.2:LICENSE`) are the ones that apply to them.
+  components). The license files shipped with those copies are the ones that apply to them.
 - **Third-party components keep their own licenses and notices.** This includes the vendored DeepFilterNet/libDF fork
   (`vendor/crates/deep_filter`, MIT OR Apache-2.0, with its `LICENSE-MIT`/`LICENSE-APACHE`), the Rust crates ClearCore
   depends on, and the DeepFilterNet3 weights. The ClearCore licenses above do not relicense them. See
