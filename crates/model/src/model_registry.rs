@@ -199,12 +199,22 @@ impl ModelAssetRegistry {
             ],
         });
 
+        // pDFNet3 Pro v3 full (speaker memory + cross-attention, `speaker_embedding`): the single
+        // stateful manifest export every runtime runs (`pdfnet3_bundle::PDFNET3_PRO_V3_FULL_FILE`).
+        // Digest and size are pinned; the signed governance record (approval manifest, legal
+        // review) is still to be produced by the approver, so `verify` refuses it until then.
         registry.register(AssetDescriptor {
-            asset_id: "pdfnet3-release-asset-v1".to_owned(),
+            asset_id: "pdfnet3-pro-v3-full-stateful-asset-v1".to_owned(),
             role: ModelRole::DenoisingPersonalized,
-            sha256: String::new(),
-            size_bytes: 0,
-            allowed_members: &["enc.onnx", "erb_dec.onnx", "df_dec.onnx", "config.ini"],
+            sha256: "c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee".to_owned(),
+            size_bytes: 12_375_900,
+            allowed_members: &[
+                "manifest.json",
+                "enc.onnx",
+                "erb_dec.onnx",
+                "df_dec.onnx",
+                "config.ini",
+            ],
         });
 
         registry.register(AssetDescriptor {
@@ -547,7 +557,7 @@ mod tests {
     fn test_catalog_descriptors_registered() {
         let registry = ModelAssetRegistry::new();
         assert!(registry.get("df-compatible-release-asset-v1").is_some());
-        assert!(registry.get("pdfnet3-release-asset-v1").is_some());
+        assert!(registry.get("pdfnet3-pro-v3-full-stateful-asset-v1").is_some());
         assert!(registry.get("voice-enrollment-asset-v1").is_some());
         assert!(registry.get("neural-eq-asset-v1").is_some());
 
@@ -561,7 +571,7 @@ mod tests {
             registry
                 .find_by_role(ModelRole::DenoisingPersonalized)
                 .map(|d| d.asset_id.as_str()),
-            Some("pdfnet3-release-asset-v1")
+            Some("pdfnet3-pro-v3-full-stateful-asset-v1")
         );
         assert_eq!(
             registry
@@ -646,7 +656,6 @@ mod tests {
         // so it must fail closed before any I/O.
         let registry = ModelAssetRegistry::default();
         for asset_id in [
-            "pdfnet3-release-asset-v1",
             "voice-enrollment-asset-v1",
             "neural-eq-asset-v1",
         ] {
@@ -659,15 +668,34 @@ mod tests {
     }
 
     #[test]
+    fn pro_v3_full_is_pinned_but_refused_without_governance_records() {
+        let registry = ModelAssetRegistry::default();
+        let descriptor = registry
+            .get("pdfnet3-pro-v3-full-stateful-asset-v1")
+            .unwrap();
+        assert_eq!(
+            descriptor.sha256,
+            "c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee"
+        );
+        assert_eq!(descriptor.size_bytes, 12_375_900);
+        let error = registry
+            .verify(&repo_root(), "pdfnet3-pro-v3-full-stateful-asset-v1")
+            .expect_err("no governance records yet");
+        assert!(
+            !matches!(&error, InferenceError::AssetNotApproved(message) if message.contains("not pinned"))
+        );
+    }
+
+    #[test]
     fn registering_a_pinned_descriptor_makes_it_verifiable_again() {
         let mut registry = ModelAssetRegistry::default();
-        let mut descriptor = registry.get("pdfnet3-release-asset-v1").unwrap().clone();
+        let mut descriptor = registry.get("voice-enrollment-asset-v1").unwrap().clone();
         descriptor.sha256 = "ab".repeat(32);
         descriptor.size_bytes = 1;
         registry.register(descriptor);
         // Now it gets past the pin check and fails later, on the missing governance records.
         let error = registry
-            .verify(&repo_root(), "pdfnet3-release-asset-v1")
+            .verify(&repo_root(), "voice-enrollment-asset-v1")
             .expect_err("no records");
         assert!(
             !matches!(&error, InferenceError::AssetNotApproved(message) if message.contains("not pinned"))

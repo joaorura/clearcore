@@ -106,6 +106,9 @@ pub struct PdfNet3DevArchive {
     sha256: String,
     /// Reported as `BackendDescriptor::asset_id` by every backend built from this archive.
     asset_id: &'static str,
+    /// `true` for a manifest export (`manifest.json` + stateful graphs, pDFNet3 Pro v3 full),
+    /// run by the generic stateful executor; `false` for the four-member `FiLM` exports.
+    manifest: bool,
 }
 
 impl fmt::Debug for PdfNet3DevArchive {
@@ -147,11 +150,18 @@ impl PdfNet3DevArchive {
         if expected_sha256_hex.len() != 64 || actual != expected_sha256_hex {
             return Err(PdfNet3DevError::HashMismatch);
         }
-        validate_members(&bytes)?;
+        let manifest = crate::stateful_asset::has_manifest(&bytes);
+        if manifest {
+            crate::stateful_asset::read_manifest_archive(&bytes)
+                .map_err(|_| PdfNet3DevError::ArchiveInvalid("manifest export is invalid"))?;
+        } else {
+            validate_members(&bytes)?;
+        }
         Ok(Self {
             bytes: Arc::from(bytes),
             sha256: actual,
             asset_id: PDFNET3_DEV_ASSET_ID,
+            manifest,
         })
     }
 
@@ -187,21 +197,89 @@ impl PdfNet3DevArchive {
     /// Builds a tract backend with this model. Fails with [`PdfNet3DevError::FilmMissing`] if the
     /// graphs do not declare the `FiLM` inputs: a backend that cannot apply a profile is useless
     /// as the development profile backend and must not be reported as `pdfnet3-dev`.
+    ///
+    /// A manifest export (pDFNet3 Pro v3 full) runs on the generic stateful executor (the same
+    /// graphs as `OpenVINO` and ONNX Runtime); the `FiLM` exports run on libDF's `DfTract`.
     #[cfg(feature = "tract")]
     pub fn instantiate(&self, profile: CpuProfile) -> Result<TractBackend, PdfNet3DevError> {
         profile
             .ensure_supported()
             .map_err(|_| PdfNet3DevError::LoadFailed)?;
-        let descriptor = BackendDescriptor {
-            backend: "tract",
-            backend_version: "deep_filter-v0.5.6",
-            runtime: "tract",
-            runtime_version: "0.19.16",
+        let backend = if self.manifest {
+            let descriptor = self.descriptor("tract-stateful", "tract", "0.19.16", profile);
+            TractBackend::from_stateful(&self.stateful_files()?, descriptor)
+        } else {
+            let descriptor = self.descriptor("tract", "tract", "0.19.16", profile);
+            TractBackend::from_archive(Arc::clone(&self.bytes), descriptor)
+        }
+        .map_err(|_| PdfNet3DevError::LoadFailed)?;
+        if !backend.supports_speaker_conditioning() {
+            return Err(PdfNet3DevError::FilmMissing);
+        }
+        Ok(backend)
+    }
+
+    /// Whether this is a manifest export (generic stateful executor) rather than a `FiLM` export.
+    #[must_use]
+    pub const fn is_manifest_export(&self) -> bool {
+        self.manifest
+    }
+
+    /// Manifest and graphs of a manifest export ([`PdfNet3DevError::ArchiveInvalid`] otherwise).
+    pub fn stateful_files(
+        &self,
+    ) -> Result<crate::stateful_asset::StatefulModelFiles, PdfNet3DevError> {
+        if !self.manifest {
+            return Err(PdfNet3DevError::ArchiveInvalid("not a manifest export"));
+        }
+        crate::stateful_asset::read_manifest_archive(&self.bytes)
+            .map_err(|_| PdfNet3DevError::ArchiveInvalid("manifest export is invalid"))
+    }
+
+    /// Provenance of a backend built from this archive on `runtime`.
+    #[must_use]
+    pub fn descriptor(
+        &self,
+        backend: &'static str,
+        runtime: &'static str,
+        runtime_version: &'static str,
+        profile: CpuProfile,
+    ) -> BackendDescriptor {
+        BackendDescriptor {
+            backend,
+            backend_version: if self.manifest {
+                "stateful-executor-v1"
+            } else {
+                "deep_filter-v0.5.6"
+            },
+            runtime,
+            runtime_version,
             asset_id: self.asset_id.to_owned(),
             asset_sha256: self.sha256.clone(),
             cpu_profile: profile.name(),
-        };
-        let backend = TractBackend::from_archive(Arc::clone(&self.bytes), descriptor)
+        }
+    }
+
+    /// The generic stateful executor on ONNX Runtime for a manifest export (the virtual
+    /// microphone's runtime; same graphs, same DSP and gating as [`Self::instantiate`]).
+    #[cfg(feature = "ort")]
+    pub fn instantiate_stateful_ort(
+        &self,
+        profile: CpuProfile,
+    ) -> Result<
+        crate::stateful_graph::StatefulGraphBackend<crate::ort_graph::OrtGraphSession>,
+        PdfNet3DevError,
+    > {
+        profile
+            .ensure_supported()
+            .map_err(|_| PdfNet3DevError::LoadFailed)?;
+        let descriptor = self.descriptor("ort-stateful", "onnxruntime", "2.0.0-rc.13", profile);
+        let executor = crate::stateful_graph::build_executor(
+            &self.stateful_files()?,
+            crate::ort_graph::OrtGraphSession::load,
+        )
+        .map_err(|_| PdfNet3DevError::LoadFailed)?;
+        let backend = crate::stateful_graph::StatefulGraphBackend::new(executor, descriptor)
             .map_err(|_| PdfNet3DevError::LoadFailed)?;
         if !backend.supports_speaker_conditioning() {
             return Err(PdfNet3DevError::FilmMissing);

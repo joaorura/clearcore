@@ -9,6 +9,9 @@ use ndarray::{Array2, ArrayView2};
 use realtime_noise_contracts::{AudioFrame, CHANNELS, HOP_SAMPLES, SAMPLE_RATE_HZ};
 use tempfile::NamedTempFile;
 
+use crate::stateful_asset::StatefulModelFiles;
+use crate::stateful_graph::{StatefulGraphBackend, build_executor};
+use crate::tract_graph::TractGraphSession;
 use crate::{
     ALGORITHM_LATENCY_SAMPLES, ApprovedAssetManifest, BackendDescriptor, BandGains, CpuProfile,
     FILM_HIDDEN_DIM, FiLMVectors, InferenceBackend, InferenceError, ModelRole, ProcessedFrame,
@@ -45,10 +48,32 @@ struct ModelCapabilities {
 
 type WorkerResult<T> = Result<T, InferenceError>;
 
-pub struct TractBackend {
+/// The libDF `DfTract` worker thread (release export, pulsed graphs).
+struct WorkerHandle {
     requests: mpsc::SyncSender<WorkerCommand>,
     responses: mpsc::Receiver<WorkerResult<WorkerReply>>,
     worker: Option<JoinHandle<()>>,
+}
+
+impl Drop for WorkerHandle {
+    fn drop(&mut self) {
+        let _ = self.requests.send(WorkerCommand::Shutdown);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+enum Engine {
+    /// libDF `DfTract` on the release (pulsed) export.
+    Worker(WorkerHandle),
+    /// The generic stateful executor on a manifest export (pDFNet3 Pro v3 full): the same
+    /// graphs `OpenVINO` and ONNX Runtime run.
+    Graph(Box<StatefulGraphBackend<TractGraphSession>>),
+}
+
+pub struct TractBackend {
+    engine: Engine,
     descriptor: BackendDescriptor,
     film_supported: bool,
     erb_band_widths: Vec<usize>,
@@ -122,9 +147,11 @@ impl TractBackend {
             .recv()
             .map_err(|error| InferenceError::InferenceExecution(error.to_string()))??;
         Ok(Self {
-            requests,
-            responses: response_receiver,
-            worker: Some(worker),
+            engine: Engine::Worker(WorkerHandle {
+                requests,
+                responses: response_receiver,
+                worker: Some(worker),
+            }),
             descriptor,
             film_supported: capabilities.film,
             erb_band_widths: capabilities.erb_band_widths,
@@ -132,7 +159,31 @@ impl TractBackend {
         })
     }
 
-    /// Whether the loaded model declares the `gamma`/`beta` `FiLM` inputs (pDFNet3-style models).
+    /// Builds the backend from a verified manifest export (pDFNet3 Pro v3 full): the generic
+    /// stateful executor on tract, every graph run on every hop.
+    pub(crate) fn from_stateful(
+        files: &StatefulModelFiles,
+        descriptor: BackendDescriptor,
+    ) -> Result<Self, InferenceError> {
+        let executor = build_executor(files, TractGraphSession::load)?;
+        let backend = StatefulGraphBackend::new(executor, descriptor.clone())?;
+        Ok(Self {
+            film_supported: backend.supports_speaker_conditioning(),
+            erb_band_widths: Vec::new(),
+            engine: Engine::Graph(Box::new(backend)),
+            descriptor,
+            active_profile: None,
+        })
+    }
+
+    /// Whether this backend runs the generic stateful executor (manifest export).
+    #[must_use]
+    pub const fn is_stateful_export(&self) -> bool {
+        matches!(self.engine, Engine::Graph(_))
+    }
+
+    /// Whether the loaded model takes a speaker conditioning: the `gamma`/`beta` `FiLM` inputs
+    /// (pDFNet3 `FiLM` exports) or `speaker_embedding` (pDFNet3 Pro v3 full).
     #[must_use]
     pub const fn supports_speaker_conditioning(&self) -> bool {
         self.film_supported
@@ -153,6 +204,11 @@ impl TractBackend {
         &mut self,
         profile: Option<&VoiceProfile>,
     ) -> Result<(), InferenceError> {
+        if let Engine::Graph(backend) = &mut self.engine {
+            backend.set_voice_profile(profile)?;
+            self.active_profile = profile.cloned();
+            return Ok(());
+        }
         let (film, eq_gains) = match profile {
             Some(profile) => {
                 profile.verify_integrity()?;
@@ -185,6 +241,9 @@ impl TractBackend {
     /// the inverse STFT: zero added algorithmic latency. Direct override: it does not change
     /// [`Self::active_voice_profile`], and the next [`Self::set_voice_profile`] replaces it.
     pub fn set_spectral_eq(&mut self, eq: Option<&BandGains>) -> Result<(), InferenceError> {
+        if let Engine::Graph(backend) = &mut self.engine {
+            return backend.set_spectral_eq(eq);
+        }
         let eq_factors = self.eq_factors(eq)?;
         self.apply(Conditioning {
             film: None,
@@ -207,10 +266,16 @@ impl TractBackend {
     }
 
     fn apply(&self, conditioning: Conditioning) -> Result<(), InferenceError> {
-        self.requests
+        let Engine::Worker(worker) = &self.engine else {
+            return Err(InferenceError::InferenceExecution(
+                "conditioning command sent to the stateful executor".to_owned(),
+            ));
+        };
+        worker
+            .requests
             .send(WorkerCommand::Condition(Box::new(conditioning)))
             .map_err(|error| InferenceError::InferenceExecution(error.to_string()))?;
-        match self
+        match worker
             .responses
             .recv()
             .map_err(|error| InferenceError::InferenceExecution(error.to_string()))??
@@ -242,6 +307,29 @@ impl InferenceBackend for TractBackend {
         self.film_supported
     }
 
+    fn set_speaker_conditioning(
+        &mut self,
+        conditioning: Option<&crate::SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        match &mut self.engine {
+            Engine::Graph(backend) => {
+                backend.set_speaker_conditioning(conditioning)?;
+                self.active_profile = None;
+                Ok(())
+            }
+            Engine::Worker(_) => match conditioning {
+                None => Self::set_voice_profile(self, None),
+                Some(_) => Err(InferenceError::UnsupportedFeature(
+                    "speaker embedding conditioning".to_owned(),
+                )),
+            },
+        }
+    }
+
+    fn supports_speaker_embedding(&self) -> bool {
+        matches!(&self.engine, Engine::Graph(backend) if backend.supports_speaker_embedding())
+    }
+
     fn descriptor(&self) -> BackendDescriptor {
         self.descriptor.clone()
     }
@@ -252,10 +340,15 @@ impl InferenceBackend for TractBackend {
                 "input frame contains a non-finite sample".to_owned(),
             ));
         }
-        self.requests
+        let worker = match &mut self.engine {
+            Engine::Graph(backend) => return backend.process(input),
+            Engine::Worker(worker) => worker,
+        };
+        worker
+            .requests
             .send(WorkerCommand::Process(Box::new(*input)))
             .map_err(|error| InferenceError::InferenceExecution(error.to_string()))?;
-        let samples = match self
+        let samples = match worker
             .responses
             .recv()
             .map_err(|error| InferenceError::InferenceExecution(error.to_string()))??
@@ -275,14 +368,6 @@ impl InferenceBackend for TractBackend {
     }
 }
 
-impl Drop for TractBackend {
-    fn drop(&mut self) {
-        let _ = self.requests.send(WorkerCommand::Shutdown);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
 
 fn run_worker(
     archive: &Arc<[u8]>,

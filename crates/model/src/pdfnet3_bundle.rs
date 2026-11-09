@@ -31,6 +31,32 @@ pub const PDFNET3_PRO_STATEFUL_FILE: &str = "pdfnet3-stateful-asset-v1.tar.gz";
 /// SHA-256 (lowercase hex) of the whole [`PDFNET3_PRO_STATEFUL_FILE`] archive.
 pub const PDFNET3_PRO_STATEFUL_SHA256: &str =
     "d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5";
+/// pDFNet3 Pro v3 **full** (speaker memory + cross-attention, `speaker_embedding` conditioning):
+/// ONE stateful manifest export (`manifest.json` + `enc`/`erb_dec`/`df_dec`, opset 12, `S = 1`) run
+/// by the generic stateful executor on every runtime (tract in the daemon, `OpenVINO` CPU/GPU/NPU,
+/// ONNX Runtime in the virtual microphone), so the daemon and the filter run the same graphs.
+pub const PDFNET3_PRO_V3_FULL_FILE: &str = "pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz";
+/// SHA-256 (lowercase hex) of the whole [`PDFNET3_PRO_V3_FULL_FILE`] archive (12 375 900 bytes,
+/// handed off on 2026-11-09; per-graph SHA-256 in its `manifest.json`).
+pub const PDFNET3_PRO_V3_FULL_SHA256: &str =
+    "c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee";
+/// Per-graph SHA-256 of the Pro v3 full export (`clearcore-train/runs/m3_deploy_pro_v3_full`,
+/// parity ORT/`OpenVINO`/tract >= 107.6 dB against `PyTorch`). Checked against the archive's
+/// `manifest.json` on top of the whole-archive pin.
+pub const PDFNET3_PRO_V3_FULL_GRAPH_SHA256: [(&str, &str); 3] = [
+    (
+        "enc.onnx",
+        "daf285e7026e75a1cde945fa6d1f7d2bd6a67fd0b832db96a3bcbcf476780ca6",
+    ),
+    (
+        "erb_dec.onnx",
+        "35974689c35e4aa00622c236f534e999dc737c407894e1a2a17c04c2ac34f31c",
+    ),
+    (
+        "df_dec.onnx",
+        "42c5c8b610022125c88553a323e0566c2f9553ccaf5f466d3a637bc5bc2b9df4",
+    ),
+];
 /// Asset id reported by every backend built from a bundled archive.
 pub const PDFNET3_PRO_ASSET_ID: &str = "pdfnet3-pro-v3";
 /// Optional override of the models directory (the one that contains `pdfnet3/`).
@@ -139,6 +165,33 @@ pub fn load_stateful_archive_from(
     dirs: &[PathBuf],
 ) -> Result<PdfNet3DevArchive, BundledModelError> {
     load_from(dirs, PDFNET3_PRO_STATEFUL_FILE, PDFNET3_PRO_STATEFUL_SHA256)
+}
+
+/// Reads and verifies the bundled pDFNet3 Pro v3 full export (manifest export, every runtime)
+/// found over `dirs`.
+pub fn load_isolation_archive_from(
+    dirs: &[PathBuf],
+) -> Result<PdfNet3DevArchive, BundledModelError> {
+    let archive = load_from(dirs, PDFNET3_PRO_V3_FULL_FILE, PDFNET3_PRO_V3_FULL_SHA256)?;
+    let files = archive.stateful_files().map_err(BundledModelError::Invalid)?;
+    let pinned = PDFNET3_PRO_V3_FULL_GRAPH_SHA256.iter().all(|(file, hex)| {
+        files
+            .manifest
+            .sha256
+            .iter()
+            .any(|(listed, digest)| listed == file && digest == hex)
+    });
+    if pinned {
+        Ok(archive)
+    } else {
+        Err(BundledModelError::Invalid(PdfNet3DevError::HashMismatch))
+    }
+}
+
+/// [`load_isolation_archive_from`] over [`candidate_model_dirs`]: the single isolation model of
+/// the daemon (tract or `OpenVINO`) and of the virtual microphone (ONNX Runtime).
+pub fn load_isolation_archive() -> Result<PdfNet3DevArchive, BundledModelError> {
+    load_isolation_archive_from(&candidate_model_dirs())
 }
 
 /// [`load_tract_archive_from`] over [`candidate_model_dirs`].
