@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { EnrollmentJob, EnrollmentLabels } from '../enrollmentTypes';
 import { EnrollmentJobStatus } from '../EnrollmentJobStatus';
+import { Spinner } from '../Spinner';
 import { formatSecondsLocale } from '../format';
 import { MAX_RECORD_SECONDS, MIN_RECORD_SECONDS } from '../enrollmentTypes';
 import type { Translate } from '../hooks/voiceProfileLogic';
@@ -10,6 +11,8 @@ export interface JobFeedbackView {
   jobBusy: boolean;
   currentJob: EnrollmentJob | null;
   enrollErrorText: string | null;
+  /** Text shown (with a spinner) while the job is running and has no stage yet; default: sending a sample. */
+  busyLabel?: string;
 }
 
 export function JobFeedbackBlock({ feedback, labels, t, locale }: {
@@ -19,7 +22,10 @@ export function JobFeedbackBlock({ feedback, labels, t, locale }: {
   return (
     <div style={{ marginBottom: 12 }}>
       {feedback.jobBusy && !feedback.currentJob && (
-        <div role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('voiceProfile.sendingSample')}</div>
+        <div role="status" aria-live="polite" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          <Spinner />
+          {feedback.busyLabel ?? t('voiceProfile.sendingSample')}
+        </div>
       )}
       <EnrollmentJobStatus job={feedback.currentJob} labels={labels} lang={locale} />
       {feedback.enrollErrorText && (
@@ -30,19 +36,26 @@ export function JobFeedbackBlock({ feedback, labels, t, locale }: {
 }
 
 /** Live level from the PCM recorder (0 when idle; never synthesized). */
-export function VuMeter({ t, isRecording, level, colorByLevel, style }: {
+export function VuMeter({ t, isRecording, level, colorByLevel, style, micLabel, lowLevelHint }: {
   t: Translate; isRecording: boolean; level: number; colorByLevel?: boolean; style?: CSSProperties;
+  /** Label of the microphone actually opened; shown above the meter while recording. */
+  micLabel?: string | null;
+  /** Speech too quiet for the service (it rejects takes below -40 dBFS): ask to speak louder. */
+  lowLevelHint?: boolean;
 }) {
   const shown = isRecording ? level : 0;
   const background = !colorByLevel
     ? '#22c55e'
-    : level > 80
+    : level > 90
       ? 'linear-gradient(90deg, #22c55e, #eab308, #ef4444)'
       : level > 40
         ? 'linear-gradient(90deg, #22c55e, #38bdf8)'
         : '#22c55e';
   return (
     <div className="vu-meter-panel" style={style}>
+      {isRecording && micLabel && (
+        <div className="mic-in-use" title={micLabel}>{t('voiceProfile.micInUse', { label: micLabel })}</div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 4, color: 'var(--text-muted)' }}>
         <span>{t('voiceProfile.voiceLevel')}</span>
         <span>{`${shown}%`}</span>
@@ -50,6 +63,9 @@ export function VuMeter({ t, isRecording, level, colorByLevel, style }: {
       <div className="vu-meter-track">
         <div className="vu-meter-bar" style={{ width: `${shown}%`, background }} />
       </div>
+      {isRecording && lowLevelHint && (
+        <div role="status" className="low-level-hint">{t('voiceProfile.speakLouderHint')}</div>
+      )}
     </div>
   );
 }

@@ -275,6 +275,8 @@ export interface Translations {
     recordingCountdown: string;
     recordingHint: string;
     voiceLevel: string;
+    micInUse: string;
+    speakLouderHint: string;
     sampleCompleted: string;
     redoSample: string;
     nextStep: string;
@@ -311,6 +313,7 @@ export interface Translations {
     rebuildProfileBtn: string;
     buildingProfile: string;
     sendingSample: string;
+    processingSample: string;
     samplesLoadFailed: string;
     jobTimeout: string;
     samplesRegisteredTitle: string;

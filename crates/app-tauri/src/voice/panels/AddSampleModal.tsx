@@ -12,6 +12,10 @@ export interface AddSampleModalProps {
   captured: CapturedPcm | null;
   isRecording: boolean;
   liveVoiceLevel: number;
+  /** Label of the microphone actually opened for the take. */
+  micLabel?: string | null;
+  /** Speech too quiet: ask the user to speak louder or get closer. */
+  lowLevelHint?: boolean;
   recordingElapsedSeconds: number;
   captureError: string | null;
   jobBusy: boolean;
@@ -52,7 +56,7 @@ export function AddSampleModal(p: AddSampleModalProps) {
           />
         </div>
 
-        <VuMeter t={t} isRecording={p.isRecording} level={p.liveVoiceLevel} style={{ marginBottom: 16 }} />
+        <VuMeter t={t} isRecording={p.isRecording} level={p.liveVoiceLevel} micLabel={p.micLabel} lowLevelHint={p.lowLevelHint} style={{ marginBottom: 16 }} />
 
         {p.captureError && (
           <div role="alert" className="feedback-banner" style={{ color: '#f87171', marginBottom: 12 }}>

@@ -1,6 +1,7 @@
 import { CAPTURE_SAMPLE_RATE, MAX_RECORD_SECONDS } from './enrollmentTypes';
 import type { CapturedPcm, DeviceInfo } from './enrollmentTypes';
 import { PCM_WORKLET_SOURCE } from './pcmWorklet';
+import type { LevelCallback } from './captureController';
 
 /*
  * Plan B (NOT implemented): if loading the AudioWorklet from a Blob URL is blocked in the
@@ -74,7 +75,7 @@ export class PcmRecorder {
    * context is closed and every track stopped, so the caller's microphone safety does not depend
    * on the caller. `onEnded` fires when the microphone track ends (device unplugged).
    */
-  async start(stream: MediaStream, onLevel?: (level01: number) => void, onEnded?: () => void): Promise<void> {
+  async start(stream: MediaStream, onLevel?: LevelCallback, onEnded?: () => void): Promise<void> {
     this.chunks = [];
     this.samples = 0;
     this.truncated = false;
@@ -107,8 +108,13 @@ export class PcmRecorder {
         this.samples += kept.length;
         if (onLevel) {
           let peak = 0;
-          for (let i = 0; i < chunk.length; i++) peak = Math.max(peak, Math.abs(chunk[i]));
-          onLevel(Math.min(1, peak));
+          let sumSq = 0;
+          for (let i = 0; i < chunk.length; i++) {
+            const v = chunk[i];
+            peak = Math.max(peak, Math.abs(v));
+            sumSq += v * v;
+          }
+          onLevel(Math.min(1, peak), chunk.length > 0 ? Math.sqrt(sumSq / chunk.length) : 0, chunk.length);
         }
       };
       this.source = context.createMediaStreamSource(stream);

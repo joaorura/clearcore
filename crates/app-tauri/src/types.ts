@@ -11,6 +11,14 @@ export interface EngineStatus {
   voice_leveler?: number;
   voice_leveler_intensity?: number;
   voice_isolation_intensity?: number;
+  /** Enrollment jobs running in the daemon right now; absent or empty when none. */
+  active_enrollment_jobs?: ActiveEnrollmentJobWire[];
+}
+
+export interface ActiveEnrollmentJobWire {
+  job_id: string;
+  kind: 'sample' | 'profile';
+  stage: string;
 }
 
 export interface VirtualMicStatus {

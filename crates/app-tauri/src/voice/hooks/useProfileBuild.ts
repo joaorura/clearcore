@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { JobAbortScope, isAbortError } from '../jobAbort';
+import { JobAbortScope, ensureOpenScope, isAbortError } from '../jobAbort';
 import { invokeBridge } from '../../bridge';
 import type { VoiceProfileStatus } from '../../types';
-import type { EnrollmentLabels, SampleList } from '../enrollmentTypes';
-import { enrollmentErrorCode } from '../enrollmentErrors';
-import { buildProfile, waitForJob } from '../enrollmentClient';
+import type { EnrollmentJob, EnrollmentLabels, SampleList } from '../enrollmentTypes';
+import { buildProfile, getActiveEnrollmentJobs, waitForJob } from '../enrollmentClient';
+import { resolveBuildJob } from '../profileBuildFlow';
 import {
   applySetVoiceProfileResult,
   profileSampleIds,
@@ -31,6 +31,8 @@ export interface ProfileBuild {
   idsAtBuild: string[] | null;
   /** True while the neural profile is actively being built and applied. */
   isBuilding: boolean;
+  /** True while a build waits for a sample job the daemon is still processing (ENROLL_BUSY). */
+  waitingForSample: boolean;
 }
 
 /**
@@ -48,11 +50,13 @@ export function useProfileBuild(opts: {
   const [idsAtBuild, setIdsAtBuild] = useState<string[] | null>(null);
   const [isBuilding, setIsBuilding] = useState<boolean>(false);
   const buildingRef = useRef<boolean>(false);
-  // The build poller stops when the card unmounts.
+  const [waitingForSample, setWaitingForSample] = useState<boolean>(false);
+  // The build poller stops when the card unmounts. abortAll() closes a scope for good and React
+  // StrictMode runs that cleanup on a live card, so the scope is re-created whenever it is found
+  // closed (same as useEnrollmentRecorder): never captured once at the first render.
   const jobScopeRef = useRef<JobAbortScope | null>(null);
-  if (jobScopeRef.current === null) jobScopeRef.current = new JobAbortScope();
-  const jobScope = jobScopeRef.current;
-  useEffect(() => () => jobScope.abortAll(), [jobScope]);
+  if (jobScopeRef.current === null || jobScopeRef.current.isClosed()) jobScopeRef.current = new JobAbortScope();
+  useEffect(() => () => jobScopeRef.current?.abortAll(), []);
 
   // Main-process pushes (same merged payload as the set_voice_profile reply).
   useEffect(() => {
@@ -94,25 +98,39 @@ export function useProfileBuild(opts: {
     return initialProfile;
   };
 
-  const runBuild = async (origin: Extract<JobOrigin, 'enroll' | 'profile'>): Promise<boolean> => {
+  /**
+   * Starts a build and follows its job. With `attachJobId` it only follows a profile job the daemon
+   * is already running (card opened mid-build): no new build is requested.
+   */
+  const runBuild = async (origin: Extract<JobOrigin, 'enroll' | 'profile'>, attachJobId?: string): Promise<boolean> => {
     if (buildingRef.current) return false;
     buildingRef.current = true;
     setIsBuilding(true);
     jobs.begin(origin, 'build');
     let done = false;
     try {
-      const start = await buildProfile(t('voiceProfile.defaultProfileName'));
-      const startError = enrollmentErrorCode(start);
-      if (startError !== null || !('jobId' in start)) {
-        jobs.setEnrollErrorText(errorLabelForJob(startError ?? 'ENROLL_FAILED', 'build', labels, t));
-      } else {
-        const signal = jobScope.signal();
-        let job;
+      const scope = (jobScopeRef.current = ensureOpenScope(jobScopeRef.current));
+      const follow = async (jobId: string, onUpdate?: (j: EnrollmentJob) => void) => {
+        const signal = scope.signal();
         try {
-          job = await waitForJob(start.jobId, { onUpdate: jobs.setCurrentJob, signal });
+          return await waitForJob(jobId, { onUpdate, signal });
         } finally {
-          jobScope.release(signal);
+          scope.release(signal);
         }
+      };
+      const resolved = attachJobId
+        ? { jobId: attachJobId }
+        : await resolveBuildJob({
+            startBuild: () => buildProfile(t('voiceProfile.defaultProfileName')),
+            activeJobs: getActiveEnrollmentJobs,
+            waitForSampleJob: (id) => follow(id),
+            sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+            onProcessingSample: setWaitingForSample,
+          });
+      if ('errorCode' in resolved) {
+        jobs.setEnrollErrorText(errorLabelForJob(resolved.errorCode, 'build', labels, t));
+      } else {
+        const job = await follow(resolved.jobId, jobs.setCurrentJob);
         jobs.setCurrentJob(job);
         const outcome = nextStepAfterJob(job);
         if (outcome.kind === 'done') done = true;
@@ -149,10 +167,28 @@ export function useProfileBuild(opts: {
       jobs.setJobBusy(false);
       buildingRef.current = false;
       setIsBuilding(false);
+      setWaitingForSample(false);
     }
 
     return done;
   };
+
+  // The card (re)opens while the daemon is already building a profile (started earlier, or by a
+  // click whose follower was lost): follow that job instead of showing an idle button. Only a
+  // profile job is adopted here; a sample job belongs to the recording flow.
+  const latestRunBuild = useRef(runBuild);
+  latestRunBuild.current = runBuild;
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const active = await getActiveEnrollmentJobs();
+      if (cancelled || buildingRef.current) return;
+      const running = active.find((j) => j.kind === 'profile');
+      if (!running) return;
+      await latestRunBuild.current('profile', running.jobId);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const setVoiceIsolation = async (enabled: boolean): Promise<boolean> => {
     try {
@@ -169,5 +205,5 @@ export function useProfileBuild(opts: {
     }
   };
 
-  return { profileStatus, loadInitialStatus, buildProfile: runBuild, setVoiceIsolation, idsAtBuild, isBuilding };
+  return { profileStatus, loadInitialStatus, buildProfile: runBuild, setVoiceIsolation, idsAtBuild, isBuilding, waitingForSample };
 }

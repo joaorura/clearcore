@@ -2,6 +2,8 @@ import { invokeBridge } from '../bridge';
 import { CMD } from './enrollmentTypes';
 import type { CapturedPcm, EnrollErrorCode, EnrollmentJob, SampleList } from './enrollmentTypes';
 import { enrollmentErrorCode } from './enrollmentErrors';
+import { normalizeActiveJobs, type ActiveEnrollmentJob } from './profileBuildFlow';
+import type { EngineStatus } from '../types';
 
 type JobStart = { jobId: string } | { errorCode: EnrollErrorCode };
 type GetJob = (id: string) => Promise<EnrollmentJob | { errorCode: EnrollErrorCode }>;
@@ -26,6 +28,16 @@ export async function addSample(c: CapturedPcm, name: string): Promise<JobStart>
 
 export async function buildProfile(name: string): Promise<JobStart> {
   return invokeBridge<JobStart>(CMD.buildProfile, { name });
+}
+
+/** Jobs the daemon is running now, from GetStatus (empty when none, absent or the service is unreachable). */
+export async function getActiveEnrollmentJobs(): Promise<ActiveEnrollmentJob[]> {
+  try {
+    const status = await invokeBridge<EngineStatus | null>('get_status');
+    return normalizeActiveJobs(status?.active_enrollment_jobs);
+  } catch {
+    return [];
+  }
 }
 
 export async function listSamples(): Promise<SampleList | { errorCode: EnrollErrorCode }> {

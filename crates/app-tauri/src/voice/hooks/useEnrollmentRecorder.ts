@@ -4,7 +4,8 @@ import type { CapturedPcm, SampleList } from '../enrollmentTypes';
 import { MAX_RECORD_SECONDS } from '../enrollmentTypes';
 import { enrollmentErrorCode, isBudgetError } from '../enrollmentErrors';
 import { addSample, waitForJob, logVoiceDebug } from '../enrollmentClient';
-import { acquireRawPhysicalStream, PhysicalMicUnavailableError } from '../captureDevice';
+import { acquireRawPhysicalStream, displayDeviceLabel, PhysicalMicUnavailableError } from '../captureDevice';
+import { LevelSmoother, LowSpeechDetector } from '../levelMeter';
 import { PcmRecorder } from '../pcmCapture';
 import { CaptureController } from '../captureController';
 import { JobAbortScope, isAbortError } from '../jobAbort';
@@ -23,7 +24,12 @@ export interface EnrollmentRecorder {
   /** True while the microphone is being opened; disable the record button. */
   isStarting: boolean;
   recordingElapsedSeconds: number;
+  /** Voice level 0..100 (dBFS -60..0, fast attack, smooth decay, ~30 Hz). */
   liveVoiceLevel: number;
+  /** Label of the microphone actually opened for the take (null when none is open). */
+  activeMicLabel: string | null;
+  /** The speech heard so far is too quiet for the service to accept. */
+  lowLevelHint: boolean;
   captureError: string | null;
   setCaptureError: (text: string | null) => void;
   startCapture: (onLimit: () => void) => Promise<boolean>;
@@ -50,6 +56,11 @@ export function useEnrollmentRecorder(opts: {
   const [isStarting, setIsStarting] = useState<boolean>(false);
   const [recordingElapsedSeconds, setRecordingElapsedSeconds] = useState<number>(0);
   const [liveVoiceLevel, setLiveVoiceLevel] = useState<number>(0);
+  const [activeMicLabel, setActiveMicLabel] = useState<string | null>(null);
+  const [lowLevelHint, setLowLevelHint] = useState<boolean>(false);
+  // The recorder reports ~375 chunks/s: smoothing and the speech check live outside React state.
+  const smootherRef = useRef(new LevelSmoother());
+  const speechRef = useRef(new LowSpeechDetector());
   const [captureError, setCaptureError] = useState<string | null>(null);
 
   const controllerRef = useRef<CaptureController | null>(null);
@@ -77,6 +88,8 @@ export function useEnrollmentRecorder(opts: {
     setIsStarting(false);
     setIsRecording(false);
     setLiveVoiceLevel(0);
+    setActiveMicLabel(null);
+    setLowLevelHint(false);
   }, [controller]);
 
   useEffect(() => cleanupRecording, [cleanupRecording]);
@@ -107,9 +120,21 @@ export function useEnrollmentRecorder(opts: {
     setCaptureError(null);
     setIsRecording(false);
     setIsStarting(true);
+    smootherRef.current.reset();
+    speechRef.current.reset();
+    setLiveVoiceLevel(0);
+    setLowLevelHint(false);
     const result = await controller.start({
-      acquire: () => acquireRawPhysicalStream(selectedInputId, inputDevices),
-      onLevel: (level01) => setLiveVoiceLevel(Math.round(level01 * 100)),
+      acquire: async () => {
+        const acquired = await acquireRawPhysicalStream(selectedInputId, inputDevices);
+        setActiveMicLabel(displayDeviceLabel(acquired.device.label));
+        return acquired;
+      },
+      onLevel: (peak, rms, frames) => {
+        const shown = smootherRef.current.push(peak, performance.now());
+        if (shown !== null) setLiveVoiceLevel(shown);
+        if (rms !== undefined && frames !== undefined) setLowLevelHint(speechRef.current.push(rms, frames));
+      },
       onEnded: () => {
         // Microphone unplugged / track ended: discard the take and tell the user.
         cleanupRecording();
@@ -126,6 +151,7 @@ export function useEnrollmentRecorder(opts: {
     }
     setIsStarting(false);
     if (result.status === 'failed') {
+      setActiveMicLabel(null);
       if (!(result.error instanceof PhysicalMicUnavailableError)) console.warn('Physical microphone capture failed');
       setCaptureError(t('voiceProfile.physicalMicUnavailable'));
       return false;
@@ -151,6 +177,8 @@ export function useEnrollmentRecorder(opts: {
     setIsStarting(false);
     setIsRecording(false);
     setLiveVoiceLevel(0);
+    setActiveMicLabel(null);
+    setLowLevelHint(false);
     const captured = await controller.stop();
     logVoiceDebug('RECORDER', 'stopCapture called', {
       hasPcm: Boolean(captured),
@@ -224,7 +252,7 @@ export function useEnrollmentRecorder(opts: {
   };
 
   return {
-    isRecording, isStarting, recordingElapsedSeconds, liveVoiceLevel, captureError, setCaptureError,
+    isRecording, isStarting, recordingElapsedSeconds, liveVoiceLevel, activeMicLabel, lowLevelHint, captureError, setCaptureError,
     startCapture, stopCapture, cleanupRecording, submitSample,
   };
 }

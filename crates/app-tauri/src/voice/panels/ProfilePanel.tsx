@@ -25,6 +25,8 @@ export interface ProfilePanelProps {
   busy: boolean;
   /** True while the neural profile is actively being built and applied. */
   isBuilding?: boolean;
+  /** The build waits for a sample the service is still processing. */
+  waitingForSample?: boolean;
   /** Feedback of the build job. */
   feedback: JobFeedbackView | null;
   onBuildProfile: () => void;
@@ -513,7 +515,7 @@ export function ProfilePanel(p: ProfilePanelProps) {
             style={{ fontSize: '0.8rem', padding: '6px 12px' }}
           >
             {p.isBuilding
-              ? `⏳ ${t('voiceProfile.buildingProfile')}`
+              ? `⏳ ${p.waitingForSample ? t('voiceProfile.processingSample') : t('voiceProfile.buildingProfile')}`
               : hasServiceVoiceProfile(profileStatus)
                 ? t('voiceProfile.rebuildProfileBtn')
                 : t('voiceProfile.activateProfileBtn')}

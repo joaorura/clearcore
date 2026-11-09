@@ -108,7 +108,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
     );
   };
   const rec = useEnrollmentRecorder({ selectedInputId, inputDevices, t, jobs, refreshSamples, beforeSend });
-  const { isRecording, isStarting, recordingElapsedSeconds, liveVoiceLevel, captureError } = rec;
+  const { isRecording, isStarting, recordingElapsedSeconds, liveVoiceLevel, captureError, activeMicLabel, lowLevelHint } = rec;
   const playback = useAudioPlayback();
   const { playingAudioId, playCaptured } = playback;
   const profile = useProfileBuild({ t, labels, jobs, refreshSamples });
@@ -267,7 +267,11 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
   };
 
   const status = profileStatusLabel(profileStatus, t);
-  const feedbackView = { jobBusy, currentJob, enrollErrorText };
+  // While a build runs, "sending the sample" would be the wrong text: name what is happening.
+  const busyLabel = profile.waitingForSample
+    ? t('voiceProfile.processingSample')
+    : jobs.source?.kind === 'build' ? t('voiceProfile.buildingProfile') : undefined;
+  const feedbackView = { jobBusy, currentJob, enrollErrorText, busyLabel };
   const feedbackFor = (tab: VoiceTabId) => jobFeedbackFor(tab, jobs.source, feedbackView);
   const badges = voiceTabBadges(samples.length, callTakes.length);
   // While the microphone records, sample is being submitted, or profile is building, the other tabs stay closed.
@@ -339,6 +343,7 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             canBuild={samples.length > 0}
             busy={jobBusy || isRecording}
             isBuilding={profile.isBuilding}
+            waitingForSample={profile.waitingForSample}
             feedback={feedbackFor('profile')}
             onBuildProfile={() => void handleBuildProfile('profile')}
             onResetEnrollment={() => void handleResetEnrollment()}
@@ -359,10 +364,13 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
             isRecording={isRecording}
             isSubmitting={isSubmitting}
             liveVoiceLevel={liveVoiceLevel}
+            micLabel={activeMicLabel}
+            lowLevelHint={lowLevelHint}
             recordingElapsedSeconds={recordingElapsedSeconds}
             captureError={isModalOpen ? null : captureError}
             jobBusy={jobBusy}
             isBuilding={profile.isBuilding}
+            waitingForSample={profile.waitingForSample}
             isStarting={isStarting}
             feedback={isModalOpen ? null : feedbackFor('enroll')}
             onSelectStep={(step) => setCurrentStep(stepAfterSelect(currentStep, step, isRecording || isSubmitting))}
@@ -435,6 +443,8 @@ export const VoiceProfileCard: React.FC<VoiceProfileCardProps> = ({
           captured={modalCaptured}
           isRecording={isRecording}
           liveVoiceLevel={liveVoiceLevel}
+          micLabel={activeMicLabel}
+          lowLevelHint={lowLevelHint}
           recordingElapsedSeconds={recordingElapsedSeconds}
           captureError={captureError}
           jobBusy={jobBusy}

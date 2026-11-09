@@ -13,6 +13,12 @@ export interface EnrollPanelProps {
   completedSteps: CompletedSteps;
   isRecording: boolean;
   liveVoiceLevel: number;
+  /** The profile build waits for a sample the service is still processing. */
+  waitingForSample?: boolean;
+  /** Label of the microphone actually opened for the take. */
+  micLabel?: string | null;
+  /** Speech too quiet: ask the user to speak louder or get closer. */
+  lowLevelHint?: boolean;
   recordingElapsedSeconds: number;
   /** Null while the voluntary sample modal shows it instead. */
   captureError: string | null;
@@ -165,7 +171,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
             </div>
           </div>
 
-          <VuMeter t={t} isRecording={isRecording} level={p.liveVoiceLevel} colorByLevel />
+          <VuMeter t={t} isRecording={isRecording} level={p.liveVoiceLevel} colorByLevel micLabel={p.micLabel} lowLevelHint={p.lowLevelHint} />
 
           {p.captureError && (
             <div role="alert" className="feedback-banner" style={{ color: '#f87171', marginBottom: 10 }}>
@@ -192,7 +198,7 @@ export function EnrollPanel(p: EnrollPanelProps) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: 'rgba(59, 130, 246, 0.15)', borderRadius: 8, color: '#93c5fd' }}>
                 <span style={{ fontSize: '1.1rem' }}>⏳</span>
                 <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
-                  {isBuilding ? t('voiceProfile.buildingProfile') : t('voiceProfile.sendingSample')}
+                  {isBuilding ? (p.waitingForSample ? t('voiceProfile.processingSample') : t('voiceProfile.buildingProfile')) : t('voiceProfile.sendingSample')}
                 </span>
               </div>
             ) : currentTake ? (

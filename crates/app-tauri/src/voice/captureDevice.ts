@@ -35,7 +35,7 @@ const isAlias = (id: string) => id === 'default' || id === 'communications';
 export function resolvePhysicalAudioDevice(
   audioInputs: MediaDeviceInfo[],
   selectedInputId?: string,
-  inputDevices?: Array<{ id?: string; name?: string }>,
+  inputDevices?: Array<{ id?: string; name?: string; is_default?: boolean }>,
 ): MediaDeviceInfo | undefined {
   const candidates = audioInputs.filter((d) => !isVirtualOrLoopbackAudioDevice(d.label));
 
@@ -54,6 +54,20 @@ export function resolvePhysicalAudioDevice(
     if (byName) return byName;
   }
 
+  // Nothing selected matched: the system default, never just "the first device that has a label"
+  // (that is how a headset ended up recording while the default was another microphone).
+  const aliasDefault = candidates.find((d) => d.deviceId === 'default');
+  if (aliasDefault) return aliasDefault;
+  const flagged = inputDevices?.find((d) => d.is_default && d.name);
+  if (flagged?.name) {
+    const name = flagged.name.toLowerCase().trim();
+    const flaggedMatch = candidates.find((d) => {
+      const label = normalizeDeviceLabel(d.label);
+      return label.length > 0 && (label.includes(name) || name.includes(label));
+    });
+    if (flaggedMatch) return flaggedMatch;
+  }
+
   const specific = candidates.find((d) => !isAlias(d.deviceId) && d.label.length > 0);
   if (specific) return specific;
   const nonDefault = candidates.find((d) => !isAlias(d.deviceId));
@@ -68,6 +82,11 @@ export function normalizeDeviceLabel(label: string | null | undefined): string {
     .toLowerCase()
     .replace(/^(default|padrão)\s*[-:]\s*/i, '')
     .trim();
+}
+
+/** The label to show the user: the browser's alias prefix ("Default - ") removed, case kept. */
+export function displayDeviceLabel(label: string | null | undefined): string {
+  return (label ?? '').trim().replace(/^(default|padrão)\s*[-:]\s*/i, '').trim();
 }
 
 export async function sha256Hex(text: string): Promise<string> {
@@ -97,7 +116,7 @@ const stopAll = (stream: MediaStream | null | undefined) =>
  */
 export async function acquireRawPhysicalStream(
   selectedInputId?: string,
-  inputDevices?: Array<{ id?: string; name?: string }>,
+  inputDevices?: Array<{ id?: string; name?: string; is_default?: boolean }>,
 ): Promise<{ stream: MediaStream; device: DeviceInfo }> {
   const md = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices;
   if (!md?.getUserMedia || !md.enumerateDevices) {

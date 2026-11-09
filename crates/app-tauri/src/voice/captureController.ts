@@ -1,7 +1,10 @@
 import type { CapturedPcm, DeviceInfo } from './enrollmentTypes';
 
+/** Per-chunk level: linear peak (0..1), chunk RMS and its length in samples. */
+export type LevelCallback = (peak: number, rms?: number, frames?: number) => void;
+
 export interface RecorderLike {
-  start(stream: MediaStream, onLevel?: (level01: number) => void, onEnded?: () => void): Promise<void>;
+  start(stream: MediaStream, onLevel?: LevelCallback, onEnded?: () => void): Promise<void>;
   stop(device: DeviceInfo): Promise<CapturedPcm>;
 }
 
@@ -29,7 +32,7 @@ export class CaptureController {
 
   async start(opts: {
     acquire: () => Promise<{ stream: MediaStream; device: DeviceInfo }>;
-    onLevel?: (level01: number) => void;
+    onLevel?: LevelCallback;
     onEnded?: () => void;
   }): Promise<StartResult> {
     if (this.starting) return { status: 'busy' };

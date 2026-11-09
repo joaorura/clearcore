@@ -1,4 +1,5 @@
 import type { EnrollmentJob, EnrollmentLabels, JobStage } from './enrollmentTypes';
+import { Spinner } from './Spinner';
 import { formatDecimalLocale, formatSecondsLocale } from './format';
 
 const stageKey: Record<JobStage, keyof EnrollmentLabels> = {
@@ -34,6 +35,7 @@ export function EnrollmentJobStatus({ job, labels, lang = 'en-US' }: { job: Enro
   }
   return (
     <div role="status" aria-live="polite" className="enrollment-job-status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+      <Spinner />
       {labels[stageKey[job.stage]] as string}
     </div>
   );
