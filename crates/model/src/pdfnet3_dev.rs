@@ -19,10 +19,10 @@ use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 use tar::Archive;
 
-#[cfg(feature = "tract")]
-use crate::TractBackend;
 #[cfg(feature = "ort")]
 use crate::OrtBackend;
+#[cfg(feature = "tract")]
+use crate::TractBackend;
 use crate::{BackendDescriptor, CpuProfile};
 
 /// Asset id reported by the backend descriptor for an archive given through the development
@@ -290,10 +290,7 @@ impl PdfNet3DevArchive {
     /// Builds an ONNX Runtime backend with this model. The loaded graphs must declare the `FiLM`
     /// inputs (the stateful Pro graphs do); otherwise this fails with [`PdfNet3DevError::FilmMissing`].
     #[cfg(feature = "ort")]
-    pub fn instantiate_ort(
-        &self,
-        profile: CpuProfile,
-    ) -> Result<OrtBackend, PdfNet3DevError> {
+    pub fn instantiate_ort(&self, profile: CpuProfile) -> Result<OrtBackend, PdfNet3DevError> {
         profile
             .ensure_supported()
             .map_err(|_| PdfNet3DevError::LoadFailed)?;

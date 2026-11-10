@@ -124,7 +124,10 @@ fn bluetooth_detection_and_3_5s_hysteresis_release() {
         is_default: false,
         is_connected: true,
     };
-    assert!(bt_mic.is_bluetooth_device(), "Must detect Bluetooth Hands-Free endpoint");
+    assert!(
+        bt_mic.is_bluetooth_device(),
+        "Must detect Bluetooth Hands-Free endpoint"
+    );
 
     let usb_mic = WasapiDeviceInfo {
         id: r"{0.0.1.00000000}.{USB\VID_1234&PID_5678}".to_string(),
@@ -209,4 +212,3 @@ fn bluetooth_detection_and_3_5s_hysteresis_release() {
         "Capture must immediately re-activate when new virtual stream arrives"
     );
 }
-

@@ -139,11 +139,7 @@ impl std::fmt::Debug for TensorRtBackend {
 }
 
 impl TensorRtBackend {
-    fn descriptor_for_sm(
-        sm: &str,
-        asset_id: String,
-        asset_sha256: String,
-    ) -> BackendDescriptor {
+    fn descriptor_for_sm(sm: &str, asset_id: String, asset_sha256: String) -> BackendDescriptor {
         BackendDescriptor {
             backend: "tensorrt",
             backend_version: env!("CARGO_PKG_VERSION"),
@@ -165,7 +161,9 @@ impl TensorRtBackend {
         let sm = context.device().sm_string();
         let device_name = context.device().name().to_owned();
         let precision = context.precision();
-        let native_version = context.is_hardware_backed().then(|| context.runtime_version().to_owned());
+        let native_version = context
+            .is_hardware_backed()
+            .then(|| context.runtime_version().to_owned());
         Self {
             descriptor: Self::descriptor_for_sm(&sm, asset_id, asset_sha256),
             device_id,

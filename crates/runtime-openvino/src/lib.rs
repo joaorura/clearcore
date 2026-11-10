@@ -28,11 +28,11 @@ pub mod tensor;
 pub use core::OpenVinoCore;
 pub use dfn3::{Dfn3Graphs, Dfn3Output, Dfn3Session};
 pub use error::OpenVinoError;
-pub use graph::{OpenVinoGraphSession, build_openvino_executor};
 pub use ffi::{
     LibrarySource, OpenVinoLibrary, SUPPORTED_MAJOR_VERSIONS, candidate_libraries, locate_library,
     ov_element_type_e, ov_status_e,
 };
+pub use graph::{OpenVinoGraphSession, build_openvino_executor};
 pub use infer::OpenVinoInferRequest;
 pub use model::{OpenVinoCompiledModel, OpenVinoModel};
 pub use precision::{DeviceKind, InferencePrecision, fallback_order, precision_for_device};

@@ -283,4 +283,3 @@ fn stateful_tensorrt_backend_runs_real_neural_inference_on_gpu() {
     backend.set_simulated_failure(false);
     assert!(backend.process(&input).is_ok());
 }
-

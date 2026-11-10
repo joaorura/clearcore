@@ -25,8 +25,8 @@ pub mod pdfnet3_bundle;
 pub mod pdfnet3_dev;
 pub mod profile_store;
 pub mod resample;
-pub mod spectral_eq;
 pub mod speaker_conditioning;
+pub mod spectral_eq;
 pub mod speech_trim;
 pub mod stateful_asset;
 #[cfg(any(feature = "tract", feature = "ort"))]
@@ -64,22 +64,22 @@ pub use pdfnet3_bundle::{BundledModelError, PDFNET3_PRO_ASSET_ID};
 #[cfg(any(feature = "tract", feature = "ort"))]
 pub use pdfnet3_dev::{ArchiveGraphs, PDFNET3_DEV_ASSET_ID, PdfNet3DevArchive, PdfNet3DevError};
 pub use profile_store::{ACTIVE_PROFILE_FILE_NAME, ProfileStore};
-pub use voice_profile_v2::{
-    OutdatedProfile, PDFNET3_PRO_V3_MODEL_ID, PDFNET3_PRO_V3_MODEL_LABEL, SPEAKER_EMBEDDING_DIM,
-    SpeakerEmbedding, StoredProfile, VoiceProfileV2,
-};
-pub use studio_backend::{StudioBackend, StudioResetHandle};
-#[cfg(feature = "tract")]
-pub use tract_backend::TractBackend;
 pub use speaker_conditioning::SpeakerConditioning;
 pub use stateful_asset::{StatefulManifest, StatefulModelFiles};
 #[cfg(any(feature = "tract", feature = "ort"))]
 pub use stateful_graph::{
     ConditioningKind, GraphSession, StatefulGraphBackend, StatefulGraphExecutor, TensorSpec,
 };
+pub use studio_backend::{StudioBackend, StudioResetHandle};
+#[cfg(feature = "tract")]
+pub use tract_backend::TractBackend;
 pub use voice_profile::{
     BandGains, FILM_HIDDEN_DIM, FiLMVectors, MAX_EQ_GAIN_DB, MIN_EQ_GAIN_DB, NUM_ERB_BANDS,
     VoiceProfile, VoiceProfileError,
+};
+pub use voice_profile_v2::{
+    OutdatedProfile, PDFNET3_PRO_V3_MODEL_ID, PDFNET3_PRO_V3_MODEL_LABEL, SPEAKER_EMBEDDING_DIM,
+    SpeakerEmbedding, StoredProfile, VoiceProfileV2,
 };
 
 pub const ALGORITHM_LATENCY_SAMPLES: u32 = 1_440;

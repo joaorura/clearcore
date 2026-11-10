@@ -826,10 +826,7 @@ fn parity_against_the_daemon_reference() {
 fn without_any_environment_a_pdfnet3_pro_model_loads() {
     let _env = EnvGuard::new();
     let filter = create_ffi();
-    assert!(
-        !filter.is_null(),
-        "the bundled Pro v3 full must load"
-    );
+    assert!(!filter.is_null(), "the bundled Pro v3 full must load");
     unsafe {
         assert_eq!(clearcore_filter_supports_voice_profile(filter), 1);
         clearcore_filter_free(filter);

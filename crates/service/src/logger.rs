@@ -142,7 +142,11 @@ impl DaemonLogger {
                 continue;
             }
             let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !filename.starts_with("daemon.") || filename.rsplit_once('.').is_none_or(|(_, ext)| ext != "log") {
+            if !filename.starts_with("daemon.")
+                || filename
+                    .rsplit_once('.')
+                    .is_none_or(|(_, ext)| ext != "log")
+            {
                 continue;
             }
             if filename == CURRENT_LOG_NAME {

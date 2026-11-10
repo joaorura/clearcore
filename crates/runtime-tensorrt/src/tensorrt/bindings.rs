@@ -300,7 +300,9 @@ pub fn locate_library() -> Option<String> {
         .or_else(|| {
             discover_dynamic_tensorrt_libs()
                 .into_iter()
-                .find(|candidate| Path::new(candidate).is_absolute() && Path::new(candidate).exists())
+                .find(|candidate| {
+                    Path::new(candidate).is_absolute() && Path::new(candidate).exists()
+                })
         })
 }
 
@@ -325,11 +327,9 @@ fn discover_dynamic_tensorrt_libs() -> Vec<String> {
                     if name_str.to_ascii_lowercase().starts_with("tensorrt") {
                         let lib_dir = entry.path().join("lib");
                         if lib_dir.is_dir() {
-                            for so_name in &[
-                                "libnvinfer.so.11",
-                                "libnvinfer.so",
-                                "libnvinfer.so.10",
-                            ] {
+                            for so_name in
+                                &["libnvinfer.so.11", "libnvinfer.so", "libnvinfer.so.10"]
+                            {
                                 let full_path = lib_dir.join(so_name);
                                 if full_path.exists() {
                                     candidates.push(full_path.to_string_lossy().into_owned());

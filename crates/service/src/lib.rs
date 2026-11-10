@@ -40,7 +40,6 @@ use realtime_noise_ipc::line_limit::{LineRead, is_invalid_utf8, read_line_limite
 use realtime_noise_ipc::protocol::truncate_request_id;
 use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus, handle_request};
 use realtime_noise_model::{ProfileStore, StoredProfile, VoiceProfileV2};
-use voice_conditioning::VoiceState;
 use realtime_noise_supervisor::{
     BackendResolutionInfo, EngineSupervisor, convert_dsp_preset_to_ipc, convert_engine_mode_to_ipc,
     convert_ipc_mode_to_engine, convert_ipc_preset_to_dsp, find_repo_root, find_stateful_model_dir,
@@ -49,6 +48,7 @@ use serde_json::json;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use voice_conditioning::VoiceState;
 
 /// Bumps the 32-bit generation counter of the Linux shared state file.
 ///
@@ -72,7 +72,8 @@ pub fn bump_linux_shared_state_generation() {
 #[must_use]
 pub fn linux_shared_state_path() -> PathBuf {
     let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|v| !v.is_empty()).map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     runtime_dir.join("clearcore_state")
 }
 
@@ -250,8 +251,14 @@ impl ServiceDaemon {
             self.settings.voice_isolation_enabled,
             self.settings.voice_isolation_intensity,
         );
-        match self.voice.status_name(self.supervisor.active_conditioning_id()) {
-            "active" => log_info!("VOICE_PROFILE", "Stored voice profile applied to the backend"),
+        match self
+            .voice
+            .status_name(self.supervisor.active_conditioning_id())
+        {
+            "active" => log_info!(
+                "VOICE_PROFILE",
+                "Stored voice profile applied to the backend"
+            ),
             "stored" => log_info!(
                 "VOICE_PROFILE",
                 "Stored voice profile present, but it is not applied (isolation disabled or backend rejected it)"
@@ -262,7 +269,9 @@ impl ServiceDaemon {
             ),
             _ if self.voice.error.is_some() => {
                 log_warn!("VOICE_PROFILE", "Stored voice profile was not loaded");
-                eprintln!("Stored voice profile was not loaded: it failed validation or has insecure permissions");
+                eprintln!(
+                    "Stored voice profile was not loaded: it failed validation or has insecure permissions"
+                );
             }
             _ => log_info!(
                 "VOICE_PROFILE",
@@ -613,10 +622,8 @@ impl ServiceDaemon {
                     info.is_fallback
                 );
                 self.settings.backend = Some(req_name.to_string());
-                let persisted = settings::persist_settings(
-                    &self.settings,
-                    self.settings_path.as_deref(),
-                );
+                let persisted =
+                    settings::persist_settings(&self.settings, self.settings_path.as_deref());
                 IpcResponse::success(
                     "set-backend-resp",
                     json!({
@@ -660,10 +667,8 @@ impl ServiceDaemon {
                 );
                 self.supervisor.set_dsp_preset(dsp_preset);
                 self.settings.preset = dsp_preset;
-                let persisted = settings::persist_settings(
-                    &self.settings,
-                    self.settings_path.as_deref(),
-                );
+                let persisted =
+                    settings::persist_settings(&self.settings, self.settings_path.as_deref());
                 IpcResponse::success(
                     "set-preset-resp",
                     json!({
@@ -863,10 +868,8 @@ impl ServiceDaemon {
                 let clamped = (*intensity).min(100);
                 log_info!("DAEMON_IPC", "SetFilterIntensity received: {clamped}%");
                 self.settings.filter_intensity = clamped;
-                let persisted = settings::persist_settings(
-                    &self.settings,
-                    self.settings_path.as_deref(),
-                );
+                let persisted =
+                    settings::persist_settings(&self.settings, self.settings_path.as_deref());
                 let beta = settings::intensity_to_post_filter_beta(clamped);
                 IpcResponse::success(
                     "set-filter-intensity-resp",
@@ -882,10 +885,8 @@ impl ServiceDaemon {
                 let enabled = *enabled;
                 log_info!("DAEMON_IPC", "SetVoiceIsolation received: {enabled}");
                 self.settings.voice_isolation_enabled = enabled;
-                let persisted = settings::persist_settings(
-                    &self.settings,
-                    self.settings_path.as_deref(),
-                );
+                let persisted =
+                    settings::persist_settings(&self.settings, self.settings_path.as_deref());
                 if enabled {
                     self.reapply_stored_profile();
                 } else {
@@ -905,12 +906,13 @@ impl ServiceDaemon {
             }
             IpcCommand::SetVoiceIsolationIntensity { intensity } => {
                 let clamped = (*intensity).min(100);
-                log_info!("DAEMON_IPC", "SetVoiceIsolationIntensity received: {clamped}%");
-                self.settings.voice_isolation_intensity = clamped;
-                let persisted = settings::persist_settings(
-                    &self.settings,
-                    self.settings_path.as_deref(),
+                log_info!(
+                    "DAEMON_IPC",
+                    "SetVoiceIsolationIntensity received: {clamped}%"
                 );
+                self.settings.voice_isolation_intensity = clamped;
+                let persisted =
+                    settings::persist_settings(&self.settings, self.settings_path.as_deref());
                 if self.settings.voice_isolation_enabled {
                     self.reapply_stored_profile();
                 }
@@ -931,10 +933,8 @@ impl ServiceDaemon {
                 log_info!("DAEMON_IPC", "SetVoiceLeveler received: {clamped}%");
                 self.supervisor.set_voice_leveler_intensity(clamped);
                 self.settings.voice_leveler = clamped;
-                let persisted = settings::persist_settings(
-                    &self.settings,
-                    self.settings_path.as_deref(),
-                );
+                let persisted =
+                    settings::persist_settings(&self.settings, self.settings_path.as_deref());
                 IpcResponse::success(
                     "set-voice-leveler-resp",
                     json!({
@@ -1007,11 +1007,9 @@ impl ServiceDaemon {
             return Err(ApplyError::NoStore);
         };
         let previous = self.voice.applied.clone();
-        let conditioning = VoiceConditioning::from_profile(
-            profile,
-            self.settings.voice_isolation_intensity,
-        )
-        .map_err(|_| ApplyError::NotApplicable)?;
+        let conditioning =
+            VoiceConditioning::from_profile(profile, self.settings.voice_isolation_intensity)
+                .map_err(|_| ApplyError::NotApplicable)?;
         if self
             .supervisor
             .apply_voice_conditioning(Some(&conditioning))
@@ -1147,9 +1145,7 @@ fn configure_isolation_model(
             );
         }
         Ok(_) => eprintln!("Isolation model: bundled pDFNet3 Pro"),
-        Err(code) => eprintln!(
-            "Isolation model unavailable ({code}); no fallback model is loaded"
-        ),
+        Err(code) => eprintln!("Isolation model unavailable ({code}); no fallback model is loaded"),
     }
     supervisor.require_isolation_model(loaded);
 }
@@ -1244,8 +1240,10 @@ mod tests {
 
     fn bundled_from(
         dirs: Vec<PathBuf>,
-    ) -> impl FnOnce() -> Result<realtime_noise_model::PdfNet3DevArchive, realtime_noise_model::BundledModelError>
-    {
+    ) -> impl FnOnce() -> Result<
+        realtime_noise_model::PdfNet3DevArchive,
+        realtime_noise_model::BundledModelError,
+    > {
         move || realtime_noise_model::pdfnet3_bundle::load_isolation_archive_from(&dirs)
     }
 
@@ -1324,7 +1322,11 @@ mod tests {
         assert_eq!(status["isolation_model_error"], "MODEL_HASH_MISMATCH");
         assert_eq!(status["active_backend"], "none");
         assert_eq!(status["voice_profile_supported"], false);
-        assert!(!status.to_string().contains(&dir.path().display().to_string()));
+        assert!(
+            !status
+                .to_string()
+                .contains(&dir.path().display().to_string())
+        );
     }
 
     fn daemon_with(dirs: Vec<PathBuf>) -> ServiceDaemon {
@@ -1423,7 +1425,10 @@ mod tests {
         // Pre-fill generation with u32::MAX to test wrapping
         {
             use std::io::{Seek, SeekFrom, Write};
-            let mut file = std::fs::OpenOptions::new().write(true).open(&path).expect("open");
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .expect("open");
             file.seek(SeekFrom::Start(8)).expect("seek");
             file.write_all(&u32::MAX.to_le_bytes()).expect("write");
         }

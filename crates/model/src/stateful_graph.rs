@@ -222,7 +222,7 @@ pub struct StatefulGraphExecutor<S> {
 impl<S: GraphSession> StatefulGraphExecutor<S> {
     /// Resolves every input of `graphs` (name, session) and the execution order.
     /// `state_pairs` are the manifest's explicit `(input, output)` pairs (may be empty).
-#[allow(clippy::too_many_lines)] // linear pipeline; splitting it before the release risks behaviour changes
+    #[allow(clippy::too_many_lines)] // linear pipeline; splitting it before the release risks behaviour changes
     pub fn new(
         graphs: Vec<(String, S)>,
         state_pairs: &[(String, String)],

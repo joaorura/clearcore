@@ -295,7 +295,8 @@ pub fn has_manifest(bytes: &[u8]) -> bool {
 /// duplicates, no other member kinds; every graph pinned by the manifest must match.
 /// `name.ends_with(".{extension}")`, spelled so the case-sensitivity is explicit.
 fn has_extension(name: &str, extension: &str) -> bool {
-    name.rsplit_once('.').is_some_and(|(_, ext)| ext == extension)
+    name.rsplit_once('.')
+        .is_some_and(|(_, ext)| ext == extension)
 }
 
 #[allow(clippy::too_many_lines)] // linear pipeline; splitting it before the release risks behaviour changes

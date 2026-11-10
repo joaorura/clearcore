@@ -80,7 +80,9 @@ fn embedding(seed: u32) -> Vec<f32> {
         })
         .collect();
     let norm = values.iter().map(|v| v * v).sum::<f32>().sqrt();
-    for v in &mut values { *v /= norm; }
+    for v in &mut values {
+        *v /= norm;
+    }
     values
 }
 

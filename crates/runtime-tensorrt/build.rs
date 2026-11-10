@@ -2,7 +2,11 @@ use std::path::PathBuf;
 
 fn find_tensorrt_include() -> Option<PathBuf> {
     // 1. Environment variables
-    for var in &["TENSORRT_INCLUDE_PATH", "CLEARCORE_TENSORRT_PATH", "TENSORRT_DIR"] {
+    for var in &[
+        "TENSORRT_INCLUDE_PATH",
+        "CLEARCORE_TENSORRT_PATH",
+        "TENSORRT_DIR",
+    ] {
         if let Ok(val) = std::env::var(var) {
             let p = PathBuf::from(val);
             if p.join("NvInfer.h").exists() {

@@ -12,11 +12,7 @@ use realtime_noise_model::{
 
 /// Maximum allowable runtime processing latency (in ms) per 480-sample hop (10.0 ms deadline)
 /// for a candidate backend to be selected in `Auto` mode. Leaves margin for PipeWire/WaveRT I/O.
-pub const AUTO_QUALIFICATION_MAX_HOP_MS: f32 = if cfg!(debug_assertions) {
-    35.0
-} else {
-    9.0
-};
+pub const AUTO_QUALIFICATION_MAX_HOP_MS: f32 = if cfg!(debug_assertions) { 35.0 } else { 9.0 };
 
 /// Qualifies an inference backend in runtime by running a micro-warmup and latency benchmark.
 ///
@@ -52,7 +48,9 @@ pub fn qualify_backend_runtime(backend: &mut dyn InferenceBackend, max_hop_ms: f
 
                 // Ensure output is finite
                 if !output.samples.iter().all(|s| s.is_finite()) {
-                    eprintln!("[supervisor] Backend qualification frame produced non-finite output");
+                    eprintln!(
+                        "[supervisor] Backend qualification frame produced non-finite output"
+                    );
                     return false;
                 }
 
@@ -217,9 +215,7 @@ fn parse_openvino_target(request: &str) -> Option<OpenVinoTarget> {
     match lower.as_str() {
         "openvino" => Some(OpenVinoTarget::Auto),
         "openvino-npu" | "npu" | "intel-npu" => Some(OpenVinoTarget::Device("NPU".to_string())),
-        "openvino-gpu" | "intel-gpu" | "arc" => {
-            Some(OpenVinoTarget::Device("GPU".to_string()))
-        }
+        "openvino-gpu" | "intel-gpu" | "arc" => Some(OpenVinoTarget::Device("GPU".to_string())),
         "openvino-cpu" | "intel-cpu" => Some(OpenVinoTarget::Device("CPU".to_string())),
         _ => None,
     }
@@ -255,11 +251,11 @@ pub fn is_explicit_accelerator_request(request: &str) -> bool {
     )
 }
 
-fn instantiate_tensorrt_backend(
-    model_dir: Option<&Path>,
-) -> Result<TensorRtBackend, String> {
+fn instantiate_tensorrt_backend(model_dir: Option<&Path>) -> Result<TensorRtBackend, String> {
     if !TensorRtBackend::is_available() {
-        return Err("TensorRT native runtime (libnvinfer) is not available on this host".to_string());
+        return Err(
+            "TensorRT native runtime (libnvinfer) is not available on this host".to_string(),
+        );
     }
 
     if let Some(dir) = model_dir {
@@ -278,12 +274,8 @@ fn instantiate_tensorrt_backend(
         }
     }
 
-    TensorRtBackend::try_new_hardware(
-        "df-compatible-release-asset-v1",
-        APPROVED_ASSET_SHA256,
-        0,
-    )
-    .map_err(|e| format!("TensorRT hardware initialization failed: {e}"))
+    TensorRtBackend::try_new_hardware("df-compatible-release-asset-v1", APPROVED_ASSET_SHA256, 0)
+        .map_err(|e| format!("TensorRT hardware initialization failed: {e}"))
 }
 
 /// Instantiates an inference backend based on `request`, falling back safely to Tract CPU.
@@ -305,10 +297,7 @@ pub fn instantiate_backend_with_fallback(
 
     let trimmed = request.trim();
     let norm = trimmed.to_ascii_lowercase().replace('_', "-");
-    let is_tract_request = matches!(
-        norm.as_str(),
-        "tract" | "cpu-tract" | "tract-cpu" | "cpu"
-    );
+    let is_tract_request = matches!(norm.as_str(), "tract" | "cpu-tract" | "tract-cpu" | "cpu");
 
     let mut fallback_reason = None;
 
@@ -317,7 +306,8 @@ pub fn instantiate_backend_with_fallback(
             // Auto order: NPU -> iGPU -> dGPU -> CPU fallback (prioritizing minimal power & zero CPU load)
             // 1. Try NPU first via OpenVINO (minimal power, dedicated neural accelerator)
             if OpenVINOBackend::is_available()
-                && let Some(ref dir) = resolved_model_dir {
+                && let Some(ref dir) = resolved_model_dir
+            {
                 match OpenVINOBackend::load_stateful(
                     dir,
                     "NPU",
@@ -345,15 +335,17 @@ pub fn instantiate_backend_with_fallback(
                         ));
                     }
                     Err(err) => {
-                        fallback_reason =
-                            Some(format!("OpenVINO NPU auto initialization skipped/failed: {err}"));
+                        fallback_reason = Some(format!(
+                            "OpenVINO NPU auto initialization skipped/failed: {err}"
+                        ));
                     }
                 }
             }
 
             // 2. Try iGPU second via OpenVINO GPU (integrated GPU, low power, offloads CPU)
             if OpenVINOBackend::is_available()
-                && let Some(ref dir) = resolved_model_dir {
+                && let Some(ref dir) = resolved_model_dir
+            {
                 match OpenVINOBackend::load_stateful(
                     dir,
                     "GPU",
@@ -381,8 +373,9 @@ pub fn instantiate_backend_with_fallback(
                         ));
                     }
                     Err(err) => {
-                        fallback_reason =
-                            Some(format!("OpenVINO GPU auto initialization skipped/failed: {err}"));
+                        fallback_reason = Some(format!(
+                            "OpenVINO GPU auto initialization skipped/failed: {err}"
+                        ));
                     }
                 }
             }
@@ -431,11 +424,12 @@ pub fn instantiate_backend_with_fallback(
                         .collect();
                     if !accel_devices.is_empty()
                         && let Ok(mut backend) = OpenVINOBackend::load_stateful_with_fallback(
-                        dir,
-                        &accel_devices,
-                        "df-compatible-release-asset-v1",
-                        APPROVED_ASSET_SHA256,
-                    ) {
+                            dir,
+                            &accel_devices,
+                            "df-compatible-release-asset-v1",
+                            APPROVED_ASSET_SHA256,
+                        )
+                    {
                         if qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
                             let device = backend.device().to_string();
                             let descriptor = backend.descriptor();
@@ -465,7 +459,10 @@ pub fn instantiate_backend_with_fallback(
                 fallback_reason = Some("No hardware accelerator runtime available".to_string());
             }
             // 5. If all hardware accelerators fail, execution falls through to CPU (Tract CPU) as final fallback!
-        } else if matches!(norm.as_str(), "tensorrt" | "nvidia-tensorrt" | "nvidia" | "cuda") {
+        } else if matches!(
+            norm.as_str(),
+            "tensorrt" | "nvidia-tensorrt" | "nvidia" | "cuda"
+        ) {
             // Explicit TensorRT request
             if TensorRtBackend::is_available() {
                 match instantiate_tensorrt_backend(resolved_model_dir.as_deref()) {
@@ -483,13 +480,13 @@ pub fn instantiate_backend_with_fallback(
                         return (Box::new(backend), info);
                     }
                     Err(err) => {
-                        fallback_reason =
-                            Some(format!("TensorRT initialization failed: {err}"));
+                        fallback_reason = Some(format!("TensorRT initialization failed: {err}"));
                     }
                 }
             } else {
                 fallback_reason = Some(
-                    "TensorRT native runtime (libnvinfer) is not available on this host".to_string(),
+                    "TensorRT native runtime (libnvinfer) is not available on this host"
+                        .to_string(),
                 );
             }
         } else if norm == "gpu" {

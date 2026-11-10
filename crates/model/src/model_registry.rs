@@ -557,7 +557,11 @@ mod tests {
     fn test_catalog_descriptors_registered() {
         let registry = ModelAssetRegistry::new();
         assert!(registry.get("df-compatible-release-asset-v1").is_some());
-        assert!(registry.get("pdfnet3-pro-v3-full-stateful-asset-v1").is_some());
+        assert!(
+            registry
+                .get("pdfnet3-pro-v3-full-stateful-asset-v1")
+                .is_some()
+        );
         assert!(registry.get("voice-enrollment-asset-v1").is_some());
         assert!(registry.get("neural-eq-asset-v1").is_some());
 
@@ -655,10 +659,7 @@ mod tests {
         // come from the training repository). Verifying them would bind the archive to nothing,
         // so it must fail closed before any I/O.
         let registry = ModelAssetRegistry::default();
-        for asset_id in [
-            "voice-enrollment-asset-v1",
-            "neural-eq-asset-v1",
-        ] {
+        for asset_id in ["voice-enrollment-asset-v1", "neural-eq-asset-v1"] {
             let error = registry.verify(&repo_root(), asset_id).expect_err(asset_id);
             assert!(
                 matches!(&error, InferenceError::AssetNotApproved(message) if message.contains("not pinned")),

@@ -12,13 +12,13 @@ use crate::enrollment_error::EnrollError;
 use crate::enrollment_ingest::{Denoiser, IngestResult, ingest_sample};
 use crate::enrollment_jobs::{JobFailure, JobInfo, JobState, JobTable};
 use crate::voice_budget::{budget_for, fits_manual, fits_take, selected_device_hash};
+use crate::voice_conditioning::VoiceConditioningTarget as _;
 use crate::voice_intake::{IntakeTake, VoiceIntakeError};
 use crate::voice_samples::{VoiceSample, is_valid_sample_id};
 use crate::{ApplyError, ServiceDaemon};
 use base64::Engine as _;
 use realtime_noise_ipc::enrollment_codes as codes;
 use realtime_noise_ipc::{IpcResponse, IpcStatus};
-use crate::voice_conditioning::VoiceConditioningTarget as _;
 use realtime_noise_model::VoiceProfileV2;
 use realtime_noise_model::enrollment::{EnrollmentError, ProfileMetadata};
 use realtime_noise_model::enrollment_builder::BuildError;
@@ -1040,10 +1040,8 @@ impl ServiceDaemon {
         if result.is_err() {
             self.settings.voice_isolation_enabled = was_enabled;
         } else if !was_enabled {
-            let _ = crate::settings::persist_settings(
-                &self.settings,
-                self.settings_path.as_deref(),
-            );
+            let _ =
+                crate::settings::persist_settings(&self.settings, self.settings_path.as_deref());
             crate::bump_linux_shared_state_generation();
         }
         match result {

@@ -368,7 +368,6 @@ impl InferenceBackend for TractBackend {
     }
 }
 
-
 fn run_worker(
     archive: &Arc<[u8]>,
     requests: &mpsc::Receiver<WorkerCommand>,

@@ -152,9 +152,17 @@ impl FiLMVectors {
     pub fn with_intensity(&self, intensity: u8) -> Self {
         let alpha = (f32::from(intensity.min(100))) / 100.0;
         Self {
-            gamma_enc: self.gamma_enc.iter().map(|&g| 1.0 + alpha * (g - 1.0)).collect(),
+            gamma_enc: self
+                .gamma_enc
+                .iter()
+                .map(|&g| 1.0 + alpha * (g - 1.0))
+                .collect(),
             beta_enc: self.beta_enc.iter().map(|&b| alpha * b).collect(),
-            gamma_df: self.gamma_df.iter().map(|&g| 1.0 + alpha * (g - 1.0)).collect(),
+            gamma_df: self
+                .gamma_df
+                .iter()
+                .map(|&g| 1.0 + alpha * (g - 1.0))
+                .collect(),
             beta_df: self.beta_df.iter().map(|&b| alpha * b).collect(),
         }
     }

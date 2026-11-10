@@ -167,7 +167,9 @@ impl WasapiAudioBackend {
                     }
                     Some(idle_start) => {
                         // Check if 3.5 seconds have elapsed
-                        if now.saturating_duration_since(idle_start) >= BLUETOOTH_RELEASE_HYSTERESIS_DURATION {
+                        if now.saturating_duration_since(idle_start)
+                            >= BLUETOOTH_RELEASE_HYSTERESIS_DURATION
+                        {
                             // Hysteresis expired: pause capture stream (IAudioClient::Stop())
                             self.is_client_started = false;
                             self.idle_since = None;

@@ -296,7 +296,9 @@ fn test_tensorrt_dfn3_session_real_inference() {
 
             // Run 3 streaming hops
             for hop in 0..3 {
-                session.run_frame(&feat_erb, &feat_spec, &mut out).expect("run_frame");
+                session
+                    .run_frame(&feat_erb, &feat_spec, &mut out)
+                    .expect("run_frame");
                 assert!(out.lsnr.is_finite());
                 assert!(out.erb_mask.iter().all(|v| v.is_finite()));
                 assert!(out.df_coefs.iter().all(|v| v.is_finite()));
@@ -312,4 +314,3 @@ fn test_tensorrt_dfn3_session_real_inference() {
         }
     }
 }
-

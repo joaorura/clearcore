@@ -168,7 +168,9 @@ impl TensorRtDfn3Session {
 
         let cuda_driver = CudaDriver::load().map_err(TensorRtError::Cuda)?;
         let device = GpuDevice::query(&cuda_driver, device_ordinal).map_err(TensorRtError::Cuda)?;
-        let precision = device.preferred_precision().unwrap_or(PrecisionTarget::Fp16);
+        let precision = device
+            .preferred_precision()
+            .unwrap_or(PrecisionTarget::Fp16);
 
         let trt_lib = TensorRtLibrary::load()?;
 
@@ -515,14 +517,23 @@ impl TensorRtDfn3Session {
         // 5. Asynchronously read back outputs to host
         let mut lsnr_val = [0.0f32; 1];
         // SAFETY: lsnr_val is valid host memory for 1 float and stays alive until stream sync.
-        unsafe { self.enc_lsnr.async_copy_to_host(&mut lsnr_val, &self.stream) }
-            .map_err(TensorRtError::Cuda)?;
+        unsafe {
+            self.enc_lsnr
+                .async_copy_to_host(&mut lsnr_val, &self.stream)
+        }
+        .map_err(TensorRtError::Cuda)?;
         // SAFETY: out.erb_mask stays alive until stream sync.
-        unsafe { self.erb_m.async_copy_to_host(&mut out.erb_mask, &self.stream) }
-            .map_err(TensorRtError::Cuda)?;
+        unsafe {
+            self.erb_m
+                .async_copy_to_host(&mut out.erb_mask, &self.stream)
+        }
+        .map_err(TensorRtError::Cuda)?;
         // SAFETY: out.df_coefs stays alive until stream sync.
-        unsafe { self.df_coefs.async_copy_to_host(&mut out.df_coefs, &self.stream) }
-            .map_err(TensorRtError::Cuda)?;
+        unsafe {
+            self.df_coefs
+                .async_copy_to_host(&mut out.df_coefs, &self.stream)
+        }
+        .map_err(TensorRtError::Cuda)?;
 
         // 6. Commit recurrent states on GPU asynchronously (Device to Device)
         self.enc_h

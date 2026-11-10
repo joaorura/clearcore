@@ -65,12 +65,19 @@ fn stateful_ort_backend_is_non_silent_and_stateful() -> Result<(), Box<dyn std::
         later = backend.process(&input)?;
     }
 
-    assert!(later.samples.iter().any(|sample| sample.abs() > f32::EPSILON));
-    assert!(first
-        .samples
-        .iter()
-        .zip(later.samples)
-        .any(|(&first, later)| (first - later).abs() > f32::EPSILON));
+    assert!(
+        later
+            .samples
+            .iter()
+            .any(|sample| sample.abs() > f32::EPSILON)
+    );
+    assert!(
+        first
+            .samples
+            .iter()
+            .zip(later.samples)
+            .any(|(&first, later)| (first - later).abs() > f32::EPSILON)
+    );
     Ok(())
 }
 

@@ -151,20 +151,22 @@ type StatefulGraphs = (Vec<u8>, Vec<u8>, Vec<u8>);
 /// present exactly once and within [`MAX_GRAPH_BYTES`]. The caller must have verified the archive
 /// (e.g. [`crate::PdfNet3DevArchive::verify`] pins the whole-archive SHA-256); this helper does
 /// not re-check digests.
-fn extract_stateful_onnx(
-    archive_bytes: &[u8],
-) -> Result<StatefulGraphs, InferenceError> {
+fn extract_stateful_onnx(archive_bytes: &[u8]) -> Result<StatefulGraphs, InferenceError> {
     use std::io::Read as _;
     let corruption = |reason: &str| InferenceError::ModelCorruption(reason.to_owned());
     let mut enc: Option<Vec<u8>> = None;
     let mut erb_dec: Option<Vec<u8>> = None;
     let mut df_dec: Option<Vec<u8>> = None;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(archive_bytes));
-    let entries = archive.entries().map_err(|_| corruption("unreadable archive"))?;
+    let entries = archive
+        .entries()
+        .map_err(|_| corruption("unreadable archive"))?;
     for entry in entries {
         let entry = entry.map_err(|_| corruption("unreadable archive"))?;
         let name = {
-            let path = entry.path().map_err(|_| corruption("invalid member path"))?;
+            let path = entry
+                .path()
+                .map_err(|_| corruption("invalid member path"))?;
             path.file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| corruption("non-UTF-8 member name"))?
@@ -256,7 +258,10 @@ fn extract_f32<'a>(
     Ok(data)
 }
 
-fn extract_scalar(outputs: &ort::session::SessionOutputs<'_>, name: &str) -> Result<f32, InferenceError> {
+fn extract_scalar(
+    outputs: &ort::session::SessionOutputs<'_>,
+    name: &str,
+) -> Result<f32, InferenceError> {
     let value = outputs
         .get(name)
         .ok_or_else(|| InferenceError::InferenceExecution(format!("missing output `{name}`")))?;
@@ -407,7 +412,7 @@ impl SpectralModelBackend for OrtSpectralModel {
     /// `feat_spec` is `[real; 96]` followed by `[imag; 96]`. State is committed only after all
     /// three stages succeeded; on error the caller should [`Self::reset`] before reusing the
     /// session, because the decoders may have run with a half-updated hop.
-#[allow(clippy::too_many_lines)] // linear pipeline; splitting it before the release risks behaviour changes
+    #[allow(clippy::too_many_lines)] // linear pipeline; splitting it before the release risks behaviour changes
     fn process_spectrum(
         &mut self,
         features: &ExtractedFeatures,
@@ -519,9 +524,7 @@ impl SpectralModelBackend for OrtSpectralModel {
         }
         let df_coefs: Vec<[Complex32; DF_ORDER]> = coefs
             .chunks_exact(DF_COEFS_LEN / NB_DF)
-            .map(|bin| {
-                std::array::from_fn(|tap| Complex32::new(bin[2 * tap], bin[2 * tap + 1]))
-            })
+            .map(|bin| std::array::from_fn(|tap| Complex32::new(bin[2 * tap], bin[2 * tap + 1])))
             .collect();
         sync_from_output(&mut self.df_h, &df_out, "h_out")?;
         sync_from_output(&mut self.df_c0_buf, &df_out, "c0_buf_out")?;

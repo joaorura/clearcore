@@ -10,8 +10,8 @@ use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
 use realtime_noise_model::{
     BackendDescriptor, CpuProfile, InferenceBackend, InferenceError, PDFNET3_DEV_ASSET_ID,
-    PDFNET3_PRO_ASSET_ID, PdfNet3DevArchive, SpeakerConditioning, StudioBackend,
-    StudioResetHandle, VoiceProfile,
+    PDFNET3_PRO_ASSET_ID, PdfNet3DevArchive, SpeakerConditioning, StudioBackend, StudioResetHandle,
+    VoiceProfile,
 };
 use std::fmt;
 use std::path::Path;
@@ -504,7 +504,9 @@ impl EngineSupervisor {
     /// Re-applies the stored conditioning to a freshly installed backend; dropped if refused.
     fn reapply_speaker_conditioning(&mut self) {
         if let Some(conditioning) = self.active_conditioning.take()
-            && self.apply_speaker_conditioning(Some(&conditioning)).is_err()
+            && self
+                .apply_speaker_conditioning(Some(&conditioning))
+                .is_err()
         {
             self.active_conditioning = None;
         }
@@ -847,7 +849,8 @@ fn openvino_stateful_descriptor(archive: &PdfNet3DevArchive, device: &str) -> Ba
         "CPU" => ("openvino-cpu", "intel-cpu"),
         _ => ("openvino-npu", "intel-npu"),
     };
-    let mut descriptor = archive.descriptor("openvino", runtime, "2025/2026", CpuProfile::Avx2Minimum);
+    let mut descriptor =
+        archive.descriptor("openvino", runtime, "2025/2026", CpuProfile::Avx2Minimum);
     descriptor.cpu_profile = cpu_profile;
     descriptor
 }

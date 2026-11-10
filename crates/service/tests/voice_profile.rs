@@ -766,7 +766,10 @@ fn set_voice_isolation_temporarily_disables_without_deleting() {
     assert_eq!(status.payload["is_voice_profile_active"], true);
 
     // Disable voice isolation
-    let resp = send(&mut daemon, IpcCommand::SetVoiceIsolation { enabled: false });
+    let resp = send(
+        &mut daemon,
+        IpcCommand::SetVoiceIsolation { enabled: false },
+    );
     assert_eq!(resp.payload["voice_isolation_enabled"], false);
     assert_eq!(resp.payload["is_voice_profile_active"], false);
 
@@ -801,7 +804,10 @@ fn set_voice_isolation_intensity_updates_status_and_reapplies() {
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["voice_isolation_intensity"], 100);
 
-    let resp = send(&mut daemon, IpcCommand::SetVoiceIsolationIntensity { intensity: 75 });
+    let resp = send(
+        &mut daemon,
+        IpcCommand::SetVoiceIsolationIntensity { intensity: 75 },
+    );
     assert_eq!(resp.payload["voice_isolation_intensity"], 75);
     assert_eq!(resp.payload["is_voice_profile_active"], true);
 

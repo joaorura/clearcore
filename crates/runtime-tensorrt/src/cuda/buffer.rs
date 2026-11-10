@@ -257,12 +257,7 @@ impl<T: DeviceCopy> GpuBuffer<T> {
         let funcs = self.driver.functions();
         // SAFETY: device_ptr is allocated with self.size_bytes.
         let res = unsafe {
-            (funcs.cu_memset_d8_async)(
-                self.device_ptr,
-                0,
-                self.size_bytes,
-                stream.raw_stream(),
-            )
+            (funcs.cu_memset_d8_async)(self.device_ptr, 0, self.size_bytes, stream.raw_stream())
         };
 
         if res != CUDA_SUCCESS {

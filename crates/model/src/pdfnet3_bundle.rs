@@ -161,7 +161,9 @@ pub fn load_isolation_archive_from(
     dirs: &[PathBuf],
 ) -> Result<PdfNet3DevArchive, BundledModelError> {
     let archive = load_from(dirs, PDFNET3_PRO_V3_FULL_FILE, PDFNET3_PRO_V3_FULL_SHA256)?;
-    let files = archive.stateful_files().map_err(BundledModelError::Invalid)?;
+    let files = archive
+        .stateful_files()
+        .map_err(BundledModelError::Invalid)?;
     let pinned = PDFNET3_PRO_V3_FULL_GRAPH_SHA256.iter().all(|(file, hex)| {
         files
             .manifest

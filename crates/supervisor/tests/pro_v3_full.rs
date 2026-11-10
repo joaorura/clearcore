@@ -35,7 +35,9 @@ fn conditioning(id: &str) -> SpeakerConditioning {
         *value = ((index as f32) * 0.37).sin();
     }
     let norm = speaker_embedding.iter().map(|v| v * v).sum::<f32>().sqrt();
-    for v in &mut speaker_embedding { *v /= norm; }
+    for v in &mut speaker_embedding {
+        *v /= norm;
+    }
     SpeakerConditioning {
         profile_id: id.to_owned(),
         model_id: "pdfnet3-pro-v3-full".to_owned(),

@@ -206,7 +206,10 @@ fn runtime_qualification_rejects_backend_exceeding_deadline() {
     // A backend that takes 15ms per frame exceeds the 8.0ms threshold and the 10.0ms deadline
     let mut slow_backend = SlowMockBackend::new(Duration::from_millis(15));
     let qualified = qualify_backend_runtime(&mut slow_backend, 8.0);
-    assert!(!qualified, "Slow backend taking 15ms must be rejected by runtime qualification");
+    assert!(
+        !qualified,
+        "Slow backend taking 15ms must be rejected by runtime qualification"
+    );
 }
 
 #[test]

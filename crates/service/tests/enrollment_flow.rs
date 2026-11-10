@@ -1726,7 +1726,10 @@ fn a_stored_v1_profile_is_outdated_and_never_applied() {
     assert_eq!(status["is_voice_profile_active"], false);
     assert_eq!(status["stored_voice_profile_id"], Value::Null);
     assert_eq!(status["has_voice_profile"], false);
-    assert_eq!(status["voice_profile_can_regenerate"], false, "no samples yet");
+    assert_eq!(
+        status["voice_profile_can_regenerate"], false,
+        "no samples yet"
+    );
     // The file is kept (the user regenerates over it).
     assert!(temp.path().join(ACTIVE_PROFILE_FILE_NAME).is_file());
 }
@@ -1760,7 +1763,9 @@ fn an_outdated_profile_is_regenerated_from_the_saved_samples_without_re_recordin
     assert_eq!(status["voice_profile_error"], Value::Null);
     assert_eq!(status["active_voice_profile_id"], job["profile_id"]);
     assert_eq!(list(&mut daemon)["total_count"], 2, "samples untouched");
-    let stored = ProfileStore::new(temp.path()).load_active_any().expect("load");
+    let stored = ProfileStore::new(temp.path())
+        .load_active_any()
+        .expect("load");
     assert!(matches!(stored, Some(StoredProfile::Current(_))));
 }
 
@@ -1788,7 +1793,10 @@ fn clearing_an_outdated_profile_removes_it() {
         .save_active(&legacy_v1_profile("old-3"))
         .expect("save v1");
     let (mut daemon, _) = daemon_with(temp.path(), Setup::default());
-    assert_eq!(send(&mut daemon, IpcCommand::ClearVoiceProfile).status, IpcStatus::Ok);
+    assert_eq!(
+        send(&mut daemon, IpcCommand::ClearVoiceProfile).status,
+        IpcStatus::Ok
+    );
     let status = send(&mut daemon, IpcCommand::GetStatus).payload;
     assert_eq!(status["voice_profile_state"], "none");
     assert_eq!(status["voice_profile_error"], Value::Null);

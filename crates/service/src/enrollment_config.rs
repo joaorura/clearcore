@@ -438,24 +438,29 @@ mod tests {
 
     #[test]
     fn find_in_system_dirs_returns_none_when_empty_or_nonexistent() {
-        let paths = [
-            "/nonexistent/clearcore/1",
-            "/nonexistent/clearcore/2",
-        ];
+        let paths = ["/nonexistent/clearcore/1", "/nonexistent/clearcore/2"];
         let found = find_in_system_dirs(&paths);
         assert_eq!(found, None);
     }
 
     #[test]
     fn system_enrollment_model_paths_contains_standard_locations() {
-        assert!(SYSTEM_ENROLLMENT_MODEL_PATHS
-            .contains(&"/opt/clearcore/models/enrollment/enrollment.onnx"));
-        assert!(SYSTEM_ENROLLMENT_MODEL_PATHS
-            .contains(&"/opt/clearcore/resources/models/enrollment/enrollment.onnx"));
-        assert!(SYSTEM_ENROLLMENT_MODEL_PATHS
-            .contains(&"/usr/share/clearcore/models/enrollment/enrollment.onnx"));
-        assert!(SYSTEM_ENROLLMENT_MODEL_PATHS
-            .contains(&"/usr/local/share/clearcore/models/enrollment/enrollment.onnx"));
+        assert!(
+            SYSTEM_ENROLLMENT_MODEL_PATHS
+                .contains(&"/opt/clearcore/models/enrollment/enrollment.onnx")
+        );
+        assert!(
+            SYSTEM_ENROLLMENT_MODEL_PATHS
+                .contains(&"/opt/clearcore/resources/models/enrollment/enrollment.onnx")
+        );
+        assert!(
+            SYSTEM_ENROLLMENT_MODEL_PATHS
+                .contains(&"/usr/share/clearcore/models/enrollment/enrollment.onnx")
+        );
+        assert!(
+            SYSTEM_ENROLLMENT_MODEL_PATHS
+                .contains(&"/usr/local/share/clearcore/models/enrollment/enrollment.onnx")
+        );
     }
 
     #[test]
