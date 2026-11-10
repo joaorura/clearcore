@@ -1,204 +1,287 @@
 #![allow(unsafe_code)]
 #![allow(clippy::missing_safety_doc)]
 
+//! `libclearcore_filter`: the neural filter of the virtual microphone, loaded by the PipeWire
+//! helper (`platform/linux/helper`) through `dlopen`.
+//!
+//! - Model: pDFNet3 Pro v3 FULL driven by its manifest (speaker embedding + cross-attention), or
+//!   the v2 stateful Pro (`FiLM`) until v3 is installed — see [`select`].
+//! - Runtime: ONNX Runtime CPU, or OpenVINO NPU → GPU → CPU per the `backend` setting with ONNX
+//!   Runtime as hot standby on failure or overrun — see [`engine`].
+//! - Profile: `active_profile.json` v2 (speaker embedding + EQ) — a v1 (`FiLM`) file is outdated
+//!   for the v3 model (neutral voice); the EQ is applied before the iSTFT — see [`core`],
+//!   [`profile_v2`] and `docs/virtual-mic-filter.md`.
+//!
+//! The C ABI is unchanged for the helper; `clearcore_filter_status_json` is new and optional.
+
+pub mod core;
+pub mod engine;
+pub mod legacy;
+pub mod profile_v2;
+pub mod select;
+pub mod v3;
+
 use std::ffi::CStr;
 use std::os::raw::c_char;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use realtime_noise_contracts::AudioFrame;
-use realtime_noise_model::{
-    CpuProfile, InferenceError, InferenceBackend, OrtBackend, PdfNet3DevArchive, ProfileStore,
-    StudioBackend, VoiceProfile, pdfnet3_bundle,
-};
-use realtime_noise_service::settings::{default_settings_path, Settings};
-use studio_dsp::{Preset, StudioControl};
+use realtime_noise_model::{ACTIVE_PROFILE_FILE_NAME, ALGORITHM_LATENCY_SAMPLES, ProfileStore};
+use realtime_noise_service::settings::{Settings, default_settings_path};
+use studio_dsp::{Preset, StudioChain, StudioControl};
 
-/// Development override of the stateful pDFNet3 archive the filter runs. Distinct from the
-/// daemon's `CLEARCORE_DEV_PDFNET3_*` (that one names the tract export, which has no state ports
-/// and cannot run here). Both must be set together; otherwise the bundled archive is used.
-pub const ENV_DEV_STATEFUL_ASSET: &str = "CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET";
-/// SHA-256 (64 lowercase hex characters) of the whole archive named by [`ENV_DEV_STATEFUL_ASSET`].
-pub const ENV_DEV_STATEFUL_SHA256: &str = "CLEARCORE_DEV_PDFNET3_STATEFUL_SHA256";
+use crate::core::{ModelKind, NeuralCore};
+use crate::engine::{Conditioning, LatencyPolicy};
+use crate::profile_v2::StoredProfile;
+
+pub use crate::select::{ENV_DEV_STATEFUL_ASSET, ENV_DEV_STATEFUL_SHA256};
 
 pub struct ClearcoreFilter {
-    backend: StudioBackend<OrtBackend>,
+    core: NeuralCore,
+    chain: StudioChain,
     control: Arc<StudioControl>,
-    supports_film: bool,
+    applied_preset: Preset,
+    applied_leveler: u8,
     active_profile_id: Option<String>,
 }
 
-/// Where the stateful pDFNet3 archive comes from.
-#[derive(Debug, PartialEq, Eq)]
-enum ArchiveSource {
-    /// Both development variables set and well formed.
-    DevOverride(PathBuf, String),
-    /// Neither variable set: the bundled pDFNet3 Pro, searched over these models directories.
-    Bundled(Vec<PathBuf>),
-    /// A partial or malformed override: fail closed (no silent switch to the bundled model).
-    InvalidOverride,
+/// What [`ClearcoreFilter::apply_profile`] did with a profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileOutcome {
+    /// Applied (EQ, and the speaker part when the model consumes it).
+    Applied,
+    /// A v1 (`FiLM`) profile on the v3 model: outdated, neutral voice applied (no EQ either),
+    /// the filter keeps running. Enrollment asks the user to regenerate it.
+    Outdated,
 }
 
-/// Resolves the archive source. The bundled search starts at `<repo_root>/models` and
-/// `<repo_root>/resources/models` (the root the PipeWire helper passes), then the standard
-/// locations of [`pdfnet3_bundle::candidate_model_dirs`].
-fn archive_source(repo_root: &Path) -> ArchiveSource {
-    let asset = std::env::var_os(ENV_DEV_STATEFUL_ASSET).filter(|v| !v.is_empty());
-    let sha = std::env::var_os(ENV_DEV_STATEFUL_SHA256).filter(|v| !v.is_empty());
-    match (asset, sha) {
-        (Some(asset), Some(sha)) => {
-            let path = PathBuf::from(asset);
-            match sha.into_string() {
-                Ok(sha)
-                    if path.is_absolute()
-                        && sha.len() == 64
-                        && sha.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) =>
-                {
-                    ArchiveSource::DevOverride(path, sha)
+impl ClearcoreFilter {
+    /// Builds the filter for `repo_root` with the given `backend` request (see [`select`]).
+    pub fn new(repo_root: &Path, backend: Option<&str>) -> Result<Self, String> {
+        let source = select::resolve_model(repo_root)?;
+        let engine = select::build_engine(&source, backend, LatencyPolicy::from_env())?;
+        let core = NeuralCore::new(source.kind(), engine).map_err(|e| format!("{e:?}"))?;
+        let control = Arc::new(StudioControl::new(Preset::Off));
+        let applied_preset = control.preset();
+        let applied_leveler = control.leveler_intensity();
+        let mut chain = StudioChain::new(applied_preset);
+        chain.set_leveler_intensity(applied_leveler);
+        Ok(Self {
+            core,
+            chain,
+            control,
+            applied_preset,
+            applied_leveler,
+            active_profile_id: None,
+        })
+    }
+
+    /// One hop through the neural core and the studio chain.
+    pub fn process(&mut self, input: &AudioFrame) -> Result<AudioFrame, String> {
+        let mut out = self.core.process(input).map_err(|e| format!("{e:?}"))?;
+        let preset = self.control.preset();
+        if preset != self.applied_preset {
+            self.chain.set_preset(preset);
+            self.applied_preset = preset;
+        }
+        let leveler = self.control.leveler_intensity();
+        if leveler != self.applied_leveler {
+            self.chain.set_leveler_intensity(leveler);
+            self.applied_leveler = leveler;
+        }
+        self.chain.process(&mut out);
+        if out.iter().all(|s| s.is_finite()) {
+            Ok(out)
+        } else {
+            Err("non-finite output".to_owned())
+        }
+    }
+
+    #[must_use]
+    pub fn algorithmic_latency_samples(&self) -> u32 {
+        ALGORITHM_LATENCY_SAMPLES + self.chain.latency_samples()
+    }
+
+    #[must_use]
+    pub const fn model_kind(&self) -> ModelKind {
+        self.core.kind
+    }
+
+    #[must_use]
+    pub fn core(&self) -> &NeuralCore {
+        &self.core
+    }
+
+    pub fn core_mut(&mut self) -> &mut NeuralCore {
+        &mut self.core
+    }
+
+    /// Applies `profile`:
+    /// - v2 profile on the v3 model: `speaker_embedding` (+ `speaker_present = 1`) and the EQ;
+    /// - v1 profile on the v2 stateful model: `FiLM` (scaled by `intensity`, as before) and the EQ;
+    /// - v1 profile on the v3 model: outdated → neutral voice, no EQ ([`ProfileOutcome::Outdated`]);
+    /// - v2 profile on the v2 stateful model: the EQ only (that model cannot use an embedding).
+    ///
+    /// `intensity` 0 turns the speaker part off (`speaker_present = 0`, zeros); any other value
+    /// feeds the embedding as stored (the model was trained with `speaker_present` in {0, 1}).
+    /// Nothing changes on error.
+    pub fn apply_profile(
+        &mut self,
+        profile: &StoredProfile,
+        intensity: u8,
+    ) -> Result<ProfileOutcome, String> {
+        let (eq, conditioning) = match (self.core.kind, profile) {
+            (ModelKind::V3Full, StoredProfile::V2(p)) => (
+                p.eq.clone(),
+                Conditioning {
+                    embedding: if intensity > 0 {
+                        Some(p.speaker_embedding()?)
+                    } else {
+                        None
+                    },
+                    film: None,
+                },
+            ),
+            (ModelKind::V3Full, StoredProfile::V1(_)) => {
+                self.clear_profile()?;
+                return Ok(ProfileOutcome::Outdated);
+            }
+            (ModelKind::V2Film, StoredProfile::V1(p)) => (
+                p.eq.clone(),
+                Conditioning {
+                    embedding: None,
+                    film: Some(p.film.with_intensity(intensity)),
+                },
+            ),
+            (ModelKind::V2Film, StoredProfile::V2(p)) => (p.eq.clone(), Conditioning::default()),
+        };
+        self.set_profile_parts(eq, conditioning)?;
+        self.active_profile_id = Some(profile.id().to_owned());
+        Ok(ProfileOutcome::Applied)
+    }
+
+    /// Neutral conditioning, no EQ.
+    pub fn clear_profile(&mut self) -> Result<(), String> {
+        self.set_profile_parts(None, Conditioning::default())?;
+        self.active_profile_id = None;
+        Ok(())
+    }
+
+    fn set_profile_parts(
+        &mut self,
+        eq: Option<realtime_noise_model::BandGains>,
+        conditioning: Conditioning,
+    ) -> Result<(), String> {
+        let previous = self.core_conditioning();
+        self.core
+            .set_conditioning(conditioning)
+            .map_err(|e| format!("{e:?}"))?;
+        if let Err(e) = self.core.set_eq(eq) {
+            let _ = self.core.set_conditioning(previous);
+            return Err(format!("{e:?}"));
+        }
+        Ok(())
+    }
+
+    fn core_conditioning(&self) -> Conditioning {
+        self.core.conditioning().clone()
+    }
+
+    /// Reads the active profile from `ProfileStore::default_dir()` honouring `settings.json`.
+    /// Returns the C codes of `clearcore_filter_reload_active_profile`.
+    pub fn reload_active_profile(&mut self) -> i32 {
+        let settings = Settings::load(&default_settings_path());
+        let neutral = |f: &mut Self| if f.clear_profile().is_ok() { 0 } else { -4 };
+        if !settings.voice_isolation_enabled {
+            return neutral(self);
+        }
+        let Some(dir) = ProfileStore::default_dir() else {
+            return neutral(self);
+        };
+        match StoredProfile::load_secure(&dir.join(ACTIVE_PROFILE_FILE_NAME)) {
+            Err(_) => -2,
+            Ok(None) => neutral(self),
+            Ok(Some(profile)) => {
+                match self.apply_profile(&profile, settings.voice_isolation_intensity) {
+                    Ok(ProfileOutcome::Applied) => 1,
+                    Ok(ProfileOutcome::Outdated) => 0,
+                    Err(_) => -4,
                 }
-                _ => ArchiveSource::InvalidOverride,
             }
         }
-        (None, None) => {
-            let mut dirs = vec![
-                repo_root.join("models"),
-                repo_root.join("resources/models"),
-            ];
-            dirs.extend(pdfnet3_bundle::candidate_model_dirs());
-            ArchiveSource::Bundled(dirs)
-        }
-        _ => ArchiveSource::InvalidOverride,
+    }
+
+    /// Diagnostics as a JSON object (see `clearcore_filter_status_json`).
+    #[must_use]
+    pub fn status_json(&self) -> String {
+        let latency = self.core.engine.latency();
+        serde_json::json!({
+            "model": self.core.kind.name(),
+            "backend": self.core.engine.label(),
+            "fallback_reason": self.core.engine.fallback_reason(),
+            "standby": self.core.engine.has_standby(),
+            "profile_id": self.active_profile_id,
+            "speaker_conditioning": self.core.speaker_active(),
+            "eq": self.core.eq_active(),
+            "silent_hops": self.core.silent_hops(),
+            "latency_us": {
+                "hops": latency.hops,
+                "p50": latency.p50_us,
+                "p99": latency.p99_us,
+                "max": latency.max_us,
+            },
+        })
+        .to_string()
     }
 }
 
-/// The verified stateful pDFNet3 archive, or `None` (fail closed).
-fn resolve_archive(repo_root: &Path) -> Option<PdfNet3DevArchive> {
-    match archive_source(repo_root) {
-        ArchiveSource::DevOverride(path, sha) => PdfNet3DevArchive::read(&path, &sha).ok(),
-        ArchiveSource::Bundled(dirs) => pdfnet3_bundle::load_stateful_archive_from(&dirs).ok(),
-        ArchiveSource::InvalidOverride => None,
+fn repo_root_from(ptr: *const c_char) -> Option<&'static Path> {
+    if ptr.is_null() {
+        return Some(Path::new("."));
     }
-}
-
-/// Model resolution (fail-closed, no base-model fallback).
-///
-/// The pDFNet3 Pro stateful archive bundled with every package
-/// (`<models>/pdfnet3/pdfnet3-stateful-asset-v1.tar.gz`, whole-file SHA-256 pinned in
-/// [`pdfnet3_bundle::PDFNET3_PRO_STATEFUL_SHA256`]) — or the development override — is verified
-/// (size cap, hash before decompression, exact flat members) and instantiated as an
-/// [`OrtBackend`]. The loaded graphs must declare the `FiLM` inputs. Returns `None` on any
-/// failure: there is no lower-tier fallback, so without the archive there is no filter (R1).
-fn resolve_ort_backend(repo_root: &Path) -> Option<OrtBackend> {
-    resolve_archive(repo_root)?
-        .instantiate_ort(CpuProfile::Avx2Minimum)
-        .ok()
-}
-
-/// Clears the active voice profile and restores neutral (identity) conditioning. `Ok(())` on
-/// success, an [`InferenceError`] otherwise.
-fn clear_to_neutral(
-    backend: &mut StudioBackend<OrtBackend>,
-    active_id: &mut Option<String>,
-) {
-    let _ = backend.set_voice_profile(None);
-    *active_id = None;
-}
-
-/// Applies `profile` to the backend. A non-identity profile on a model without `FiLM` inputs is
-/// rejected up front ([`InferenceError::UnsupportedFeature`]); the previous profile stays active.
-fn apply_profile(
-    backend: &mut StudioBackend<OrtBackend>,
-    supports_film: bool,
-    active_id: &mut Option<String>,
-    profile: &VoiceProfile,
-) -> Result<(), InferenceError> {
-    if !supports_film && !profile.is_neutral() {
-        return Err(InferenceError::UnsupportedFeature(
-            "voice profile conditioning".into(),
-        ));
-    }
-    backend.set_voice_profile(Some(profile))?;
-    *active_id = Some(profile.id.clone());
-    Ok(())
-}
-
-/// Best-effort load of `~/.local/share/clearcore/profiles/active_profile.json` from
-/// [`ProfileStore::default_dir`]. Failures are swallowed: a missing or corrupt profile simply
-/// leaves the filter in neutral conditioning rather than aborting filter construction.
-fn try_load_active_profile(filter: &mut ClearcoreFilter) {
-    let settings = Settings::load(&default_settings_path());
-    if !settings.voice_isolation_enabled {
-        return;
-    }
-    let Some(dir) = ProfileStore::default_dir() else {
-        return;
-    };
-    let store = ProfileStore::new(dir);
-    let loaded = store.load_active().unwrap_or(None);
-    if let Some(profile) = loaded {
-        let profile_to_apply = match profile.with_intensity(settings.voice_isolation_intensity) {
-            Ok(p) => p,
-            Err(_) => profile,
-        };
-        let _ = apply_profile(
-            &mut filter.backend,
-            filter.supports_film,
-            &mut filter.active_profile_id,
-            &profile_to_apply,
-        );
-    }
+    // SAFETY: the caller passes a valid NUL-terminated string that outlives the call; the path
+    // is only used during `clearcore_filter_create`.
+    let c_str = unsafe { CStr::from_ptr(ptr) };
+    c_str.to_str().ok().map(Path::new)
 }
 
 /// Create a new neural filter instance.
 ///
-/// The model asset is resolved fail-closed (R1): the bundled pDFNet3 Pro stateful archive (or
-/// the `CLEARCORE_DEV_PDFNET3_STATEFUL_*` development override) is the only candidate. When it loads, its `FiLM` inputs are detected and a persisted
-/// `active_profile.json` (if any) is applied atomically as part of construction. On any failure
-/// (archive missing, hash mismatch, missing `FiLM` inputs, CPU gate) this returns `NULL` — there
-/// is no base-model fallback.
-///
-/// After construction the studio preset starts at `Off` (bit-exact passthrough of the neural
-/// output); select another one with `clearcore_filter_set_preset`.
+/// Resolves the model fail-closed (v3 FULL, else v2 stateful Pro; never a base model), compiles it
+/// for the `backend` of `settings.json` (or `CLEARCORE_FILTER_BACKEND`) and applies the persisted
+/// active profile. Returns `NULL` on any failure. The studio preset starts at `Off`.
 ///
 /// # Safety
-/// If `repo_root_path` is non-null, it must be a valid null-terminated C string. This function
-/// performs disk I/O and must be called from a control thread, never from the realtime audio
-/// callback.
+/// If `repo_root_path` is non-null, it must be a valid null-terminated C string. Performs disk
+/// I/O and compilation: call from a control thread, never from the realtime audio callback.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clearcore_filter_create(
     repo_root_path: *const c_char,
 ) -> *mut ClearcoreFilter {
-    let repo_root = if repo_root_path.is_null() {
-        Path::new(".")
-    } else {
-        let c_str = unsafe { CStr::from_ptr(repo_root_path) };
-        match c_str.to_str() {
-            Ok(s) => Path::new(s),
-            Err(_) => return std::ptr::null_mut(),
+    let Some(repo_root) = repo_root_from(repo_root_path) else {
+        return std::ptr::null_mut();
+    };
+    let settings = Settings::load(&default_settings_path());
+    let backend = select::requested_backend(settings.backend.as_deref());
+    match ClearcoreFilter::new(repo_root, backend.as_deref()) {
+        Ok(mut filter) => {
+            // Best effort: a missing or corrupt profile leaves the filter neutral.
+            let _ = filter.reload_active_profile();
+            Box::into_raw(Box::new(filter))
         }
-    };
-
-    let backend = match resolve_ort_backend(repo_root) {
-        Some(backend) => backend,
-        None => return std::ptr::null_mut(),
-    };
-    let supports_film = backend.supports_speaker_conditioning();
-
-    let control = Arc::new(StudioControl::new(Preset::Off));
-    let mut filter = ClearcoreFilter {
-        backend: StudioBackend::new(backend, Arc::clone(&control)),
-        control,
-        supports_film,
-        active_profile_id: None,
-    };
-    // Best-effort: activate the persisted profile. Ignored on failure so creation is robust
-    // against a corrupt/missing profile file (fail-closed to neutral, not to no device).
-    try_load_active_profile(&mut filter);
-    let filter = Box::new(filter);
-    Box::into_raw(filter)
+        Err(error) => {
+            eprintln!(
+                "[clearcore_filter] create failed for {}: {error}",
+                repo_root.display()
+            );
+            std::ptr::null_mut()
+        }
+    }
 }
 
-/// Process a single 480-sample (10 ms @ 48 kHz) audio frame through the DeepFilterNet3 neural network and the studio chain.
+/// Process a single 480-sample (10 ms @ 48 kHz) audio frame. Returns 0, -1 on NULL arguments and
+/// -2 on an inference error (the output is left untouched).
 ///
 /// # Safety
 /// `filter` must be a valid pointer returned by `clearcore_filter_create`.
@@ -213,32 +296,23 @@ pub unsafe extern "C" fn clearcore_filter_process(
         return -1;
     }
     let filter_ref = unsafe { &mut *filter };
-    let in_slice = unsafe { std::slice::from_raw_parts(in_samples, 480) };
     let mut in_frame: AudioFrame = [0.0; 480];
-    in_frame.copy_from_slice(in_slice);
-
-    match filter_ref.backend.process(&in_frame) {
-        Ok(processed) => {
-            let out_slice = unsafe { std::slice::from_raw_parts_mut(out_samples, 480) };
-            out_slice.copy_from_slice(&processed.samples);
+    in_frame.copy_from_slice(unsafe { std::slice::from_raw_parts(in_samples, 480) });
+    match filter_ref.process(&in_frame) {
+        Ok(out) => {
+            unsafe { std::slice::from_raw_parts_mut(out_samples, 480) }.copy_from_slice(&out);
             0
         }
         Err(_) => -2,
     }
 }
 
-/// Select the studio finishing preset applied after the neural network.
-///
-/// `preset` is `0` = Off, `1` = Natural, `2` = Podcast, `3` = Broadcast. The change takes effect at
-/// the next 480-sample frame boundary.
-///
-/// Returns `0` on success, `-1` if `filter` is NULL and `-3` if `preset` is not one of the values
-/// above (the current preset is left untouched). `-2` is reserved for `clearcore_filter_process`.
+/// Select the studio finishing preset (`0` Off, `1` Natural, `2` Podcast, `3` Broadcast).
+/// Returns `0`, `-1` for NULL, `-3` for an unknown value.
 ///
 /// # Safety
-/// `filter` must be a valid pointer returned by `clearcore_filter_create`, or NULL. It must not be
-/// called concurrently with `clearcore_filter_process` or `clearcore_filter_free` on the same
-/// handle: call it from the thread that calls `clearcore_filter_process` (the C helper does).
+/// `filter` must be a valid pointer from `clearcore_filter_create`, or NULL; same thread as
+/// `clearcore_filter_process`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clearcore_filter_set_preset(
     filter: *mut ClearcoreFilter,
@@ -250,17 +324,14 @@ pub unsafe extern "C" fn clearcore_filter_set_preset(
     let Some(preset) = Preset::from_u8(preset) else {
         return -3;
     };
-    let filter_ref = unsafe { &*filter };
-    filter_ref.control.set_preset(preset);
+    unsafe { &*filter }.control.set_preset(preset);
     0
 }
 
-/// Set the voice auto-leveler intensity (0–100).
-///
-/// Returns `0` on success, or `-1` if `filter` is NULL.
+/// Set the voice auto-leveler intensity (0–100). Returns `0`, or `-1` for NULL.
 ///
 /// # Safety
-/// `filter` must be a valid pointer returned by `clearcore_filter_create`, or NULL.
+/// `filter` must be a valid pointer from `clearcore_filter_create`, or NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clearcore_filter_set_leveler_intensity(
     filter: *mut ClearcoreFilter,
@@ -269,8 +340,7 @@ pub unsafe extern "C" fn clearcore_filter_set_leveler_intensity(
     if filter.is_null() {
         return -1;
     }
-    let filter_ref = unsafe { &*filter };
-    filter_ref.control.set_leveler_intensity(intensity);
+    unsafe { &*filter }.control.set_leveler_intensity(intensity);
     0
 }
 
@@ -281,25 +351,20 @@ pub unsafe extern "C" fn clearcore_filter_set_leveler_intensity(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clearcore_filter_free(filter: *mut ClearcoreFilter) {
     if !filter.is_null() {
-        unsafe {
-            drop(Box::from_raw(filter));
-        }
+        drop(unsafe { Box::from_raw(filter) });
     }
 }
 
-/// Activate a voice profile from a JSON payload.
+/// Activate a voice profile from a JSON payload (schema v2: speaker embedding + EQ; or v1).
+/// Applied at full intensity.
 ///
-/// # Returns
-/// - `0`: success, profile applied (its id is cached).
-/// - `-1`: `filter` or `profile_json` is NULL.
-/// - `-2`: non-UTF-8 payload, JSON deserialization failure or integrity mismatch.
-/// - `-3`: the loaded model cannot apply a conditioned profile (base DFNet3).
-/// - `-4`: backend conditioning error.
+/// Returns `0` applied; `-1` NULL argument; `-2` non-UTF-8, invalid JSON, unknown version or
+/// integrity mismatch; `-3` a v1 profile on the v3 model (outdated: neutral voice applied, the
+/// filter keeps running); `-4` conditioning error (previous profile kept).
 ///
 /// # Safety
-/// `filter` must be a valid pointer from `clearcore_filter_create` or NULL. Must be called outside
-/// the realtime audio callback and not concurrently with `clearcore_filter_process` on the same
-/// handle.
+/// `filter` must be a valid pointer from `clearcore_filter_create` or NULL. Call outside the
+/// realtime callback and not concurrently with `clearcore_filter_process` on the same handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clearcore_filter_set_voice_profile(
     filter: *mut ClearcoreFilter,
@@ -309,107 +374,55 @@ pub unsafe extern "C" fn clearcore_filter_set_voice_profile(
         return -1;
     }
     let filter_ref = unsafe { &mut *filter };
-    let c_str = unsafe { CStr::from_ptr(profile_json) };
-    let json = match c_str.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
+    let Ok(json) = unsafe { CStr::from_ptr(profile_json) }.to_str() else {
+        return -2;
     };
-    let profile = match VoiceProfile::from_json(json) {
-        Ok(p) => p,
-        Err(_) => return -2,
+    let Ok(profile) = StoredProfile::from_json(json) else {
+        return -2;
     };
-    match apply_profile(
-        &mut filter_ref.backend,
-        filter_ref.supports_film,
-        &mut filter_ref.active_profile_id,
-        &profile,
-    ) {
-        Ok(()) => 0,
-        Err(InferenceError::UnsupportedFeature(_)) => -3,
+    match filter_ref.apply_profile(&profile, 100) {
+        Ok(ProfileOutcome::Applied) => 0,
+        Ok(ProfileOutcome::Outdated) => -3,
         Err(_) => -4,
     }
 }
 
-/// Clear the active voice profile and restore neutral (identity) conditioning.
-///
-/// # Returns
-/// - `0`: success.
-/// - `-1`: `filter` is NULL.
-/// - `-2`: backend conditioning error.
+/// Clear the active voice profile (neutral conditioning, no EQ). `0`, `-1` NULL, `-2` error.
 ///
 /// # Safety
-/// Same threading contract as `clearcore_filter_set_voice_profile`.
+/// Same contract as `clearcore_filter_set_voice_profile`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn clearcore_filter_clear_voice_profile(filter: *mut ClearcoreFilter) -> i32 {
     if filter.is_null() {
         return -1;
     }
-    let filter_ref = unsafe { &mut *filter };
-    match filter_ref.backend.set_voice_profile(None) {
-        Ok(()) => {
-            filter_ref.active_profile_id = None;
-            0
-        }
+    match unsafe { &mut *filter }.clear_profile() {
+        Ok(()) => 0,
         Err(_) => -2,
     }
 }
 
-/// Reload the persisted `active_profile.json` from [`ProfileStore::default_dir`].
+/// Reload the persisted `active_profile.json` from `ProfileStore::default_dir()`, honouring
+/// `voice_isolation_enabled`/`_intensity` of `settings.json`.
 ///
-/// # Returns
-/// - `1`: a profile was loaded from disk and applied.
-/// - `0`: no profile file found; neutral conditioning applied.
-/// - `-1`: `filter` is NULL.
-/// - `-2`: a profile file exists but failed verification (permissions, JSON, hash).
-/// - `-3`: the loaded model cannot apply a conditioned profile (base DFNet3).
-/// - `-4`: backend conditioning error.
+/// Returns `1` loaded and applied; `0` none, isolation disabled, or a v1 profile on the v3 model
+/// (outdated → neutral voice); `-1` NULL; `-2` a profile file exists but
+/// failed verification (permissions, JSON, hash; previous state kept); `-4` conditioning error.
 ///
 /// # Safety
-/// Performs disk I/O; call from a control thread, never inside the audio callback, and not
-/// concurrently with `clearcore_filter_process` on the same handle.
+/// Disk I/O: call from a control thread, never inside the audio callback, and not concurrently
+/// with `clearcore_filter_process` on the same handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn clearcore_filter_reload_active_profile(filter: *mut ClearcoreFilter) -> i32 {
+pub unsafe extern "C" fn clearcore_filter_reload_active_profile(
+    filter: *mut ClearcoreFilter,
+) -> i32 {
     if filter.is_null() {
         return -1;
     }
-    let filter_ref = unsafe { &mut *filter };
-    let settings = Settings::load(&default_settings_path());
-    if !settings.voice_isolation_enabled {
-        clear_to_neutral(&mut filter_ref.backend, &mut filter_ref.active_profile_id);
-        return 0;
-    }
-    let Some(dir) = ProfileStore::default_dir() else {
-        clear_to_neutral(&mut filter_ref.backend, &mut filter_ref.active_profile_id);
-        return 0;
-    };
-    let store = ProfileStore::new(dir);
-    match store.load_active() {
-        Ok(None) => {
-            clear_to_neutral(&mut filter_ref.backend, &mut filter_ref.active_profile_id);
-            0
-        }
-        Ok(Some(profile)) => {
-            let profile_to_apply = match profile.with_intensity(settings.voice_isolation_intensity) {
-                Ok(p) => p,
-                Err(_) => profile,
-            };
-            match apply_profile(
-                &mut filter_ref.backend,
-                filter_ref.supports_film,
-                &mut filter_ref.active_profile_id,
-                &profile_to_apply,
-            ) {
-                Ok(()) => 1,
-                Err(InferenceError::UnsupportedFeature(_)) => -3,
-                Err(_) => -4,
-            }
-        }
-        Err(_) => -2,
-    }
+    unsafe { &mut *filter }.reload_active_profile()
 }
 
-/// Report whether the loaded model can apply a voice profile (`1`) or is the unconditioned base
-/// model (`0`). Returns `-1` if `filter` is NULL.
+/// `1`: the loaded model consumes a speaker (v3 embedding or v2 `FiLM`); `-1` for NULL.
 ///
 /// # Safety
 /// `filter` must be a valid pointer from `clearcore_filter_create` or NULL.
@@ -420,12 +433,10 @@ pub unsafe extern "C" fn clearcore_filter_supports_voice_profile(
     if filter.is_null() {
         return -1;
     }
-    let filter_ref = unsafe { &*filter };
-    i32::from(filter_ref.supports_film)
+    i32::from(unsafe { &*filter }.core.engine.supports_speaker())
 }
 
-/// Report whether a voice profile is currently active (`1`) or the filter is running neutral
-/// (`0`). Returns `-1` if `filter` is NULL.
+/// `1` when a voice profile is active, `0` when neutral, `-1` for NULL.
 ///
 /// # Safety
 /// `filter` must be a valid pointer from `clearcore_filter_create` or NULL.
@@ -436,429 +447,36 @@ pub unsafe extern "C" fn clearcore_filter_is_voice_profile_active(
     if filter.is_null() {
         return -1;
     }
-    let filter_ref = unsafe { &*filter };
-    i32::from(filter_ref.active_profile_id.is_some())
+    i32::from(unsafe { &*filter }.active_profile_id.is_some())
+}
+
+/// Writes the diagnostics JSON (`model`, `backend`, `fallback_reason`, `standby`, `profile_id`,
+/// `speaker_conditioning`, `eq`, `silent_hops`, `latency_us` {`hops`,`p50`,`p99`,`max`}) into
+/// `buf` (NUL-terminated, truncated to `len - 1` bytes). Returns the full length without the NUL,
+/// or `-1` when `filter` is NULL. `buf` may be NULL with `len` 0 to query the length.
+///
+/// # Safety
+/// `filter` as above; `buf` must point to `len` writable bytes when non-NULL. Same thread as
+/// `clearcore_filter_process` (it reads the latency record).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clearcore_filter_status_json(
+    filter: *mut ClearcoreFilter,
+    buf: *mut c_char,
+    len: usize,
+) -> i32 {
+    if filter.is_null() {
+        return -1;
+    }
+    let json = unsafe { &*filter }.status_json();
+    if !buf.is_null() && len > 0 {
+        let n = json.len().min(len - 1);
+        unsafe {
+            std::ptr::copy_nonoverlapping(json.as_ptr(), buf.cast::<u8>(), n);
+            *buf.add(n) = 0;
+        }
+    }
+    i32::try_from(json.len()).unwrap_or(i32::MAX)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ffi::{CString, OsString};
-    use std::sync::Mutex;
-    use realtime_noise_model::{BandGains, FiLMVectors, FILM_HIDDEN_DIM};
-    use tempfile::TempDir;
-
-    /// Serializes env-touching tests so `CLEARCORE_DEV_PDFNET3_*` and `XDG_DATA_HOME` mutations
-    /// never race. Each holder also gets an empty, isolated profile-store directory so `create_filter`
-    /// always starts from neutral conditioning regardless of any real machine state.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Guard returned by [`lock_env`]. Releases the env lock (and the temp dir) on drop; the env vars
-    /// it sets are not automatically restored because the lock is process-wide and exclusive — each
-    /// test sets what it needs before touching the FFI. Tests that alter `CLEARCORE_DEV_*` restore
-    /// them via [`DisableProTier`].
-    struct EnvGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        _data: TempDir,
-    }
-
-    fn lock_env() -> EnvGuard {
-        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let data = tempfile::tempdir().expect("tempdir");
-        // SAFETY (edition 2024): `set_var` is unsafe; we hold the process-wide env lock for the
-        // whole test so the mutation is race-free within this test binary.
-        unsafe { std::env::set_var("XDG_DATA_HOME", data.path()) };
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", data.path()) };
-        EnvGuard {
-            _lock: lock,
-            _data: data,
-        }
-    }
-
-    /// Disables the model by making `archive_source` return `InvalidOverride` through a *partial*
-    /// env configuration (asset set, SHA unset). Restores the previous values on
-    /// drop so subsequent tests see the original machine config.
-    struct DisableProTier {
-        prev_asset: Option<OsString>,
-        prev_sha: Option<OsString>,
-    }
-
-    impl DisableProTier {
-        fn engage() -> Self {
-            let prev_asset = std::env::var_os(ENV_DEV_STATEFUL_ASSET);
-            let prev_sha = std::env::var_os(ENV_DEV_STATEFUL_SHA256);
-            unsafe {
-                std::env::set_var(
-                    ENV_DEV_STATEFUL_ASSET,
-                    "/nonexistent/clearcore-tier1-disabled",
-                )
-            };
-            unsafe { std::env::remove_var(ENV_DEV_STATEFUL_SHA256) };
-            Self {
-                prev_asset,
-                prev_sha,
-            }
-        }
-    }
-
-    impl Drop for DisableProTier {
-        fn drop(&mut self) {
-            unsafe {
-                match self.prev_asset.take() {
-                    Some(v) => std::env::set_var(ENV_DEV_STATEFUL_ASSET, v),
-                    None => std::env::remove_var(ENV_DEV_STATEFUL_ASSET),
-                }
-                match self.prev_sha.take() {
-                    Some(v) => std::env::set_var(ENV_DEV_STATEFUL_SHA256, v),
-                    None => std::env::remove_var(ENV_DEV_STATEFUL_SHA256),
-                }
-            }
-        }
-    }
-
-    fn repo_root() -> CString {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        CString::new(root.to_string_lossy().as_bytes()).unwrap_or_default()
-    }
-
-    fn create_filter() -> *mut ClearcoreFilter {
-        let root = repo_root();
-        unsafe { clearcore_filter_create(root.as_ptr()) }
-    }
-
-    /// Voiced-speech-like frame: 120 Hz fundamental with 20 harmonics and a 4 Hz syllabic envelope.
-    fn voiced_frame(index: u32) -> [f32; 480] {
-        let mut frame = [0.0_f32; 480];
-        for (offset, sample) in (0_u32..).zip(frame.iter_mut()) {
-            let t = (f64::from(index) * 480.0 + f64::from(offset)) / 48_000.0;
-            let envelope = 0.5 + 0.5 * (std::f64::consts::TAU * 4.0 * t).sin();
-            let voiced: f64 = (1..=20_u32)
-                .map(|h| {
-                    let h = f64::from(h);
-                    (std::f64::consts::TAU * 120.0 * h * t).sin() / h
-                })
-                .sum();
-            *sample = (0.25 * envelope * voiced) as f32;
-        }
-        frame
-    }
-
-    fn process(filter: *mut ClearcoreFilter, input: &[f32; 480]) -> ([f32; 480], i32) {
-        let mut output = [0.0_f32; 480];
-        let rc = unsafe { clearcore_filter_process(filter, input.as_ptr(), output.as_mut_ptr()) };
-        (output, rc)
-    }
-
-    /// A non-identity (conditioned) profile: gamma=1.2, beta=0.05, neutral EQ. Mirrors the test
-    /// fixture in `crates/model/src/pdfnet3_dev.rs` so it is within `FiLM` range bounds.
-    fn conditioned_profile(id: &str) -> VoiceProfile {
-        let film = FiLMVectors::new(
-            vec![1.2; FILM_HIDDEN_DIM],
-            vec![0.05; FILM_HIDDEN_DIM],
-            vec![1.2; FILM_HIDDEN_DIM],
-            vec![0.05; FILM_HIDDEN_DIM],
-        )
-        .expect("conditioned FiLM vectors");
-        VoiceProfile::new(id, "Speaker", "2026-10-05T12:00:00Z", film, Some(BandGains::neutral()))
-            .expect("conditioned voice profile")
-    }
-
-    /// Neutral identity profile: accepted by both the FiLM-capable pro model and the base model.
-    fn identity_profile(id: &str) -> VoiceProfile {
-        VoiceProfile::identity(id, "Speaker", "2026-10-05T12:00:00Z").expect("identity profile")
-    }
-
-    /// `true` when the filter will resolve a stateful pDFNet3 archive (bundled or override).
-    fn pro_archive_present() -> bool {
-        resolve_archive(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").as_path()).is_some()
-    }
-
-    #[test]
-    fn set_preset_rejects_a_null_handle() {
-        assert_eq!(
-            unsafe { clearcore_filter_set_preset(std::ptr::null_mut(), 0) },
-            -1
-        );
-    }
-
-    #[test]
-    fn set_preset_rejects_unknown_values_and_keeps_the_filter_usable() {
-        let _env = lock_env();
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        assert_eq!(unsafe { clearcore_filter_set_preset(filter, 4) }, -3);
-        assert_eq!(unsafe { clearcore_filter_set_preset(filter, 255) }, -3);
-        assert_eq!(process(filter, &voiced_frame(0)).1, 0);
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn set_preset_accepts_every_preset() {
-        let _env = lock_env();
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        for value in 0..=3_u8 {
-            assert_eq!(unsafe { clearcore_filter_set_preset(filter, value) }, 0);
-        }
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn set_leveler_intensity_rejects_a_null_handle() {
-        assert_eq!(
-            unsafe { clearcore_filter_set_leveler_intensity(std::ptr::null_mut(), 50) },
-            -1
-        );
-    }
-
-    #[test]
-    fn set_leveler_intensity_updates_control() {
-        let _env = lock_env();
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        assert_eq!(unsafe { clearcore_filter_set_leveler_intensity(filter, 80) }, 0);
-        assert_eq!(unsafe { (*filter).control.leveler_intensity() }, 80);
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn new_filter_reports_the_model_latency_plus_the_chain() {
-        let _env = lock_env();
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        let latency = unsafe { (*filter).backend.algorithmic_latency_samples() };
-        assert_eq!(latency, 1_440 + 96);
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn off_is_bit_exact_with_the_raw_neural_backend_and_a_preset_changes_it() {
-        let _env = lock_env();
-        let root = repo_root();
-        let root_path = Path::new(root.to_str().unwrap_or("."));
-        // Match `clearcore_filter_create`'s exact model-resolution so the reference and the FFI
-        // filter use the same (tier-1 or tier-2) graphs — otherwise the bit-exact comparison
-        // below is meaningless on machines that ship the pro archive.
-        let reference = resolve_ort_backend(root_path);
-        assert!(reference.is_some());
-        let Some(mut reference) = reference else { return };
-
-        // `lock_env` already pointed XDG_DATA_HOME at an empty temp dir, so `create_filter` starts
-        // from neutral conditioning and is comparable to the unconditioned `reference`.
-        let filter = create_filter();
-        assert!(!filter.is_null());
-
-        for index in 0..30 {
-            let input = voiced_frame(index);
-            let expected = reference.process(&input).map(|frame| frame.samples).ok();
-            let (output, rc) = process(filter, &input);
-            assert_eq!(rc, 0);
-            assert_eq!(Some(output), expected, "Off must not alter frame {index}");
-        }
-
-        assert_eq!(unsafe { clearcore_filter_set_preset(filter, 3) }, 0);
-        let mut changed = false;
-        for index in 30..130 {
-            let input = voiced_frame(index);
-            let expected = reference.process(&input).map(|frame| frame.samples).ok();
-            let (output, rc) = process(filter, &input);
-            assert_eq!(rc, 0);
-            if Some(output) != expected {
-                changed = true;
-                break;
-            }
-        }
-        assert!(changed, "Broadcast never altered the neural output");
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn voice_profile_support_flag_matches_the_resolved_model_tier() {
-        let _env = lock_env();
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        assert_eq!(
-            unsafe { clearcore_filter_supports_voice_profile(filter) },
-            i32::from(unsafe { (*filter).supports_film })
-        );
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn create_strictly_requires_pdfnet3_pro() {
-        let _env = lock_env();
-        let filter = create_filter();
-        if pro_archive_present() {
-            assert!(!filter.is_null());
-            let supports = unsafe { clearcore_filter_supports_voice_profile(filter) };
-            assert_eq!(
-                supports, 1,
-                "pDFNet3 Pro v2 archive present -> model must expose FiLM inputs"
-            );
-            assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
-            unsafe { clearcore_filter_free(filter) };
-        } else {
-            assert!(filter.is_null(), "must be null when pro archive is absent");
-        }
-    }
-
-    // --- pDFNet3 Pro v2 voice-profile acceptance (presence-gated) ---
-
-    #[test]
-    fn set_voice_profile_applies_a_conditioned_profile_on_the_pro_model() {
-        let _env = lock_env();
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        // Presence-gated: a conditioned profile only applies when tier 1 (FiLM) is active.
-        if unsafe { clearcore_filter_supports_voice_profile(filter) } != 1 {
-            unsafe { clearcore_filter_free(filter) };
-            eprintln!("skipped: pDFNet3 pro archive not present on this machine");
-            return;
-        }
-        let json = CString::new(conditioned_profile("spk-pro-set").to_json().expect("json")).unwrap();
-        assert_eq!(unsafe { clearcore_filter_set_voice_profile(filter, json.as_ptr()) }, 0);
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 1);
-        assert_eq!(unsafe { (*filter).active_profile_id.as_deref() }, Some("spk-pro-set"));
-
-        // Clearing must restore neutral and forget the cached id.
-        assert_eq!(unsafe { clearcore_filter_clear_voice_profile(filter) }, 0);
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
-        assert_eq!(unsafe { (*filter).active_profile_id.as_deref() }, None);
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    // --- always-run error/neutral paths (independent of which model tier is present) ---
-
-    #[test]
-    fn set_voice_profile_null_and_payload_errors() {
-        let _env = lock_env();
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        let json = CString::new(conditioned_profile("spk-x").to_json().expect("json")).unwrap();
-
-        // NULL handle / NULL payload.
-        assert_eq!(
-            unsafe { clearcore_filter_set_voice_profile(std::ptr::null_mut(), json.as_ptr()) },
-            -1
-        );
-        assert_eq!(unsafe { clearcore_filter_set_voice_profile(filter, std::ptr::null()) }, -1);
-
-        // Malformed JSON -> -2 (parse failure before any integrity check).
-        let garbage = CString::new("{ this is not valid json").unwrap();
-        assert_eq!(
-            unsafe { clearcore_filter_set_voice_profile(filter, garbage.as_ptr()) },
-            -2
-        );
-
-        // Tampered integrity (the integrity hash no longer matches its body).
-        let tampered = json.to_str().expect("utf8").replace("Speaker", "Imposter");
-        let tampered = CString::new(tampered).unwrap();
-        assert_eq!(
-            unsafe { clearcore_filter_set_voice_profile(filter, tampered.as_ptr()) },
-            -2
-        );
-        // A failed apply must not leave a stale active id behind.
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn clear_voice_profile_on_a_neutral_filter_is_a_no_op() {
-        let _env = lock_env();
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        assert_eq!(unsafe { clearcore_filter_clear_voice_profile(filter) }, 0);
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
-        assert_eq!(unsafe { clearcore_filter_clear_voice_profile(std::ptr::null_mut()) }, -1);
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn without_environment_the_bundled_pdfnet3_pro_is_loaded() {
-        let _env = lock_env();
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        if std::env::var_os(ENV_DEV_STATEFUL_ASSET).is_some()
-            || std::env::var_os(ENV_DEV_STATEFUL_SHA256).is_some()
-        {
-            eprintln!("skipped: a development override is set in this environment");
-            return;
-        }
-        assert!(matches!(archive_source(&root), ArchiveSource::Bundled(_)));
-        let archive = resolve_archive(&root).expect("bundled stateful pDFNet3 Pro");
-        assert_eq!(archive.sha256(), pdfnet3_bundle::PDFNET3_PRO_STATEFUL_SHA256);
-        assert_eq!(archive.asset_id(), realtime_noise_model::PDFNET3_PRO_ASSET_ID);
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        assert_eq!(unsafe { clearcore_filter_supports_voice_profile(filter) }, 1);
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn disabled_pro_tier_yields_null_filter_without_fallback() {
-        let _env = lock_env();
-        let _pro = DisableProTier::engage();
-        assert!(!pro_archive_present(), "precondition: pro tier must be disabled");
-
-        let filter = create_filter();
-        assert!(filter.is_null(), "without pro archive, filter creation must fail closed with no fallback");
-    }
-
-    #[test]
-    fn reload_active_profile_reads_the_store_and_falls_back_to_neutral() {
-        let _env = lock_env();
-        // `lock_env` already redirected XDG_DATA_HOME to an empty dir; `ProfileStore::default_dir`
-        // therefore points inside the temp dir we own.
-        let profiles_dir = ProfileStore::default_dir().expect("default_dir under XDG_DATA_HOME");
-        let store = ProfileStore::new(&profiles_dir);
-
-        let filter = create_filter();
-        assert!(!filter.is_null());
-        // No profile on disk yet -> neutral.
-        assert_eq!(unsafe { clearcore_filter_reload_active_profile(filter) }, 0);
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
-
-        // An identity profile loads successfully on both the base and the pro model.
-        store.save_active(&identity_profile("spk-reload")).expect("save active");
-        assert_eq!(unsafe { clearcore_filter_reload_active_profile(filter) }, 1);
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 1);
-
-        // `reload` honors the NULL handle.
-        assert_eq!(
-            unsafe { clearcore_filter_reload_active_profile(std::ptr::null_mut()) },
-            -1
-        );
-
-        // Removing the file returns the filter to neutral.
-        store.clear_active().expect("clear active");
-        assert_eq!(unsafe { clearcore_filter_reload_active_profile(filter) }, 0);
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
-        unsafe { clearcore_filter_free(filter) };
-    }
-
-    #[test]
-    fn reload_active_profile_falls_back_to_neutral_when_voice_isolation_disabled_in_settings() {
-        let _env = lock_env();
-        let profiles_dir = ProfileStore::default_dir().expect("default_dir under XDG_DATA_HOME");
-        let store = ProfileStore::new(&profiles_dir);
-        store.save_active(&identity_profile("spk-disabled")).expect("save active");
-
-        let filter = create_filter();
-        assert!(!filter.is_null());
-
-        // By default (settings file missing), voice_isolation_enabled is true.
-        assert_eq!(unsafe { clearcore_filter_reload_active_profile(filter) }, 1);
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 1);
-
-        // Save settings with voice_isolation_enabled = false.
-        let mut settings = Settings::default();
-        settings.voice_isolation_enabled = false;
-        let settings_path = default_settings_path();
-        settings.save(&settings_path).expect("save settings");
-
-        // Reload should now fall back to neutral (return 0) and deactivate voice profile.
-        assert_eq!(unsafe { clearcore_filter_reload_active_profile(filter) }, 0);
-        assert_eq!(unsafe { clearcore_filter_is_voice_profile_active(filter) }, 0);
-
-        unsafe { clearcore_filter_free(filter) };
-    }
-}
+mod tests;

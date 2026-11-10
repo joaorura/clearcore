@@ -174,3 +174,9 @@ contra o tract) e a NPU falha com `OpenVINO device not found: NPU`, como esperad
   NPU 2,03 / 21,85 ms.
 - **Seleção**: com o arquivo de manifesto como modelo de isolamento, `auto`/`tract` usam o executor no tract e
   os pedidos OpenVINO usam o executor no OpenVINO com o MESMO arquivo (não há mais export separado).
+
+## Filtro do microfone virtual
+
+Desde a branch `feat/pro-v3-filter` o `libclearcore_filter` também roda no OpenVINO (NPU → GPU → CPU
+conforme o `backend` do `settings.json`, com o ONNX Runtime CPU de reserva quente) e aplica a EQ do
+perfil. Detalhes, política de troca e medições em `docs/virtual-mic-filter.md`.

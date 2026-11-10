@@ -98,6 +98,10 @@ typedef int (*clearcore_clear_voice_profile_fn_t)(void *filter);
 typedef int (*clearcore_reload_active_profile_fn_t)(void *filter);
 typedef int (*clearcore_supports_voice_profile_fn_t)(const void *filter);
 typedef int (*clearcore_is_voice_profile_active_fn_t)(const void *filter);
+/* Optional (libraries with the manifest-driven pDFNet3 Pro v3 filter): diagnostics JSON with the
+ * model, runtime (ort:CPU / openvino:NPU|GPU|CPU), fallback reason, profile and latency. Writes a
+ * NUL-terminated, possibly truncated string; returns the full length or -1. */
+typedef int (*clearcore_status_json_fn_t)(void *filter, char *buf, size_t len);
 
 /**
  * PipeWire Native Helper Context.
@@ -132,6 +136,7 @@ typedef struct pipewire_helper_context {
     clearcore_reload_active_profile_fn_t neural_reload_active_profile_fn;
     clearcore_supports_voice_profile_fn_t neural_supports_voice_profile_fn;
     clearcore_is_voice_profile_active_fn_t neural_is_voice_profile_active_fn;
+    clearcore_status_json_fn_t neural_status_json_fn; /* optional: NULL on an old library */
 
     /* Profile reload synchronization.
      * `applied_generation` is the shared-state `generation` value the last reload was driven by;
