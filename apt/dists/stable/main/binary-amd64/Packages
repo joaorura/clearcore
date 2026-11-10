@@ -3,11 +3,13 @@ Version: 0.1.0-beta.1
 Architecture: amd64
 Maintainer: João Messias Lima Pereira <jmessiaslp856@gmail.com>
 Depends: pipewire (>= 0.3.0)
+Recommends: ocl-icd-libopencl1
+Suggests: intel-opencl-icd, libze1
 Filename: pool/main/Clearcore-0.1.0-beta.1_amd64.deb
-Size: 308949316
-MD5sum: f4076e8866f61d42253c492d1d87a893
-SHA1: 2424c629a8f7404c4685dec8f98a1038959d0bd4
-SHA256: 69766f02f35c8fb4a04daf559b8a0f4d8e2bd70f1bf746a19013e635c12b8fcf
+Size: 334427594
+MD5sum: 9ea7c4bd535cacc3a35e2c2e7157fd65
+SHA1: fe17f4ed200bac6e976de2aee0e869c2235af15c
+SHA256: e766ae54602cc0ed34593a6278426ae23f04cc389b5b7bd8793135676dda1fc3
 Section: sound
 Priority: optional
 Homepage: https://github.com/joaorura/clearcore
