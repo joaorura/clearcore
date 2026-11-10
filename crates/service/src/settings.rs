@@ -16,7 +16,12 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use studio_dsp::Preset;
 
-pub const SETTINGS_VERSION: u32 = 1;
+/// v2: the voice profile (pDFNet3 Pro v3 speaker conditioning) is OFF by default. A v1 file's
+/// `voice_isolation_enabled` was written from the old `true` default, not by the user, so it is
+/// ignored and the profile stays off until the user turns it on.
+pub const SETTINGS_VERSION: u32 = 2;
+/// First version whose `voice_isolation_enabled` is an explicit user choice.
+const VOICE_ISOLATION_OPT_IN_VERSION: u32 = 2;
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
 
 const SETTINGS_DIR_NAME: &str = "clearcore";
@@ -31,7 +36,8 @@ pub struct Settings {
     pub backend: Option<String>,
     /// Suppression intensity 0–100 (maps to `post_filter_beta` 0.0–0.10).
     pub filter_intensity: u8,
-    /// Whether voice isolation (biometric profile) is active.
+    /// Whether the user turned the voice profile (speaker conditioning) on. Off by default: a
+    /// stored profile is never applied without this explicit opt-in.
     pub voice_isolation_enabled: bool,
     /// Voice isolation intensity 0–100 (percentage scale for FiLM vectors).
     pub voice_isolation_intensity: u8,
@@ -46,7 +52,7 @@ impl Default for Settings {
             preset: Preset::Off,
             backend: None,
             filter_intensity: 50,
-            voice_isolation_enabled: true,
+            voice_isolation_enabled: false,
             voice_isolation_intensity: 100,
             voice_leveler: 0,
         }
@@ -76,7 +82,7 @@ fn default_filter_intensity() -> u8 {
 }
 
 fn default_voice_isolation() -> bool {
-    true
+    false
 }
 
 fn default_voice_isolation_intensity() -> u8 {
@@ -97,7 +103,8 @@ impl Settings {
                 preset: convert_ipc_preset_to_dsp(file.preset),
                 backend: file.backend,
                 filter_intensity: file.filter_intensity.min(100),
-                voice_isolation_enabled: file.voice_isolation_enabled,
+                voice_isolation_enabled: file.version >= VOICE_ISOLATION_OPT_IN_VERSION
+                    && file.voice_isolation_enabled,
                 voice_isolation_intensity: file.voice_isolation_intensity.min(100),
                 voice_leveler: file.voice_leveler.min(100),
             },

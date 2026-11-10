@@ -118,6 +118,8 @@ fn supervisor_with(supports: bool) -> (EngineSupervisor, Calls, Knobs) {
 fn daemon_with_knobs(dir: &Path, supports: bool) -> (ServiceDaemon, Calls, Knobs) {
     let (supervisor, calls, knobs) = supervisor_with(supports);
     let mut daemon = ServiceDaemon::with_supervisor(supervisor);
+    // The voice profile is opt-in (off by default): these tests start from a user who turned it on.
+    send(&mut daemon, IpcCommand::SetVoiceIsolation { enabled: true });
     daemon.attach_profile_store(ProfileStore::new(dir));
     (daemon, calls, knobs)
 }
@@ -805,4 +807,38 @@ fn set_voice_isolation_intensity_updates_status_and_reapplies() {
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["voice_isolation_intensity"], 75);
     assert_eq!(status.payload["is_voice_profile_active"], true);
+}
+
+/// The voice profile is OFF by default: a profile already stored on disk is NOT applied at boot
+/// until the user turns it on (`SetVoiceIsolation(true)`), and then it is.
+#[test]
+fn a_stored_profile_is_not_applied_at_boot_until_the_user_turns_it_on() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("profiles");
+    ProfileStore::new(&dir)
+        .save_active_v2(&test_profile("spk-boot", "Alice"))
+        .expect("save");
+
+    let (supervisor, calls, _) = supervisor_with(true);
+    let mut daemon = ServiceDaemon::with_supervisor(supervisor);
+    daemon.attach_profile_store(ProfileStore::new(&dir));
+
+    assert!(
+        calls.lock().unwrap().iter().all(Option::is_none),
+        "no conditioning delivered at boot"
+    );
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_isolation_enabled"], false);
+    assert_eq!(status.payload["stored_voice_profile_id"], "spk-boot");
+    assert_eq!(status.payload["active_voice_profile_id"], json!(null));
+    assert_eq!(status.payload["is_voice_profile_active"], false);
+
+    let resp = send(&mut daemon, IpcCommand::SetVoiceIsolation { enabled: true });
+    assert_eq!(resp.payload["is_voice_profile_active"], true);
+    assert_eq!(
+        calls.lock().unwrap().last().cloned().flatten().as_deref(),
+        Some("spk-boot")
+    );
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["active_voice_profile_id"], "spk-boot");
 }

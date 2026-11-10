@@ -176,7 +176,8 @@ impl ServiceDaemon {
             preset: supervisor.dsp_preset(),
             backend: None,
             filter_intensity: 50,
-            voice_isolation_enabled: true,
+            // The voice profile is opt-in: nothing is applied until `SetVoiceIsolation(true)`.
+            voice_isolation_enabled: false,
             voice_isolation_intensity: 100,
             voice_leveler: supervisor.voice_leveler_intensity(),
         };

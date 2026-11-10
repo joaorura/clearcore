@@ -26,12 +26,26 @@ fn write_settings(dir: &TempDir, text: &str) -> PathBuf {
 }
 
 #[test]
-fn defaults_are_version_one_with_preset_off() {
+fn defaults_are_version_two_with_preset_off_and_the_voice_profile_off() {
     let settings = Settings::default();
     assert_eq!(settings.version, SETTINGS_VERSION);
-    assert_eq!(SETTINGS_VERSION, 1);
+    assert_eq!(SETTINGS_VERSION, 2);
     assert_eq!(settings.preset, Preset::Off);
     assert_eq!(settings.backend, None);
+    assert!(!settings.voice_isolation_enabled);
+}
+
+#[test]
+fn a_v1_file_never_turns_the_voice_profile_on() {
+    // v1 wrote `true` from the old default, not from the user: ignored.
+    let parsed = Settings::parse_or_default(r#"{"version":1,"voice_isolation_enabled":true}"#);
+    assert!(!parsed.voice_isolation_enabled);
+    assert_eq!(parsed.version, SETTINGS_VERSION);
+    // A v2 file carries the user's explicit choice.
+    let parsed = Settings::parse_or_default(r#"{"version":2,"voice_isolation_enabled":true}"#);
+    assert!(parsed.voice_isolation_enabled);
+    // Absent field: off.
+    assert!(!Settings::parse_or_default(r#"{"version":2}"#).voice_isolation_enabled);
 }
 
 #[test]
@@ -118,7 +132,7 @@ fn save_writes_versioned_json_creates_parents_and_leaves_no_temporary_file() {
 
     let value: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(value["version"], 1);
+    assert_eq!(value["version"], 2);
     assert_eq!(value["preset"], "Podcast");
     assert!(!path.with_file_name("settings.json.tmp").exists());
 }

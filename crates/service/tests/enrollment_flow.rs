@@ -191,6 +191,8 @@ fn daemon_with(dir: &Path, setup: Setup) -> (ServiceDaemon, Arc<Mutex<Option<f32
         "fake",
     );
     let mut daemon = ServiceDaemon::with_supervisor(supervisor).with_enrollment_hooks(hooks);
+    // The voice profile is opt-in (off by default): these tests start from a user who turned it on.
+    send(&mut daemon, IpcCommand::SetVoiceIsolation { enabled: true });
     daemon.attach_profile_store(ProfileStore::new(dir));
     (daemon, seen_peak)
 }

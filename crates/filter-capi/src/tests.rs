@@ -415,10 +415,16 @@ fn reload_reads_v2_from_disk_honours_settings_and_rejects_bad_files() {
     unsafe {
         assert_eq!(clearcore_filter_reload_active_profile(filter), 0);
         write(&profile.to_json().expect("json"));
+        // Off by default: without the user's opt-in in settings.json the stored profile is ignored.
+        assert_eq!(clearcore_filter_reload_active_profile(filter), 0);
+        assert!(!(*filter).core().speaker_active());
+        let mut settings = Settings::default();
+        assert!(!settings.voice_isolation_enabled);
+        settings.voice_isolation_enabled = true;
+        settings.save(&default_settings_path()).expect("settings");
         assert_eq!(clearcore_filter_reload_active_profile(filter), 1);
         assert!((*filter).core().speaker_active());
 
-        let mut settings = Settings::default();
         settings.voice_isolation_enabled = false;
         settings.save(&default_settings_path()).expect("settings");
         assert_eq!(clearcore_filter_reload_active_profile(filter), 0);

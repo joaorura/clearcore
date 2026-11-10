@@ -57,15 +57,17 @@ CLEARCORE_DEV_ENROLLMENT_SHA256=bd4d6dd941f8527b5011a2bae78169148f33155e25d30c57
 
 The asset is never copied to `vendor/approved/`, pinned or distributed (see `docs/ipc-v1.md` §3.1.7).
 
-**Isolation model: bundled pDFNet3 Pro (FiLM).** The pDFNet3 Pro is the ONLY isolation model shipped
-(`models/pdfnet3/`, see its `README.md`): the daemon loads `pdfnet3-release-asset-v1.tar.gz` (tract) and the
-virtual-mic filter loads `pdfnet3-stateful-asset-v1.tar.gz` (ONNX Runtime) by default, with no environment
-variable; both SHA-256 are pinned in `crates/model/src/pdfnet3_bundle.rs`. Every backend request runs tract
-with it (`GetStatus`: `isolation_model: "pdfnet3-pro"`, `voice_profile_supported: true`). If the archive is
-missing or tampered there is no fallback: no backend, `isolation_model: "none"` and a fixed
-`isolation_model_error` (`MODEL_*`). The base DFNet3 (`models/stateful/`, `vendor/approved/`) stays in the
-repository for tests only and is not packaged. `models/enrollment/enrollment.onnx` is the enrollment model
-paired with this checkpoint.
+**Isolation model: bundled pDFNet3 Pro v3 full.** The pDFNet3 Pro v3 full (speaker embedding
+[192] + `speaker_present`) is the ONLY isolation model shipped (`models/pdfnet3/`, see its `README.md`):
+ONE manifest export, `pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz`, loaded by the daemon
+(`pdfnet3_bundle::load_isolation_archive`, tract or OpenVINO) and by the virtual-mic filter (ONNX Runtime
+or OpenVINO) with no environment variable; its SHA-256 (and the enrollment v3 one) is pinned in
+`crates/model/src/pdfnet3_bundle.rs`. If the archive is missing or tampered there is no fallback: no backend,
+`isolation_model: "none"` and a fixed `isolation_model_error` (`MODEL_*`). The base DFNet3
+(`models/stateful/`, `vendor/approved/`) stays in the repository for tests only and is not packaged.
+`models/enrollment/enrollment.onnx` is the enrollment v3 model (SHA-256 `82a292b9…`) whose embedding
+conditions this model. The voice profile is OFF by default (`settings.json` `voice_isolation_enabled:
+false`, v1 files ignored): a stored profile is applied only after the user turns it on.
 
 Development overrides (both variables or none): `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256` (daemon, tract
 export) and `CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET`/`_SHA256` (filter, stateful export). An invalid override

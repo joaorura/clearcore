@@ -171,6 +171,8 @@ fn real_denoiser_and_development_model_build_and_apply_a_profile() {
             legacy_samples_dir: None,
         });
     daemon.set_repo_root(repo_root);
+    // The voice profile is opt-in (off by default).
+    send(&mut daemon, IpcCommand::SetVoiceIsolation { enabled: true });
     daemon.attach_profile_store(ProfileStore::new(temp.path()));
 
     let clip = speech_over_noise();
@@ -286,6 +288,8 @@ fn real_pdfnet3_backend_accepts_the_profile_built_from_real_samples() {
             legacy_samples_dir: None,
         });
     daemon.set_repo_root(repo_root);
+    // The voice profile is opt-in (off by default).
+    send(&mut daemon, IpcCommand::SetVoiceIsolation { enabled: true });
     daemon.attach_profile_store(ProfileStore::new(temp.path()));
 
     let status = send(&mut daemon, IpcCommand::GetStatus);
