@@ -111,6 +111,7 @@ update-desktop-database /usr/share/applications 2>/dev/null || true
 - Republished beta 1: pDFNet3 Pro v3 full (speaker embedding conditioning) is the only
   isolation model, with the enrollment v3 model (both SHA-256 pinned); the voice profile is
   off by default and is turned on when a new profile is generated.
+- Source is clean under cargo clippy -D warnings and cargo fmt --check.
 
 * Mon Nov 09 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.1-1
 - First beta release: pDFNet3 Pro (FiLM voice-profile conditioning) bundled as the only
