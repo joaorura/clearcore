@@ -129,6 +129,17 @@ impl<B: InferenceBackend> InferenceBackend for StudioBackend<B> {
     fn supports_voice_profile(&self) -> bool {
         self.inner.supports_voice_profile()
     }
+
+    fn set_speaker_conditioning(
+        &mut self,
+        conditioning: Option<&crate::SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        self.inner.set_speaker_conditioning(conditioning)
+    }
+
+    fn supports_speaker_embedding(&self) -> bool {
+        self.inner.supports_speaker_embedding()
+    }
 }
 
 #[cfg(test)]

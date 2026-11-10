@@ -10,6 +10,7 @@ arquivos faltar ou o SHA-256 não bater, o daemon não carrega modelo nenhum e o
 |---|---:|---|---|
 | `pdfnet3-release-asset-v1.tar.gz` | 7978093 | `1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8` | daemon (`realtime-noise-service`, tract): backend que recebe o perfil e denoiser neutro das amostras de cadastro |
 | `pdfnet3-stateful-asset-v1.tar.gz` | 7974311 | `d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5` | `libclearcore_filter` (microfone virtual, ONNX Runtime, estados recorrentes como portas do grafo) |
+| `pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz` | 12375900 | `c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee` | pDFNet3 Pro v3 **completo** (memória de locutor + cross-attention, `speaker_embedding` [1,192] + `speaker_present` [1]): UM export stateful com `manifest.json` para todos os runtimes (daemon tract/OpenVINO via executor genérico; filtro ORT via o mesmo executor). Carregado por `pdfnet3_bundle::load_isolation_archive` |
 
 Os dois hashes estão fixados em `crates/model/src/pdfnet3_bundle.rs` e conferidos também por
 `crates/app-tauri/scripts/package-app.mjs` (o build do pacote falha se não baterem) e pelo workflow de release.

@@ -24,7 +24,12 @@ pub const AUTO_QUALIFICATION_MAX_HOP_MS: f32 = if cfg!(debug_assertions) {
 /// followed by benchmark frames of synthetic audio (silence/finite samples).
 /// Measures the processing time per frame and verifies real-time compliance within `max_hop_ms`.
 pub fn qualify_backend_runtime(backend: &mut dyn InferenceBackend, max_hop_ms: f32) -> bool {
-    let dummy_frame = [0.0f32; HOP_SAMPLES];
+    // A quiet tone, not digital silence: stateful backends skip the model on silent hops
+    // (`stateful_graph::DIGITAL_SILENCE_RMS`), which would time nothing.
+    #[allow(clippy::cast_precision_loss)]
+    let dummy_frame: [f32; HOP_SAMPLES] = std::array::from_fn(|i| {
+        1e-3 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48_000.0).sin()
+    });
 
     // Warmup frames: JIT compilation, driver command queue warm up, and buffer allocations
     for w in 0..5 {

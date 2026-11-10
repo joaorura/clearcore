@@ -16,6 +16,8 @@ pub mod microphone_eq;
 pub mod model_registry;
 #[cfg(feature = "ort")]
 mod ort_backend;
+#[cfg(feature = "ort")]
+pub mod ort_graph;
 #[cfg(any(feature = "tract", feature = "ort"))]
 pub mod pdfnet3_bundle;
 #[cfg(any(feature = "tract", feature = "ort"))]
@@ -23,10 +25,16 @@ pub mod pdfnet3_dev;
 pub mod profile_store;
 pub mod resample;
 pub mod spectral_eq;
+pub mod speaker_conditioning;
 pub mod speech_trim;
+pub mod stateful_asset;
+#[cfg(any(feature = "tract", feature = "ort"))]
+pub mod stateful_graph;
 mod studio_backend;
 #[cfg(feature = "tract")]
 mod tract_backend;
+#[cfg(feature = "tract")]
+pub mod tract_graph;
 pub mod voice_profile;
 pub mod wav;
 
@@ -57,6 +65,12 @@ pub use profile_store::{ACTIVE_PROFILE_FILE_NAME, ProfileStore};
 pub use studio_backend::{StudioBackend, StudioResetHandle};
 #[cfg(feature = "tract")]
 pub use tract_backend::TractBackend;
+pub use speaker_conditioning::SpeakerConditioning;
+pub use stateful_asset::{StatefulManifest, StatefulModelFiles};
+#[cfg(any(feature = "tract", feature = "ort"))]
+pub use stateful_graph::{
+    ConditioningKind, GraphSession, StatefulGraphBackend, StatefulGraphExecutor, TensorSpec,
+};
 pub use voice_profile::{
     BandGains, FILM_HIDDEN_DIM, FiLMVectors, MAX_EQ_GAIN_DB, MIN_EQ_GAIN_DB, NUM_ERB_BANDS,
     VoiceProfile, VoiceProfileError,
@@ -150,6 +164,27 @@ pub trait InferenceBackend: Send {
     fn supports_voice_profile(&self) -> bool {
         true
     }
+
+    /// Conditions the model on a speaker embedding (pDFNet3 Pro v3 full), or returns to the
+    /// neutral voice with `None`. The default (models without `speaker_embedding`) accepts only
+    /// `None`, which clears the profile like `set_voice_profile(None)`.
+    fn set_speaker_conditioning(
+        &mut self,
+        conditioning: Option<&SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        match conditioning {
+            None => self.set_voice_profile(None),
+            Some(_) => Err(InferenceError::UnsupportedFeature(
+                "speaker embedding conditioning".into(),
+            )),
+        }
+    }
+
+    /// Whether [`Self::set_speaker_conditioning`] accepts a speaker (the model declares
+    /// `speaker_embedding`).
+    fn supports_speaker_embedding(&self) -> bool {
+        false
+    }
 }
 
 /// Policy for backends that cannot condition on a voice profile: `None` is
@@ -184,6 +219,17 @@ impl<T: InferenceBackend + ?Sized> InferenceBackend for Box<T> {
 
     fn supports_voice_profile(&self) -> bool {
         (**self).supports_voice_profile()
+    }
+
+    fn set_speaker_conditioning(
+        &mut self,
+        conditioning: Option<&SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        (**self).set_speaker_conditioning(conditioning)
+    }
+
+    fn supports_speaker_embedding(&self) -> bool {
+        (**self).supports_speaker_embedding()
     }
 }
 

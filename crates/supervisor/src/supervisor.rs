@@ -10,7 +10,8 @@ use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
 use realtime_noise_model::{
     BackendDescriptor, CpuProfile, InferenceBackend, InferenceError, PDFNET3_DEV_ASSET_ID,
-    PDFNET3_PRO_ASSET_ID, PdfNet3DevArchive, StudioBackend, StudioResetHandle, VoiceProfile,
+    PDFNET3_PRO_ASSET_ID, PdfNet3DevArchive, SpeakerConditioning, StudioBackend,
+    StudioResetHandle, VoiceProfile,
 };
 use std::fmt;
 use std::path::Path;
@@ -73,6 +74,8 @@ pub struct EngineSupervisor {
     studio_control: Arc<StudioControl>,
     studio_reset: StudioResetHandle,
     active_profile: Option<VoiceProfile>,
+    /// Speaker conditioning (pDFNet3 Pro v3 full) confirmed by the live backend.
+    active_conditioning: Option<SpeakerConditioning>,
     /// pDFNet3 archive (`FiLM`) that overrides every backend selection while set: the bundled
     /// pDFNet3 Pro in production, or the development override.
     dev_base_model: Option<PdfNet3DevArchive>,
@@ -130,6 +133,7 @@ impl EngineSupervisor {
             studio_control: Arc::new(StudioControl::new(Preset::Off)),
             studio_reset: StudioResetHandle::new(),
             active_profile: None,
+            active_conditioning: None,
             dev_base_model: None,
             dev_base_model_error: None,
             isolation_model_required: false,
@@ -420,6 +424,7 @@ impl EngineSupervisor {
         ));
         self.backend = Some(wrapped);
         self.reapply_voice_profile();
+        self.reapply_speaker_conditioning();
     }
 
     /// Applies `profile` to the live backend. The profile is reported as active only after the
@@ -446,7 +451,64 @@ impl EngineSupervisor {
 
         backend.set_voice_profile(Some(p))?;
         self.active_profile = Some(p.clone());
+        self.active_conditioning = None;
         Ok(())
+    }
+
+    /// Applies the pDFNet3 Pro v3 full speaker conditioning (embedding [192] + EQ + intensity, the
+    /// service's `VoiceConditioning`) to the live backend, or returns to the neutral voice with
+    /// `None`. Reported as active only after the backend confirms it; on failure the previous
+    /// conditioning stays. It replaces a legacy profile and is re-applied on backend switches.
+    pub fn apply_speaker_conditioning(
+        &mut self,
+        conditioning: Option<&SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        let backend = self
+            .backend
+            .as_mut()
+            .ok_or_else(|| InferenceError::UnsupportedFeature("no active backend".into()))?;
+        backend.set_speaker_conditioning(conditioning)?;
+        self.active_conditioning = conditioning.cloned();
+        self.active_profile = None;
+        Ok(())
+    }
+
+    /// Whether the live backend takes a speaker embedding (pDFNet3 Pro v3 full graphs).
+    #[must_use]
+    pub fn supports_speaker_embedding(&self) -> bool {
+        self.backend
+            .as_deref()
+            .is_some_and(InferenceBackend::supports_speaker_embedding)
+    }
+
+    #[must_use]
+    pub const fn active_speaker_conditioning(&self) -> Option<&SpeakerConditioning> {
+        self.active_conditioning.as_ref()
+    }
+
+    /// Profile id of the applied speaker conditioning.
+    #[must_use]
+    pub fn active_conditioning_id(&self) -> Option<&str> {
+        self.active_conditioning
+            .as_ref()
+            .map(|c| c.profile_id.as_str())
+    }
+
+    /// Whether the applied speaker conditioning carries a spectral EQ.
+    #[must_use]
+    pub fn active_conditioning_has_eq(&self) -> bool {
+        self.active_conditioning
+            .as_ref()
+            .is_some_and(|c| c.eq.is_some())
+    }
+
+    /// Re-applies the stored conditioning to a freshly installed backend; dropped if refused.
+    fn reapply_speaker_conditioning(&mut self) {
+        if let Some(conditioning) = self.active_conditioning.take()
+            && self.apply_speaker_conditioning(Some(&conditioning)).is_err()
+        {
+            self.active_conditioning = None;
+        }
     }
 
     #[must_use]
@@ -494,7 +556,22 @@ impl EngineSupervisor {
         if let Some(archive) = self.dev_base_model.clone() {
             let mut openvino_failure = None;
             if let Some(devices) = openvino_devices_for_request(request) {
-                if archive.asset_id() == PDFNET3_PRO_ASSET_ID {
+                if archive.is_manifest_export() {
+                    // One export for every runtime: the same archive runs on OpenVINO.
+                    match instantiate_openvino_stateful(&archive, &devices) {
+                        Ok((backend, info)) => {
+                            self.dev_base_model_error = None;
+                            self.isolation_model_error = None;
+                            self.set_backend(backend, &info.name);
+                            self.last_resolution = Some(info.clone());
+                            return info;
+                        }
+                        Err(reason) => {
+                            eprintln!("pDFNet3 Pro v3 on OpenVINO unavailable: {reason}");
+                            openvino_failure = Some(reason);
+                        }
+                    }
+                } else if archive.asset_id() == PDFNET3_PRO_ASSET_ID {
                     match self.instantiate_openvino_pdfnet3(&devices) {
                         Ok((backend, info)) => {
                             self.dev_base_model_error = None;
@@ -576,6 +653,7 @@ impl EngineSupervisor {
         self.backend = None;
         self.active_backend_name.clear();
         self.active_profile = None;
+        self.active_conditioning = None;
         BackendResolutionInfo {
             name: "none".to_string(),
             runtime: "none".to_string(),
@@ -759,4 +837,80 @@ pub const fn convert_dsp_preset_to_ipc(preset: Preset) -> realtime_noise_ipc::St
         Preset::Podcast => realtime_noise_ipc::StudioPreset::Podcast,
         Preset::Broadcast => realtime_noise_ipc::StudioPreset::Broadcast,
     }
+}
+
+/// `BackendDescriptor` of the generic stateful executor on `OpenVINO` (`backend = "openvino"`,
+/// `runtime = "openvino-<device>"`, like the legacy `OpenVINOBackend`, so status and device
+/// reporting stay the same).
+fn openvino_stateful_descriptor(archive: &PdfNet3DevArchive, device: &str) -> BackendDescriptor {
+    let (runtime, cpu_profile) = match device.split('.').next().unwrap_or(device) {
+        "GPU" => ("openvino-gpu", "intel-gpu"),
+        "CPU" => ("openvino-cpu", "intel-cpu"),
+        _ => ("openvino-npu", "intel-npu"),
+    };
+    let mut descriptor = archive.descriptor("openvino", runtime, "2025/2026", CpuProfile::Avx2Minimum);
+    descriptor.cpu_profile = cpu_profile;
+    descriptor
+}
+
+/// Compiles the manifest export (pDFNet3 Pro v3 full) with the generic stateful executor on the
+/// first of `devices` that loads and meets the real-time deadline (then resets it). The error is
+/// the reason shown as `fallback_reason`.
+fn instantiate_openvino_stateful(
+    archive: &PdfNet3DevArchive,
+    devices: &[String],
+) -> Result<(Box<dyn InferenceBackend>, BackendResolutionInfo), String> {
+    use realtime_noise_model::StatefulGraphBackend;
+    let probe = realtime_noise_runtime_openvino::probe_runtime_cached();
+    if !probe.state.is_usable() {
+        return Err(format!(
+            "OpenVINO indisponível ({}): {}",
+            probe.state.code(),
+            probe.message
+        ));
+    }
+    if devices.is_empty() {
+        return Err("OpenVINO não listou nenhum dispositivo".to_owned());
+    }
+    let files = archive
+        .stateful_files()
+        .map_err(|error| format!("export do pDFNet3 Pro v3 inválido ({})", error.model_code()))?;
+    let mut failures = Vec::new();
+    for device in devices {
+        let built = realtime_noise_runtime_openvino::build_openvino_executor(&files, device)
+            .and_then(|executor| {
+                StatefulGraphBackend::new(executor, openvino_stateful_descriptor(archive, device))
+            });
+        let mut backend = match built {
+            Ok(backend) => backend,
+            Err(error) => {
+                failures.push(format!("{device}: {error}"));
+                continue;
+            }
+        };
+        if !backend.supports_speaker_embedding() {
+            failures.push(format!("{device}: o grafo não declara speaker_embedding"));
+            continue;
+        }
+        if !qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
+            failures.push(format!(
+                "{device}: excedeu o prazo de tempo real de {AUTO_QUALIFICATION_MAX_HOP_MS:.1} ms por hop"
+            ));
+            continue;
+        }
+        if let Err(error) = backend.reset() {
+            failures.push(format!("{device}: {error}"));
+            continue;
+        }
+        let info = BackendResolutionInfo {
+            name: format!("openvino-{}", device.to_ascii_lowercase()),
+            runtime: InferenceBackend::descriptor(&backend).runtime.to_owned(),
+            device: device.clone(),
+            is_hardware_accelerated: true,
+            is_fallback: false,
+            fallback_reason: None,
+        };
+        return Ok((Box::new(backend), info));
+    }
+    Err(format!("OpenVINO falhou: {}", failures.join("; ")))
 }
