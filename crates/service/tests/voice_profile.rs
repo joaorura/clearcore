@@ -5,8 +5,8 @@ use realtime_noise_contracts::AudioFrame;
 use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus};
 use realtime_noise_model::{
     ACTIVE_PROFILE_FILE_NAME, BackendDescriptor, BandGains, InferenceBackend, InferenceError,
-    ProcessedFrame, ProfileStore, SpeakerEmbedding, StoredProfile, VoiceProfile, VoiceProfileV2,
-    reject_unsupported_voice_profile,
+    ProcessedFrame, ProfileStore, SpeakerConditioning, SpeakerEmbedding, StoredProfile,
+    VoiceProfile, VoiceProfileV2, reject_unsupported_voice_profile,
 };
 use realtime_noise_service::ServiceDaemon;
 use realtime_noise_supervisor::EngineSupervisor;
@@ -15,7 +15,8 @@ use std::io::Cursor;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-/// Calls received by `ProfileBackend::set_voice_profile`, as profile ids (`None` = neutral).
+/// Calls received by `ProfileBackend::set_speaker_conditioning` (or the legacy
+/// `set_voice_profile`), as profile ids (`None` = neutral).
 type Calls = Arc<Mutex<Vec<Option<String>>>>;
 
 /// Test backend: when `supports` is true it accepts any profile, otherwise it follows the
@@ -55,27 +56,47 @@ impl InferenceBackend for ProfileBackend {
     }
 
     fn set_voice_profile(&mut self, p: Option<&VoiceProfile>) -> Result<(), InferenceError> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(p.map(|profile| profile.id.clone()));
-        let injected = match p {
-            None => self
-                .knobs
-                .fail_none
-                .load(std::sync::atomic::Ordering::SeqCst),
-            Some(profile) => {
-                self.knobs.fail_id.lock().unwrap().as_deref() == Some(profile.id.as_str())
-            }
-        };
-        if injected {
-            return Err(InferenceError::UnsupportedFeature("injected".into()));
-        }
+        self.record(p.map(|profile| profile.id.clone()))?;
         if self.supports {
             Ok(())
         } else {
             reject_unsupported_voice_profile(p)
         }
+    }
+
+    fn set_speaker_conditioning(
+        &mut self,
+        c: Option<&SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        self.record(c.map(|conditioning| conditioning.profile_id.clone()))?;
+        match c {
+            Some(_) if !self.supports => Err(InferenceError::UnsupportedFeature(
+                "speaker embedding conditioning".into(),
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    fn supports_speaker_embedding(&self) -> bool {
+        self.supports
+    }
+}
+
+impl ProfileBackend {
+    /// Records the call and applies the injected failures.
+    fn record(&self, id: Option<String>) -> Result<(), InferenceError> {
+        let injected = match &id {
+            None => self
+                .knobs
+                .fail_none
+                .load(std::sync::atomic::Ordering::SeqCst),
+            Some(id) => self.knobs.fail_id.lock().unwrap().as_deref() == Some(id.as_str()),
+        };
+        self.calls.lock().unwrap().push(id);
+        if injected {
+            return Err(InferenceError::UnsupportedFeature("injected".into()));
+        }
+        Ok(())
     }
 }
 
@@ -785,4 +806,3 @@ fn set_voice_isolation_intensity_updates_status_and_reapplies() {
     assert_eq!(status.payload["voice_isolation_intensity"], 75);
     assert_eq!(status.payload["is_voice_profile_active"], true);
 }
-

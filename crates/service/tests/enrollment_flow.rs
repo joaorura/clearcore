@@ -25,7 +25,8 @@ use realtime_noise_model::enrollment_v3::EmbeddingExtractor;
 use realtime_noise_model::wav::decode_wav_pcm16_mono;
 use realtime_noise_model::{
     ACTIVE_PROFILE_FILE_NAME, BackendDescriptor, BandGains, InferenceBackend, InferenceError,
-    ProcessedFrame, ProfileStore, SpeakerEmbedding, StoredProfile, VoiceProfile, VoiceProfileV2,
+    ProcessedFrame, ProfileStore, SpeakerConditioning, SpeakerEmbedding, StoredProfile,
+    VoiceProfile, VoiceProfileV2,
 };
 use realtime_noise_service::{
     Denoiser, EnrollError, EnrollmentHooks, IntakeTake, ServiceDaemon, VoiceSample,
@@ -79,6 +80,22 @@ impl InferenceBackend for ProfileBackend {
     }
 
     fn supports_voice_profile(&self) -> bool {
+        self.supports
+    }
+
+    fn set_speaker_conditioning(
+        &mut self,
+        c: Option<&SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        match (c, self.reject_prefix) {
+            (Some(c), Some(prefix)) if c.profile_id.starts_with(prefix) => {
+                Err(InferenceError::UnsupportedFeature("injected".into()))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn supports_speaker_embedding(&self) -> bool {
         self.supports
     }
 }

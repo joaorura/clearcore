@@ -26,7 +26,8 @@ use common::{TempDir, send};
 use realtime_noise_contracts::AudioFrame;
 use realtime_noise_ipc::{IpcCommand, IpcStatus};
 use realtime_noise_model::{
-    BackendDescriptor, InferenceBackend, InferenceError, ProcessedFrame, ProfileStore, VoiceProfile,
+    BackendDescriptor, InferenceBackend, InferenceError, ProcessedFrame, ProfileStore,
+    SpeakerConditioning, VoiceProfile,
 };
 use realtime_noise_service::{EnrollmentHooks, ServiceDaemon};
 use realtime_noise_supervisor::EngineSupervisor;
@@ -59,6 +60,17 @@ impl InferenceBackend for ProfileBackend {
 
     fn set_voice_profile(&mut self, _p: Option<&VoiceProfile>) -> Result<(), InferenceError> {
         Ok(())
+    }
+
+    fn set_speaker_conditioning(
+        &mut self,
+        _c: Option<&SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        Ok(())
+    }
+
+    fn supports_speaker_embedding(&self) -> bool {
+        true
     }
 }
 

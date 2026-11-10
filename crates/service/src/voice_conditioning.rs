@@ -21,16 +21,15 @@
 //! }
 //! ```
 //!
-//! `None` returns the backend to the neutral voice. The daemon adaptation implements the trait
-//! natively on the supervisor (feeding the embedding to the v3 main model); until then
-//! [`EngineSupervisor`] uses the bridge below, which keeps the id and the EQ flowing through the
-//! legacy `set_voice_profile` with identity `FiLM` and does NOT deliver the embedding.
+//! `None` returns the backend to the neutral voice. [`EngineSupervisor`] implements the trait
+//! natively: the embedding, the EQ and the intensity go to `apply_speaker_conditioning`, and the
+//! supervisor derives `speaker_present` (binary) from the intensity.
 
 use realtime_noise_model::voice_profile_v2::{
     OutdatedProfile, PDFNET3_PRO_V3_MODEL_ID, SPEAKER_EMBEDDING_DIM, VoiceProfileV2,
 };
 use realtime_noise_model::{
-    BandGains, FiLMVectors, ProfileStore, StoredProfile, VoiceProfile, VoiceProfileError,
+    BandGains, ProfileStore, SpeakerConditioning, StoredProfile, VoiceProfileError,
 };
 use realtime_noise_supervisor::EngineSupervisor;
 
@@ -102,42 +101,43 @@ pub trait VoiceConditioningTarget {
     fn active_conditioning_has_eq(&self) -> bool;
 }
 
-/// Bridge to the supervisor as it is today: the id and the EQ reach the backend through the
-/// legacy `set_voice_profile` (identity `FiLM`); the speaker embedding is NOT delivered yet.
-/// Replaced by the daemon adaptation.
+impl VoiceConditioning {
+    /// The supervisor's view of this conditioning (same fields; `speaker_present` is derived from
+    /// the intensity by [`SpeakerConditioning::speaker_present`], never here).
+    #[must_use]
+    pub fn to_speaker_conditioning(&self) -> SpeakerConditioning {
+        SpeakerConditioning {
+            profile_id: self.profile_id.clone(),
+            model_id: self.model_id.clone(),
+            speaker_embedding: self.speaker_embedding,
+            eq: self.eq.clone(),
+            intensity_percent: self.intensity_percent,
+        }
+    }
+}
+
+/// Native delivery to the supervisor: the speaker embedding, the EQ and the intensity reach the
+/// pDFNet3 Pro v3 full graphs through [`EngineSupervisor::apply_speaker_conditioning`].
 impl VoiceConditioningTarget for EngineSupervisor {
     fn supports_voice_conditioning(&self) -> bool {
-        self.supports_voice_profile()
+        self.supports_speaker_embedding()
     }
 
     fn apply_voice_conditioning(
         &mut self,
         conditioning: Option<&VoiceConditioning>,
     ) -> Result<(), ConditioningRejected> {
-        let legacy = match conditioning {
-            None => None,
-            Some(c) => Some(
-                VoiceProfile::new(
-                    c.profile_id.clone(),
-                    "v3",
-                    "1970-01-01T00:00:00Z",
-                    FiLMVectors::identity(),
-                    c.eq.clone(),
-                )
-                .map_err(|_| ConditioningRejected)?,
-            ),
-        };
-        self.set_voice_profile(legacy.as_ref())
+        let speaker = conditioning.map(VoiceConditioning::to_speaker_conditioning);
+        self.apply_speaker_conditioning(speaker.as_ref())
             .map_err(|_| ConditioningRejected)
     }
 
     fn active_conditioning_id(&self) -> Option<&str> {
-        self.active_voice_profile_id()
+        EngineSupervisor::active_conditioning_id(self)
     }
 
     fn active_conditioning_has_eq(&self) -> bool {
-        self.active_voice_profile()
-            .is_some_and(|profile| profile.eq.is_some())
+        EngineSupervisor::active_conditioning_has_eq(self)
     }
 }
 
