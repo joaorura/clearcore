@@ -1,31 +1,27 @@
-# pDFNet3 Pro (modelo de isolamento embutido)
+# pDFNet3 Pro v3 completo (modelo de isolamento embutido)
 
-Único modelo de isolamento distribuído nos pacotes do Clearcore. É o DeepFilterNet3 com condicionamento
-FiLM (`gamma`/`beta`) por perfil de voz, treinado no repositório `clearcore-train`. O DFNet3 base
-(`models/stateful/`, `vendor/approved/`) não é mais distribuído e não há fallback para ele: se um destes
-arquivos faltar ou o SHA-256 não bater, o daemon não carrega modelo nenhum e o `GetStatus` informa
-`isolation_model: "none"` com `isolation_model_error` (`MODEL_*`), e o filtro do microfone virtual não é criado.
+Único modelo de isolamento distribuído nos pacotes do Clearcore: o pDFNet3 Pro v3 **completo** (memória de
+locutor + cross-attention), condicionado por `speaker_embedding` [1,192] (ECAPA, L2) e `speaker_present` [1]
+(binário: 0 com intensidade 0 ou sem perfil, 1 caso contrário). O DFNet3 base (`models/stateful/`,
+`vendor/approved/`) não é distribuído e não há fallback para ele: se o arquivo faltar ou o SHA-256 não bater,
+o daemon não carrega modelo nenhum e o `GetStatus` informa `isolation_model: "none"` com
+`isolation_model_error` (`MODEL_*`), e o filtro do microfone virtual não é criado.
 
 | Arquivo | Bytes | SHA-256 (arquivo inteiro) | Quem usa |
 |---|---:|---|---|
-| `pdfnet3-release-asset-v1.tar.gz` | 7978093 | `1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8` | daemon (`realtime-noise-service`, tract): backend que recebe o perfil e denoiser neutro das amostras de cadastro |
-| `pdfnet3-stateful-asset-v1.tar.gz` | 7974311 | `d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5` | `libclearcore_filter` (microfone virtual, ONNX Runtime, estados recorrentes como portas do grafo) |
-| `pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz` | 12375900 | `c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee` | pDFNet3 Pro v3 **completo** (memória de locutor + cross-attention, `speaker_embedding` [1,192] + `speaker_present` [1]): UM export stateful com `manifest.json` para todos os runtimes (daemon tract/OpenVINO via executor genérico; filtro ORT via o mesmo executor). Carregado por `pdfnet3_bundle::load_isolation_archive` |
+| `pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz` | 12375900 | `c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee` | UM export stateful com `manifest.json` (`enc`/`erb_dec`/`df_dec`, opset 12, `S = 1`) para todos os runtimes: daemon (tract ou OpenVINO, executor genérico, `pdfnet3_bundle::load_isolation_archive`) e `libclearcore_filter` (ONNX Runtime ou OpenVINO) |
 
-Os dois hashes estão fixados em `crates/model/src/pdfnet3_bundle.rs` e conferidos também por
-`crates/app-tauri/scripts/package-app.mjs` (o build do pacote falha se não baterem) e pelo workflow de release.
-Cada arquivo contém exatamente `enc.onnx`, `erb_dec.onnx`, `df_dec.onnx` e `config.ini` na raiz.
+O hash do arquivo e os de cada grafo estão fixados em `crates/model/src/pdfnet3_bundle.rs` e conferidos também
+por `crates/app-tauri/scripts/package-app.mjs` (o build do pacote falha se não baterem) e pelo workflow de
+release. Os exports antigos do Pro v2 com FiLM (`pdfnet3-release-asset-v1.tar.gz`, `1cfa86c7…`, e
+`pdfnet3-stateful-asset-v1.tar.gz`, `d1b9c2fd…`) foram removidos.
 
 ## Origem
 
-- Run `clearcore-train/runs/m3_deploy_pro_v3_20261013` (2026-10-13), checkpoint
-  `m2/pro-v2-mhca-k16-tse/checkpoints/ckpt-00002000.pt` (SHA-256 `fb59c785…6cb1`), derivado do asset
-  aprovado `df-compatible-release-asset-v1` (pesos DeepFilterNet3; registro em
-  `governance/model-assets/df-compatible-release-asset-v1/`).
-- Gates do `m3_report.json` da run: G0 PASS (paridade tract × stateful, perfis neutro/aleatório/extremos),
-  G11 PASS; exportação reprodutível (duas exportações com o mesmo SHA-256).
-- O modelo de cadastro `models/enrollment/enrollment.onnx` (SHA-256 `2e825fec…40f2`) é o da mesma run, par
-  obrigatório deste modelo: os vetores FiLM que ele produz são os que este pDFNet3 espera.
+- Run `clearcore-train/runs/m3_deploy_pro_v3_full` (entregue em 2026-11-09); paridade ORT/OpenVINO/tract
+  ≥ 107,6 dB contra o PyTorch.
+- O modelo de cadastro `models/enrollment/enrollment.onnx` (enrollment v3, SHA-256 `82a292b9…c1`) é o par
+  obrigatório: o embedding que ele produz é o que este modelo espera.
 
 ## Busca em tempo de execução
 
@@ -35,19 +31,16 @@ no diretório do executável e nos ancestrais; `$XDG_DATA_HOME/clearcore/models`
 `/usr/local/share/clearcore/models`. O primeiro arquivo encontrado é o usado (um arquivo adulterado não faz
 a busca continuar).
 
-Overrides de desenvolvimento (opcionais, os dois juntos): `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256` (daemon,
-export tract) e `CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET`/`_SHA256` (filtro, export stateful).
+Overrides de desenvolvimento (opcionais, os dois juntos): `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256` (daemon)
+e `CLEARCORE_DEV_PDFNET3_V3_ASSET`/`_SHA256` ou `CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET`/`_SHA256` (filtro).
 
 ## Aceleradores
 
-O daemon roda o pDFNet3 Pro no **OpenVINO** (NPU, GPU ou CPU Intel) quando um backend OpenVINO é
-pedido nas configurações (`openvino-npu`, `openvino-gpu`, `openvino-cpu`, `openvino`): ele compila o
-export **stateful** (o mesmo do filtro), fixa as dimensões em `S = 1` (a NPU exige shapes estáticos),
-alimenta `gamma`/`beta` (identidade `1`/`0` sem perfil, os vetores do perfil quando há um) e aplica a
-EQ do perfil antes da iSTFT, como o tract. Qualquer falha (runtime ausente, plugin ou dispositivo
-faltando, compilação, prazo de tempo real) volta para o tract com o motivo em
-`GetStatus.backend_fallback_reason`. O `auto` continua no tract (ver `docs/openvino.md`). O microfone
-virtual (`libclearcore_filter`) continua no ONNX Runtime na CPU.
+O daemon roda o mesmo arquivo no **OpenVINO** (NPU, GPU ou CPU Intel) quando um backend OpenVINO é pedido
+(`openvino-npu`, `openvino-gpu`, `openvino-cpu`, `openvino`), com as portas descobertas por nome e as
+dimensões fixadas em 1; qualquer falha volta para o tract com o motivo em `GetStatus.backend_fallback_reason`.
+O `auto` fica no tract (ver `docs/openvino.md`). O filtro do microfone virtual segue o `backend` do
+`settings.json` (ver `docs/virtual-mic-filter.md`).
 
 ## Licença
 

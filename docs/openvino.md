@@ -112,7 +112,12 @@ Séries aceitas: 2025 e 2026 (`SUPPORTED_MAJOR_VERSIONS`). Conferido em 2026-11-
 
 ## Paridade e latência medidas
 
-Comando (teste `#[ignore]`, ligado por variável):
+> **Histórico (Pro v2, FiLM).** Esta seção mediu os exports v2 (`pdfnet3-release-asset-v1` e
+> `pdfnet3-stateful-asset-v1`), que não são mais distribuídos; o teste `openvino_pdfnet3` foi removido
+> junto com eles. A paridade do Pro v3 completo no OpenVINO está na seção do executor genérico abaixo
+> (`crates/runtime-openvino/tests/stateful_graph.rs`).
+
+Comando usado na época (teste `#[ignore]`, ligado por variável):
 
 ```text
 CLEARCORE_OV_PARITY=1 OPENVINO_LIB_PATH=<.../openvino/libs> \

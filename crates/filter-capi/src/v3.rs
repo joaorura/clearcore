@@ -41,11 +41,12 @@ use crate::engine::{Conditioning, Engine, SPEAKER_EMBEDDING_DIM};
 /// `model` identifier the manifest must declare.
 pub const V3_MODEL_ID: &str = "pdfnet3-pro-v3-full";
 /// File name of the bundled v3 archive under `<models>/pdfnet3/`.
-pub const V3_BUNDLED_FILE: &str = "pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz";
+pub const V3_BUNDLED_FILE: &str = realtime_noise_model::pdfnet3_bundle::PDFNET3_PRO_V3_FULL_FILE;
 /// Whole-archive SHA-256 of the v3 FULL export handed off on 2026-11-09 (enc/erb_dec/df_dec,
 /// opset 12, `S = 1`; second hand-off, tract-compatible enc/df_dec).
+/// Single source: the pin in `crates/model/src/pdfnet3_bundle.rs`.
 pub const V3_BUNDLED_SHA256: &str =
-    "c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee";
+    realtime_noise_model::pdfnet3_bundle::PDFNET3_PRO_V3_FULL_SHA256;
 /// Development override (absolute path of a v3 archive) and its whole-archive SHA-256.
 pub const ENV_DEV_V3_ASSET: &str = "CLEARCORE_DEV_PDFNET3_V3_ASSET";
 pub const ENV_DEV_V3_SHA256: &str = "CLEARCORE_DEV_PDFNET3_V3_SHA256";

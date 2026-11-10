@@ -12,11 +12,12 @@ Resolução fail-closed, sem modelo base:
 1. `CLEARCORE_DEV_PDFNET3_V3_ASSET` + `CLEARCORE_DEV_PDFNET3_V3_SHA256` (os dois ou nenhum): arquivo
    pDFNet3 Pro v3 FULL de desenvolvimento;
 2. `CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET` + `_SHA256`: arquivo v2 stateful (como antes);
-3. `<models>/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz`, SHA-256 do arquivo inteiro fixado
-   em `V3_BUNDLED_SHA256` (`crates/filter-capi/src/v3.rs`). Presente mas divergente = sem filtro;
-4. `<models>/pdfnet3/pdfnet3-stateful-asset-v1.tar.gz` (Pro v2 com FiLM), o embutido hoje.
+3. `<models>/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz`, o único modelo embutido, SHA-256
+   do arquivo inteiro fixado em `PDFNET3_PRO_V3_FULL_SHA256` (`crates/model/src/pdfnet3_bundle.rs`,
+   reexportado como `V3_BUNDLED_SHA256`). Ausente ou divergente = sem filtro.
 
-`CLEARCORE_FILTER_MODEL=v2` pula o passo 3 (diagnóstico).
+O Pro v2 embutido (`pdfnet3-stateful-asset-v1.tar.gz`) e o `CLEARCORE_FILTER_MODEL=v2` foram removidos;
+o v2 só entra por override de desenvolvimento (passo 2).
 
 ### Contrato do asset v3 (manifest)
 

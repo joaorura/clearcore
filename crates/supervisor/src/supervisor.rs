@@ -86,8 +86,10 @@ pub struct EngineSupervisor {
     isolation_model_required: bool,
     /// Fixed `MODEL_*` code while the required isolation model is unavailable.
     isolation_model_error: Option<&'static str>,
-    /// Where the pDFNet3 Pro stateful export (the graphs `OpenVINO` runs) comes from; `None` uses
-    /// the bundled archive (`pdfnet3_bundle::load_stateful_archive`).
+    /// Where the `FiLM` stateful export `OpenVINO` runs for a `FiLM` (v2) isolation model comes
+    /// from. Only a development override can be a `FiLM` export now: the bundled model is the Pro
+    /// v3 full manifest export, which `OpenVINO` runs from the isolation archive itself, so `None`
+    /// means "no `FiLM` stateful export" (`MODEL_ASSET_NOT_FOUND`).
     stateful_source: Option<StatefulSource>,
     /// The verified stateful export once loaded (or the `MODEL_*` code of why it is not).
     stateful_archive: Option<Result<PdfNet3DevArchive, &'static str>>,
@@ -160,11 +162,8 @@ impl EngineSupervisor {
     /// The verified pDFNet3 stateful export, loaded once (fixed `MODEL_*` code on failure).
     fn stateful_archive(&mut self) -> Result<PdfNet3DevArchive, &'static str> {
         if self.stateful_archive.is_none() {
-            let loaded = self.stateful_source.as_ref().map_or_else(
-                || {
-                    realtime_noise_model::pdfnet3_bundle::load_stateful_archive()
-                        .map_err(realtime_noise_model::BundledModelError::code)
-                },
+            let loaded = self.stateful_source.as_ref().map_or(
+                Err(realtime_noise_model::pdfnet3_bundle::MODEL_ASSET_NOT_FOUND),
                 |source| source(),
             );
             self.stateful_archive = Some(loaded);

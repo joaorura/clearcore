@@ -13,19 +13,18 @@ use tempfile::TempDir;
 use super::*;
 use crate::engine::{Engine, FallbackEngine, latency_stats};
 use crate::profile_v2::{VoiceProfileV2, test_embedding};
-use crate::select::{ENV_FILTER_BACKEND, ENV_FILTER_MODEL, ModelSource};
+use crate::select::{ENV_FILTER_BACKEND, ModelSource};
 use crate::v3::{ENV_DEV_V3_ASSET, ENV_DEV_V3_SHA256, V3Asset, sha256_hex};
 use realtime_noise_model::VoiceProfile;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-const VARS: [&str; 7] = [
+const VARS: [&str; 6] = [
     ENV_DEV_V3_ASSET,
     ENV_DEV_V3_SHA256,
     ENV_DEV_STATEFUL_ASSET,
     ENV_DEV_STATEFUL_SHA256,
     ENV_FILTER_BACKEND,
-    ENV_FILTER_MODEL,
     "XDG_DATA_HOME",
 ];
 
@@ -818,76 +817,12 @@ fn parity_against_the_daemon_reference() {
 // ------------------------------------------------------------------ v2 (bundled) --------
 
 #[test]
-fn v2_bundled_model_still_loads_with_film_and_eq() {
-    let env = EnvGuard::new();
-    env.set(ENV_FILTER_MODEL, "v2");
-    let mut filter = ClearcoreFilter::new(&repo_root(), None).expect("bundled v2");
-    assert_eq!(filter.model_kind(), ModelKind::V2Film);
-    let reference = run(&mut filter, 0..20);
-    let mut conditioned = ClearcoreFilter::new(&repo_root(), None).expect("bundled v2");
-    let profile = v1_conditioned("spk-v1")
-        .with_eq(Some(BandGains::from_array([3.0; 32]).expect("gains")))
-        .expect("eq");
-    conditioned
-        .apply_profile(&StoredProfile::V1(Box::new(profile)), 100)
-        .expect("v1 on v2");
-    assert!(conditioned.core().speaker_active() && conditioned.core().eq_active());
-    assert!(snr_db(&reference, &run(&mut conditioned, 0..20)) < 40.0);
-}
-
-/// The v2 replica in this crate must match `OrtBackend` (crates/model) bit for bit without a
-/// profile: same graphs, same DSP, all graphs every hop.
-#[test]
-fn v2_replica_matches_the_model_crate_ort_backend() {
-    let env = EnvGuard::new();
-    env.set(ENV_FILTER_MODEL, "v2");
-    let dirs = select::model_dirs(&repo_root());
-    let archive =
-        realtime_noise_model::pdfnet3_bundle::load_stateful_archive_from(&dirs).expect("v2");
-    let mut reference = archive
-        .instantiate_ort(realtime_noise_model::CpuProfile::Avx2Minimum)
-        .expect("OrtBackend");
-    let mut filter = ClearcoreFilter::new(&repo_root(), None).expect("filter");
-    for i in 0..30 {
-        let frame = voiced_frame(i);
-        let expected = realtime_noise_model::InferenceBackend::process(&mut reference, &frame)
-            .expect("reference")
-            .samples;
-        assert_eq!(
-            filter.core.process(&frame).expect("hop"),
-            expected,
-            "hop {i}"
-        );
-    }
-}
-
-#[test]
-fn v2_openvino_cpu_matches_v2_onnx_runtime() {
-    let env = EnvGuard::new();
-    if !ov_available() {
-        eprintln!("skipped: OpenVINO runtime not found");
-        return;
-    }
-    env.set(ENV_FILTER_MODEL, "v2");
-    let mut ort = ClearcoreFilter::new(&repo_root(), None).expect("ort");
-    let mut ov = ClearcoreFilter::new(&repo_root(), Some("openvino-cpu")).expect("ov");
-    assert_eq!(
-        ov.core.engine.label(),
-        "openvino:CPU",
-        "{}",
-        ov.status_json()
-    );
-    let snr = snr_db(&run(&mut ort, 0..40), &run(&mut ov, 0..40));
-    assert!(snr > 60.0, "v2 OpenVINO CPU vs ORT: {snr:.1} dB");
-}
-
-#[test]
 fn without_any_environment_a_pdfnet3_pro_model_loads() {
     let _env = EnvGuard::new();
     let filter = create_ffi();
     assert!(
         !filter.is_null(),
-        "bundled Pro (v3 if installed, else v2) must load"
+        "the bundled Pro v3 full must load"
     );
     unsafe {
         assert_eq!(clearcore_filter_supports_voice_profile(filter), 1);

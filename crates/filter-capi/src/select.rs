@@ -5,9 +5,9 @@
 //! 2. `CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET` + `_SHA256` — a v2 stateful archive;
 //! 3. the bundled v3 FULL archive `<models>/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz`
 //!    (SHA-256 pinned in [`crate::v3::V3_BUNDLED_SHA256`]); present but not matching = no filter;
-//! 4. the bundled v2 stateful archive (`pdfnet3-stateful-asset-v1.tar.gz`).
 //!
-//! `CLEARCORE_FILTER_MODEL=v2` skips step 3 (diagnostics).
+//! The older bundled v2 stateful archive is no longer shipped: without the v3 full archive (and
+//! without an override) there is no filter.
 //!
 //! Runtime: the `backend` of `settings.json` (the one the UI writes), overridden by
 //! `CLEARCORE_FILTER_BACKEND`:
@@ -44,8 +44,6 @@ pub const ENV_DEV_STATEFUL_ASSET: &str = "CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET";
 pub const ENV_DEV_STATEFUL_SHA256: &str = "CLEARCORE_DEV_PDFNET3_STATEFUL_SHA256";
 /// Runtime override (same values as the `backend` setting).
 pub const ENV_FILTER_BACKEND: &str = "CLEARCORE_FILTER_BACKEND";
-/// `v2` forces the v2 stateful model even when the v3 archive is installed.
-pub const ENV_FILTER_MODEL: &str = "CLEARCORE_FILTER_MODEL";
 
 /// A verified model ready to be compiled.
 pub enum ModelSource {
@@ -138,15 +136,11 @@ pub fn resolve_model(repo_root: &Path) -> Result<ModelSource, String> {
         return v2_source(&archive);
     }
     let dirs = model_dirs(repo_root);
-    let force_v2 = std::env::var(ENV_FILTER_MODEL).is_ok_and(|v| v.eq_ignore_ascii_case("v2"));
-    if !force_v2 && let Some(path) = pdfnet3_bundle::find_in(&dirs, V3_BUNDLED_FILE) {
-        return V3Asset::read(&path, V3_BUNDLED_SHA256)
-            .map(ModelSource::V3)
-            .map_err(|e| format!("bundled v3 {}: {e}", path.display()));
-    }
-    let archive = pdfnet3_bundle::load_stateful_archive_from(&dirs)
-        .map_err(|e| format!("bundled v2: {e:?}"))?;
-    v2_source(&archive)
+    let path = pdfnet3_bundle::find_in(&dirs, V3_BUNDLED_FILE)
+        .ok_or_else(|| format!("bundled v3 {V3_BUNDLED_FILE}: not found"))?;
+    V3Asset::read(&path, V3_BUNDLED_SHA256)
+        .map(ModelSource::V3)
+        .map_err(|e| format!("bundled v3 {}: {e}", path.display()))
 }
 
 /// OpenVINO device kinds to try for a `backend` value, or `None` for ONNX Runtime.

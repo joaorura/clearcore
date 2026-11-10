@@ -1,19 +1,16 @@
-//! The pDFNet3 Pro (v3, `FiLM` speaker conditioning) that every package ships as its ONLY
-//! isolation model, under `<models>/pdfnet3/`.
+//! The pDFNet3 Pro v3 full that every package ships as its ONLY isolation model, under
+//! `<models>/pdfnet3/`, and the enrollment v3 model it pairs with, under `<models>/enrollment/`.
 //!
-//! Two exports of the same checkpoint (`clearcore-train`, run `m3_deploy_pro_v3_20261013`,
-//! gates G0/G11 PASS) are bundled, each pinned here by the SHA-256 of the WHOLE archive:
+//! - [`PDFNET3_PRO_V3_FULL_FILE`]: ONE stateful manifest export (`manifest.json` + `enc`/`erb_dec`/
+//!   `df_dec`) run by the generic stateful executor on every runtime: tract or `OpenVINO` in the
+//!   daemon, ONNX Runtime or `OpenVINO` in `libclearcore_filter` (the virtual microphone).
+//! - [`ENROLLMENT_V3_FILE`]: the enrollment v3 `enrollment.onnx` (`audio` [1, N] 16 kHz ->
+//!   `speaker_embedding` [1, 192], ECAPA L2) whose embedding conditions the Pro v3 full.
 //!
-//! - [`PDFNET3_PRO_TRACT_FILE`]: the streaming graphs with `gamma`/`beta` inputs that `tract`
-//!   pulses internally. The service daemon runs it (isolation backend that receives the voice
-//!   profile, and the neutral denoiser of enrollment samples).
-//! - [`PDFNET3_PRO_STATEFUL_FILE`]: the same graphs with every recurrent state exposed as a port
-//!   (`h_in`/`h_out`, delay rings). `libclearcore_filter` (the virtual microphone) runs it on ONNX
-//!   Runtime, one 10 ms hop at a time.
-//!
-//! Both archives go through [`PdfNet3DevArchive`] (size cap, whole-archive hash before any
-//! decompression, exact flat member list, `FiLM` inputs required at load). There is no fallback
-//! to the base `DFNet3`: a missing or tampered archive is an error the caller reports.
+//! Each file is pinned by the SHA-256 of the WHOLE file ([`PDFNET3_PRO_V3_FULL_SHA256`],
+//! [`ENROLLMENT_V3_SHA256`]), mirrored by `crates/app-tauri/scripts/package-app.mjs` and the
+//! release workflow. There is no fallback to the base `DFNet3` nor to the older Pro v2 exports: a
+//! missing or tampered archive is an error the caller reports.
 
 use std::path::{Path, PathBuf};
 
@@ -21,16 +18,6 @@ use crate::{PdfNet3DevArchive, PdfNet3DevError};
 
 /// Sub-directory of the models directory that holds the bundled archives.
 pub const PDFNET3_BUNDLE_DIR: &str = "pdfnet3";
-/// `tract` export (streaming graphs with `FiLM` inputs, no state ports).
-pub const PDFNET3_PRO_TRACT_FILE: &str = "pdfnet3-release-asset-v1.tar.gz";
-/// SHA-256 (lowercase hex) of the whole [`PDFNET3_PRO_TRACT_FILE`] archive.
-pub const PDFNET3_PRO_TRACT_SHA256: &str =
-    "1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8";
-/// Stateful export (explicit recurrent-state ports and `FiLM` inputs) for ONNX Runtime.
-pub const PDFNET3_PRO_STATEFUL_FILE: &str = "pdfnet3-stateful-asset-v1.tar.gz";
-/// SHA-256 (lowercase hex) of the whole [`PDFNET3_PRO_STATEFUL_FILE`] archive.
-pub const PDFNET3_PRO_STATEFUL_SHA256: &str =
-    "d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5";
 /// pDFNet3 Pro v3 **full** (speaker memory + cross-attention, `speaker_embedding` conditioning):
 /// ONE stateful manifest export (`manifest.json` + `enc`/`erb_dec`/`df_dec`, opset 12, `S = 1`) run
 /// by the generic stateful executor on every runtime (tract in the daemon, `OpenVINO` CPU/GPU/NPU,
@@ -57,6 +44,14 @@ pub const PDFNET3_PRO_V3_FULL_GRAPH_SHA256: [(&str, &str); 3] = [
         "42c5c8b610022125c88553a323e0566c2f9553ccaf5f466d3a637bc5bc2b9df4",
     ),
 ];
+/// Sub-directory of the models directory that holds the enrollment model.
+pub const ENROLLMENT_BUNDLE_DIR: &str = "enrollment";
+/// Enrollment v3 model (speaker embedding of the Pro v3 full).
+pub const ENROLLMENT_V3_FILE: &str = "enrollment.onnx";
+/// SHA-256 (lowercase hex) of the whole [`ENROLLMENT_V3_FILE`] (84 012 231 bytes, `clearcore-train`
+/// `scripts/export_enrollment_v3.py`, parity `PyTorch` x ORT >= 117.5 dB, tract x ORT 103.5 dB).
+pub const ENROLLMENT_V3_SHA256: &str =
+    "82a292b95121dd7d7e82a2f4515497512693d499f06bafa0d3d627bed34ad3c1";
 /// Asset id reported by every backend built from a bundled archive.
 pub const PDFNET3_PRO_ASSET_ID: &str = "pdfnet3-pro-v3";
 /// Optional override of the models directory (the one that contains `pdfnet3/`).
@@ -155,18 +150,6 @@ pub fn find_bundled(file: &str) -> Option<PathBuf> {
     find_in(&candidate_model_dirs(), file)
 }
 
-/// Reads and verifies the bundled `tract` export found over `dirs`.
-pub fn load_tract_archive_from(dirs: &[PathBuf]) -> Result<PdfNet3DevArchive, BundledModelError> {
-    load_from(dirs, PDFNET3_PRO_TRACT_FILE, PDFNET3_PRO_TRACT_SHA256)
-}
-
-/// Reads and verifies the bundled stateful (ONNX Runtime) export found over `dirs`.
-pub fn load_stateful_archive_from(
-    dirs: &[PathBuf],
-) -> Result<PdfNet3DevArchive, BundledModelError> {
-    load_from(dirs, PDFNET3_PRO_STATEFUL_FILE, PDFNET3_PRO_STATEFUL_SHA256)
-}
-
 /// Reads and verifies the bundled pDFNet3 Pro v3 full export (manifest export, every runtime)
 /// found over `dirs`.
 pub fn load_isolation_archive_from(
@@ -194,16 +177,6 @@ pub fn load_isolation_archive() -> Result<PdfNet3DevArchive, BundledModelError> 
     load_isolation_archive_from(&candidate_model_dirs())
 }
 
-/// [`load_tract_archive_from`] over [`candidate_model_dirs`].
-pub fn load_tract_archive() -> Result<PdfNet3DevArchive, BundledModelError> {
-    load_tract_archive_from(&candidate_model_dirs())
-}
-
-/// [`load_stateful_archive_from`] over [`candidate_model_dirs`].
-pub fn load_stateful_archive() -> Result<PdfNet3DevArchive, BundledModelError> {
-    load_stateful_archive_from(&candidate_model_dirs())
-}
-
 fn load_from(
     dirs: &[PathBuf],
     file: &str,
@@ -212,6 +185,19 @@ fn load_from(
     let path = find_in(dirs, file).ok_or(BundledModelError::NotFound)?;
     PdfNet3DevArchive::read_pinned(&path, sha256, PDFNET3_PRO_ASSET_ID)
         .map_err(BundledModelError::Invalid)
+}
+
+/// SHA-256 (lowercase hex) of `bytes`.
+#[must_use]
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
 }
 
 #[cfg(all(test, feature = "tract"))]
@@ -227,47 +213,51 @@ mod tests {
     }
 
     #[test]
-    fn bundled_tract_archive_loads_with_film_and_the_pro_asset_id() -> TestResult {
-        let archive = load_tract_archive_from(&[repository_models()])?;
-        assert_eq!(archive.sha256(), PDFNET3_PRO_TRACT_SHA256);
+    fn bundled_v3_full_archive_loads_with_the_speaker_embedding() -> TestResult {
+        let archive = load_isolation_archive_from(&[repository_models()])?;
+        assert_eq!(archive.sha256(), PDFNET3_PRO_V3_FULL_SHA256);
         assert_eq!(archive.asset_id(), PDFNET3_PRO_ASSET_ID);
+        assert!(archive.is_manifest_export());
         let backend = archive.instantiate(CpuProfile::Avx2Minimum)?;
-        assert!(backend.supports_speaker_conditioning());
-        assert!(InferenceBackend::supports_voice_profile(&backend));
+        assert!(backend.supports_speaker_embedding());
         assert_eq!(backend.descriptor().asset_id, PDFNET3_PRO_ASSET_ID);
         Ok(())
     }
 
     #[cfg(feature = "ort")]
     #[test]
-    fn bundled_stateful_archive_loads_on_onnx_runtime_with_film() -> TestResult {
-        let archive = load_stateful_archive_from(&[repository_models()])?;
-        assert_eq!(archive.sha256(), PDFNET3_PRO_STATEFUL_SHA256);
-        let backend = archive.instantiate_ort(CpuProfile::Avx2Minimum)?;
-        assert!(backend.supports_speaker_conditioning());
+    fn bundled_v3_full_archive_loads_on_onnx_runtime() -> TestResult {
+        let archive = load_isolation_archive_from(&[repository_models()])?;
+        let backend = archive.instantiate_stateful_ort(CpuProfile::Avx2Minimum)?;
+        assert!(backend.supports_speaker_embedding());
         assert_eq!(backend.descriptor().asset_id, PDFNET3_PRO_ASSET_ID);
         Ok(())
     }
 
     #[test]
-    fn bundled_stateful_archive_yields_its_three_graphs() -> TestResult {
-        let archive = load_stateful_archive_from(&[repository_models()])?;
-        let graphs = archive.graphs()?;
-        for graph in [&graphs.enc, &graphs.erb_dec, &graphs.df_dec] {
-            // ONNX protobufs, 1.9-3.4 MB each.
-            assert!(
-                graph.len() > 1_000_000 && graph.len() < 4_000_000,
-                "{}",
-                graph.len()
-            );
-        }
+    fn bundled_enrollment_v3_matches_its_pin() -> TestResult {
+        let path = repository_models()
+            .join(ENROLLMENT_BUNDLE_DIR)
+            .join(ENROLLMENT_V3_FILE);
+        assert_eq!(sha256_hex(&std::fs::read(path)?), ENROLLMENT_V3_SHA256);
         Ok(())
+    }
+
+    #[test]
+    fn the_old_pro_v2_exports_are_not_bundled_any_more() {
+        let bundle = repository_models().join(PDFNET3_BUNDLE_DIR);
+        for old in [
+            "pdfnet3-release-asset-v1.tar.gz",
+            "pdfnet3-stateful-asset-v1.tar.gz",
+        ] {
+            assert!(!bundle.join(old).exists(), "{old}");
+        }
     }
 
     #[test]
     fn missing_bundle_is_not_found() -> TestResult {
         let dir = tempfile::tempdir()?;
-        let error = load_tract_archive_from(&[dir.path().to_path_buf()]).unwrap_err();
+        let error = load_isolation_archive_from(&[dir.path().to_path_buf()]).unwrap_err();
         assert_eq!(error, BundledModelError::NotFound);
         assert_eq!(error.code(), "MODEL_ASSET_NOT_FOUND");
         Ok(())
@@ -279,36 +269,17 @@ mod tests {
         let bundle = dir.path().join(PDFNET3_BUNDLE_DIR);
         std::fs::create_dir_all(&bundle)?;
         std::fs::write(
-            bundle.join(PDFNET3_PRO_TRACT_FILE),
+            bundle.join(PDFNET3_PRO_V3_FULL_FILE),
             b"not the pinned archive",
         )?;
         // A valid archive later in the search order must NOT be used once a candidate exists.
-        let error =
-            load_tract_archive_from(&[dir.path().to_path_buf(), repository_models()]).unwrap_err();
+        let error = load_isolation_archive_from(&[dir.path().to_path_buf(), repository_models()])
+            .unwrap_err();
         assert_eq!(
             error,
             BundledModelError::Invalid(PdfNet3DevError::HashMismatch)
         );
         assert_eq!(error.code(), "MODEL_HASH_MISMATCH");
-        Ok(())
-    }
-
-    #[test]
-    fn the_wrong_export_is_refused_by_its_pin() -> TestResult {
-        // The stateful export under the tract name has a different hash.
-        let dir = tempfile::tempdir()?;
-        let bundle = dir.path().join(PDFNET3_BUNDLE_DIR);
-        std::fs::create_dir_all(&bundle)?;
-        std::fs::copy(
-            repository_models()
-                .join(PDFNET3_BUNDLE_DIR)
-                .join(PDFNET3_PRO_STATEFUL_FILE),
-            bundle.join(PDFNET3_PRO_TRACT_FILE),
-        )?;
-        assert_eq!(
-            load_tract_archive_from(&[dir.path().to_path_buf()]).unwrap_err(),
-            BundledModelError::Invalid(PdfNet3DevError::HashMismatch)
-        );
         Ok(())
     }
 
@@ -321,7 +292,7 @@ mod tests {
             std::fs::write(
                 dir.path()
                     .join(PDFNET3_BUNDLE_DIR)
-                    .join(PDFNET3_PRO_TRACT_FILE),
+                    .join(PDFNET3_PRO_V3_FULL_FILE),
                 b"x",
             )?;
         }
@@ -331,7 +302,7 @@ mod tests {
                 first.path().to_path_buf(),
                 second.path().to_path_buf(),
             ],
-            PDFNET3_PRO_TRACT_FILE,
+            PDFNET3_PRO_V3_FULL_FILE,
         );
         assert_eq!(
             found,
@@ -339,7 +310,7 @@ mod tests {
                 first
                     .path()
                     .join(PDFNET3_BUNDLE_DIR)
-                    .join(PDFNET3_PRO_TRACT_FILE)
+                    .join(PDFNET3_PRO_V3_FULL_FILE)
             )
         );
         Ok(())

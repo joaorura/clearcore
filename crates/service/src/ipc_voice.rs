@@ -250,9 +250,19 @@ fn load_dev_model(
         return Err(EnrollError::ModelNotConfigured);
     };
 
-    // Direct ONNX model support (embedded repository model)
+    // Direct ONNX model (the bundled enrollment v3). Pinned: the bytes must hash to the configured
+    // SHA-256 or, without one, to `ENROLLMENT_V3_SHA256`; anything else fails closed.
     if path.extension().is_some_and(|ext| ext == "onnx") {
-        let model = OnnxEnrollmentModel::from_file(path)
+        let bytes = read_capped(path, MAX_DEV_ARCHIVE_BYTES)
+            .map_err(|()| EnrollError::ModelNotConfigured)?;
+        let expected = config
+            .expected_sha256
+            .as_deref()
+            .unwrap_or(realtime_noise_model::pdfnet3_bundle::ENROLLMENT_V3_SHA256);
+        if realtime_noise_model::pdfnet3_bundle::sha256_hex(&bytes) != expected {
+            return Err(EnrollError::ModelNotConfigured);
+        }
+        let model = OnnxEnrollmentModel::from_onnx_bytes(bytes)
             .map_err(|_| EnrollError::ModelNotConfigured)?;
         return Ok(Box::new(v3(model)?));
     }
