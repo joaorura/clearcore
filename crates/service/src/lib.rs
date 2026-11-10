@@ -141,7 +141,7 @@ impl ServiceDaemon {
         configure_isolation_model(
             &mut supervisor,
             pdfnet3_dev_config::PdfNet3DevConfig::from_env(),
-            realtime_noise_model::pdfnet3_bundle::load_tract_archive,
+            realtime_noise_model::pdfnet3_bundle::load_isolation_archive,
         );
         let _ = supervisor.select_backend("auto", model_dir.as_deref(), repo_root.as_deref());
         let default_dir = VoiceSampleManager::default_dir();
@@ -1236,7 +1236,7 @@ mod tests {
         dirs: Vec<PathBuf>,
     ) -> impl FnOnce() -> Result<realtime_noise_model::PdfNet3DevArchive, realtime_noise_model::BundledModelError>
     {
-        move || realtime_noise_model::pdfnet3_bundle::load_tract_archive_from(&dirs)
+        move || realtime_noise_model::pdfnet3_bundle::load_isolation_archive_from(&dirs)
     }
 
     fn status_with(
@@ -1301,7 +1301,7 @@ mod tests {
         let bundle = dir.path().join("pdfnet3");
         std::fs::create_dir_all(&bundle).unwrap();
         std::fs::write(
-            bundle.join(realtime_noise_model::pdfnet3_bundle::PDFNET3_PRO_TRACT_FILE),
+            bundle.join(realtime_noise_model::pdfnet3_bundle::PDFNET3_PRO_V3_FULL_FILE),
             b"not the pinned archive",
         )
         .unwrap();
