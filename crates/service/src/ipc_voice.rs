@@ -1030,8 +1030,25 @@ impl ServiceDaemon {
             .mark_failed(job_id, failure(codes::ENROLL_FAILED, "apply"));
     }
 
+    /// A freshly built profile (first enrollment or "Regenerar perfil") turns the voice isolation
+    /// on: generating it is the user's opt-in. The setting is flipped before the transaction so the
+    /// conditioning is applied right away, restored if the transaction refuses the profile, and
+    /// persisted (then the shared state generation is bumped) so the virtual-mic filter, which
+    /// reads `settings.json`, follows the daemon. A boot without a new profile keeps the saved value.
     fn apply_built_profile(&mut self, job_id: &str, profile: &VoiceProfileV2) {
-        match self.apply_profile(profile) {
+        let was_enabled = self.settings.voice_isolation_enabled;
+        self.settings.voice_isolation_enabled = true;
+        let result = self.apply_profile(profile);
+        if result.is_err() {
+            self.settings.voice_isolation_enabled = was_enabled;
+        } else if !was_enabled {
+            let _ = crate::settings::persist_settings(
+                self.settings.clone(),
+                self.settings_path.as_deref(),
+            );
+            crate::bump_linux_shared_state_generation();
+        }
+        match result {
             Ok(()) => {
                 self.enrollment.extras.insert(
                     format!("{PROFILE_JOB_PREFIX}{job_id}"),

@@ -67,7 +67,8 @@ or OpenVINO) with no environment variable; its SHA-256 (and the enrollment v3 on
 (`models/stateful/`, `vendor/approved/`) stays in the repository for tests only and is not packaged.
 `models/enrollment/enrollment.onnx` is the enrollment v3 model (SHA-256 `82a292b9…`) whose embedding
 conditions this model. The voice profile is OFF by default (`settings.json` `voice_isolation_enabled:
-false`, v1 files ignored): a stored profile is applied only after the user turns it on.
+false`, v1 files ignored): a stored profile is applied only after the user turns it on. Generating a
+new profile (enrollment or "Regenerar perfil") is that opt-in: the service turns it on and persists `true`.
 
 Development overrides (both variables or none): `CLEARCORE_DEV_PDFNET3_ASSET`/`_SHA256` (daemon, tract
 export) and `CLEARCORE_DEV_PDFNET3_STATEFUL_ASSET`/`_SHA256` (filter, stateful export). An invalid override

@@ -761,6 +761,67 @@ fn build_profile_applies_it_through_the_transaction() {
     assert_eq!(list(&mut daemon)["has_profile"], true);
 }
 
+/// Generating a profile is the user's opt-in: with the isolation OFF, a successful build turns it
+/// ON (conditioning applied now, `settings.json` persisted with `true`).
+#[test]
+fn a_built_profile_turns_the_voice_isolation_on_and_persists_it() {
+    let temp = TempDir::new("enroll-build-enables");
+    let settings_file = temp.path().join("settings.json");
+    let (daemon, _) = daemon_with(temp.path(), Setup::default());
+    let mut daemon = daemon.with_settings_path(settings_file.clone());
+    send(
+        &mut daemon,
+        IpcCommand::SetVoiceIsolation { enabled: false },
+    );
+    assert!(!daemon.settings().voice_isolation_enabled);
+    for _ in 0..3 {
+        assert_eq!(add_sample(&mut daemon, 4.0, "mic-a")["state"], "done");
+    }
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "done", "{job}");
+    let profile_id = job["profile_id"].as_str().expect("profile id").to_owned();
+
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_isolation_enabled"], true);
+    assert_eq!(status.payload["is_voice_profile_active"], true);
+    assert_eq!(
+        status.payload["active_voice_profile_id"],
+        profile_id.as_str()
+    );
+    assert!(daemon.settings().voice_isolation_enabled);
+    let persisted = realtime_noise_service::settings::Settings::load(&settings_file);
+    assert!(
+        persisted.voice_isolation_enabled,
+        "persisted for the filter and the next boot"
+    );
+}
+
+/// A build the backend refuses does not flip the isolation on.
+#[test]
+fn a_refused_build_leaves_the_voice_isolation_off() {
+    let temp = TempDir::new("enroll-build-refused-off");
+    let (mut daemon, _) = daemon_with(
+        temp.path(),
+        Setup {
+            reject_built: true,
+            ..Setup::default()
+        },
+    );
+    send(
+        &mut daemon,
+        IpcCommand::SetVoiceIsolation { enabled: false },
+    );
+    add_sample(&mut daemon, 4.0, "mic-a");
+    add_sample(&mut daemon, 4.0, "mic-a");
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "failed", "{job}");
+    let status = send(&mut daemon, IpcCommand::GetStatus);
+    assert_eq!(status.payload["voice_isolation_enabled"], false);
+    assert_eq!(status.payload["is_voice_profile_active"], false);
+}
+
 #[test]
 fn build_without_the_development_model_fails_closed() {
     let temp = TempDir::new("enroll-no-model");

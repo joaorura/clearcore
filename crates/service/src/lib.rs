@@ -213,6 +213,13 @@ impl ServiceDaemon {
         daemon
     }
 
+    /// Where `settings.json` is persisted (builder form, for daemons built `with_supervisor`).
+    #[must_use]
+    pub fn with_settings_path(mut self, path: PathBuf) -> Self {
+        self.settings_path = Some(path);
+        self
+    }
+
     #[must_use]
     pub fn studio_control(&self) -> Arc<studio_dsp::StudioControl> {
         self.supervisor.studio_control()
