@@ -14,11 +14,14 @@ pub const ENROLL_BUSY: &str = "ENROLL_BUSY";
 pub const ENROLL_BACKEND_UNSUPPORTED: &str = "ENROLL_BACKEND_UNSUPPORTED";
 /// Active speech is heavily masked by background noise (SNR < 5 dB).
 pub const ENROLL_NOISY_ENVIRONMENT: &str = "ENROLL_NOISY_ENVIRONMENT";
+/// The stored voice profile is schema v1 (`FiLM` gamma/beta, pre pDFNet3 Pro v3) and cannot be
+/// applied: regenerate it from the stored samples with `BuildVoiceProfile` (no re-recording).
+pub const ENROLL_PROFILE_OUTDATED: &str = "ENROLL_PROFILE_OUTDATED";
 /// 90 s * 48 kHz * 4 B = 17.28 MB; base64 inflates by 4/3 (23.04 MB) plus envelope.
 pub const MAX_REQUEST_LINE_BYTES: usize = 32 * 1024 * 1024;
 
 /// The closed list of enrollment codes; clients reject (or collapse) anything else.
-pub const ALL_ENROLL_CODES: [&str; 12] = [
+pub const ALL_ENROLL_CODES: [&str; 13] = [
     ENROLL_CLIPPING,
     ENROLL_TOO_QUIET,
     ENROLL_TOO_LITTLE_SPEECH,
@@ -31,6 +34,7 @@ pub const ALL_ENROLL_CODES: [&str; 12] = [
     ENROLL_BUSY,
     ENROLL_BACKEND_UNSUPPORTED,
     ENROLL_NOISY_ENVIRONMENT,
+    ENROLL_PROFILE_OUTDATED,
 ];
 
 #[cfg(test)]

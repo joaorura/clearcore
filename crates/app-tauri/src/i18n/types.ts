@@ -228,6 +228,13 @@ export interface Translations {
     profileCorruptedTitle: string;
     profileCorruptedDesc: string;
     reEnrollFeedback: string;
+    statusOutdated: string;
+    outdatedTitle: string;
+    outdatedDesc: string;
+    outdatedNoSamplesDesc: string;
+    regenerateProfileBtn: string;
+    regenerateProfileHint: string;
+    modelTitle: string;
     storedNotApplied: string;
     errorServiceUnavailable: string;
     errorServiceError: string;
@@ -383,6 +390,7 @@ export interface Translations {
         ENROLL_JOB_NOT_FOUND: string;
         ENROLL_BUSY: string;
         ENROLL_BACKEND_UNSUPPORTED: string;
+        ENROLL_PROFILE_OUTDATED: string;
         ENROLL_FAILED: string;
         SERVICE_UNAVAILABLE: string;
         SERVICE_OUTDATED: string;

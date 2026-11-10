@@ -9,6 +9,8 @@ export type EnrollErrorCode =
   | 'ENROLL_BUDGET_EXCEEDED' | 'ENROLL_INVALID_AUDIO' | 'ENROLL_PAYLOAD_TOO_LARGE'
   | 'ENROLL_JOB_NOT_FOUND' | 'ENROLL_BUSY' | 'ENROLL_FAILED' | 'SERVICE_UNAVAILABLE'
   | 'ENROLL_NOISY_ENVIRONMENT'
+  /** The stored profile is v1 (FiLM): regenerate it from the saved samples. */
+  | 'ENROLL_PROFILE_OUTDATED'
   /** The active isolation model cannot apply a voice profile (samples and enrollment are kept). */
   | 'ENROLL_BACKEND_UNSUPPORTED'
   /** Local code: the running daemon predates the enrollment pipeline (restart ClearCore). */

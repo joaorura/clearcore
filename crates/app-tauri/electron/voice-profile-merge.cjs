@@ -23,17 +23,27 @@ const SERVICE_VOICE_PROFILE_KEYS = [
   'isolation_model_error',
   'voice_isolation_enabled',
   'voice_isolation_intensity',
+  // GetStatus (profile schema v2, pDFNet3 Pro v3): 'none' | 'active' | 'stored' | 'outdated'.
+  'voice_profile_state',
+  // GetStatus: a v1 (FiLM) profile is stored; regenerate it from the saved samples.
+  'voice_profile_outdated',
+  'voice_profile_can_regenerate',
+  // GetStatus: model of the profile, short fixed strings (e.g. pdfnet3-pro-v3-full / pDFNet3 Pro v3).
+  'voice_profile_model_id',
+  'voice_profile_model_label',
 ];
 
 const DEV_BASE_MODELS = new Set(['pdfnet3-dev', 'base']);
 const DEV_BASE_MODEL_ERROR_RE = /^DEV_MODEL_[A-Z_]{1,48}$/;
 const ISOLATION_MODELS = new Set(['pdfnet3-pro', 'pdfnet3-dev', 'base', 'none']);
 const ISOLATION_MODEL_ERROR_RE = /^MODEL_[A-Z_]{1,48}$/;
+const PROFILE_STATES = new Set(['none', 'active', 'stored', 'outdated']);
+const MODEL_TEXT_RE = /^[A-Za-z0-9 ._()-]{1,64}$/;
 
 // Service fields accepted only as real booleans; anything else is dropped (= unknown).
 const BOOLEAN_SERVICE_KEYS = new Set([
   'is_voice_profile_active', 'has_voice_profile', 'voice_profile_supported', 'neural_eq_calibrated',
-  'voice_isolation_enabled',
+  'voice_isolation_enabled', 'voice_profile_outdated', 'voice_profile_can_regenerate',
 ]);
 
 function isObject(v) {
@@ -47,6 +57,9 @@ function pickServiceVoiceProfileFields(serviceStatus) {
     if (!(key in serviceStatus) || serviceStatus[key] === undefined) continue;
     if (BOOLEAN_SERVICE_KEYS.has(key) && typeof serviceStatus[key] !== 'boolean') continue;
     if (key === 'voice_isolation_intensity' && !(typeof serviceStatus[key] === 'number' && serviceStatus[key] >= 0 && serviceStatus[key] <= 100)) continue;
+    if (key === 'voice_profile_state' && !PROFILE_STATES.has(serviceStatus[key])) continue;
+    if ((key === 'voice_profile_model_id' || key === 'voice_profile_model_label')
+      && !(typeof serviceStatus[key] === 'string' && MODEL_TEXT_RE.test(serviceStatus[key]))) continue;
     if (key === 'dev_base_model' && !DEV_BASE_MODELS.has(serviceStatus[key])) continue;
     if (key === 'dev_base_model_error' && serviceStatus[key] !== null
       && !(typeof serviceStatus[key] === 'string' && DEV_BASE_MODEL_ERROR_RE.test(serviceStatus[key]))) continue;

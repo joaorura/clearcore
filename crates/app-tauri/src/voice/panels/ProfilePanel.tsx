@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { VoiceProfileStatus } from '../../types';
 import type { EnrollmentLabels } from '../enrollmentTypes';
-import { hasServiceVoiceProfile, voiceProfileErrorKey, voiceProfileUnsupported, type Translate } from '../hooks/voiceProfileLogic';
+import { hasServiceVoiceProfile, isVoiceProfileOutdated, voiceProfileErrorKey, voiceProfileUnsupported, type Translate } from '../hooks/voiceProfileLogic';
 import { profileStatusLabel } from './profileStatusLabel';
 import { JobFeedbackBlock, type JobFeedbackView } from './shared';
 import { getVoiceIsolationIntensity, setVoiceIsolationIntensity } from '../../bridge';
@@ -46,6 +46,9 @@ export function ProfilePanel(p: ProfilePanelProps) {
   const { t, profileStatus } = p;
   const status = profileStatusLabel(profileStatus, t);
   const hasProfile = hasServiceVoiceProfile(profileStatus);
+  // A v1 (FiLM) profile is stored: regenerate it from the saved samples (no re-recording).
+  const outdated = isVoiceProfileOutdated(profileStatus);
+  const canRegenerate = outdated && p.canBuild && profileStatus.voice_profile_can_regenerate !== false;
   // Only an explicit `false` from the service; an absent field keeps today's behavior.
   const unsupported = voiceProfileUnsupported(profileStatus);
   // The bundled pDFNet3 Pro failed to load: show the fixed service code instead of a generic text.
@@ -218,7 +221,59 @@ export function ProfilePanel(p: ProfilePanelProps) {
           )}
         </div>
       )}
-      {!hasProfile && !status.active && !profileStatus.voice_profile_error && (
+      {outdated && (
+        <div
+          role="alert"
+          className="profile-outdated-banner"
+          data-testid="profile-outdated-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 16px',
+            background: 'rgba(249, 115, 22, 0.1)',
+            border: '1px solid rgba(249, 115, 22, 0.35)',
+            borderRadius: 8,
+            marginBottom: 16,
+            color: '#fb923c',
+          }}
+        >
+          <span style={{ fontSize: '1.4rem' }}>🟠</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
+              {t('voiceProfile.outdatedTitle')}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {canRegenerate ? t('voiceProfile.outdatedDesc') : t('voiceProfile.outdatedNoSamplesDesc')}
+            </div>
+          </div>
+          {canRegenerate ? (
+            <button
+              className="action-btn"
+              data-testid="regenerate-profile-btn"
+              disabled={p.busy || p.isBuilding || unsupported}
+              onClick={p.onBuildProfile}
+              title={t('voiceProfile.regenerateProfileHint')}
+              style={{ fontSize: '0.8rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+            >
+              {p.isBuilding
+                ? `⏳ ${p.waitingForSample ? t('voiceProfile.processingSample') : t('voiceProfile.buildingProfile')}`
+                : t('voiceProfile.regenerateProfileBtn')}
+            </button>
+          ) : (
+            p.onResetEnrollment && (
+              <button
+                className="action-btn"
+                onClick={p.onResetEnrollment}
+                style={{ fontSize: '0.8rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+              >
+                {t('voiceProfile.startEnrollBtn')}
+              </button>
+            )
+          )}
+        </div>
+      )}
+      {!hasProfile && !status.active && !outdated && !profileStatus.voice_profile_error && (
         <div
           role="status"
           className="profile-empty-banner"
@@ -254,7 +309,7 @@ export function ProfilePanel(p: ProfilePanelProps) {
           )}
         </div>
       )}
-      {profileStatus.voice_profile_error && !status.active && (
+      {profileStatus.voice_profile_error && !status.active && !outdated && (
         <div
           role="alert"
           className="profile-corrupted-banner"
@@ -347,7 +402,7 @@ export function ProfilePanel(p: ProfilePanelProps) {
               {t('voiceProfile.appliedInServiceNote')}
             </div>
           )}
-          {profileStatus.voice_profile_error && !status.active && (
+          {profileStatus.voice_profile_error && !status.active && !outdated && (
             <div style={{ color: status.corrupted ? '#f87171' : '#fbbf24', fontSize: '0.75rem', marginTop: 4 }}>
               {t(`voiceProfile.${voiceProfileErrorKey(profileStatus.voice_profile_error)}`)}
             </div>
@@ -365,6 +420,14 @@ export function ProfilePanel(p: ProfilePanelProps) {
             {profileStatus.neural_eq_calibrated ? t('voiceProfile.neuralEqCalibrated') : t('voiceProfile.neuralEqPending')}
           </div>
         </div>
+        {profileStatus.voice_profile_model_label && (
+          <div className="overview-metric">
+            <div className="overview-label">{t('voiceProfile.modelTitle')}</div>
+            <div className="overview-value" data-testid="profile-model-label">
+              {profileStatus.voice_profile_model_label}
+            </div>
+          </div>
+        )}
       </div>
 
       {hasProfile && (

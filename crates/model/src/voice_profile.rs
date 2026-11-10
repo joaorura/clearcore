@@ -450,6 +450,12 @@ impl VoiceProfile {
 
     /// Deserializes and validates a profile from JSON string.
     pub fn from_json(json_str: &str) -> Result<Self, VoiceProfileError> {
+        // A profile of another schema fails with its version, not with a missing-field error.
+        if let Some(version) = probe_schema_version(json_str)
+            && version != PROFILE_SCHEMA_VERSION
+        {
+            return Err(VoiceProfileError::UnsupportedVersion(version));
+        }
         let profile: Self = serde_json::from_str(json_str)
             .map_err(|e| VoiceProfileError::Deserialization(e.to_string()))?;
         profile.verify_integrity()?;
@@ -460,69 +466,84 @@ impl VoiceProfile {
     pub fn save_to_file_secure(&self, path: &Path) -> Result<(), VoiceProfileError> {
         self.verify_integrity()?;
         let json_str = self.to_json()?;
-
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let tmp_path = path.with_extension(format!(
-            "tmp.{}.{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        ));
-
-        // The file is created with mode 0600 from the first byte: there is no window in which
-        // biometric data is readable by group/others (unlike write-then-chmod).
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let write_result = options.open(&tmp_path).and_then(|mut file| {
-            file.write_all(json_str.as_bytes())?;
-            file.sync_all()
-        });
-        if let Err(error) = write_result {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(error.into());
-        }
-
-        if let Err(error) = fs::rename(&tmp_path, path) {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(error.into());
-        }
-        Ok(())
+        write_secure_atomic(path, &json_str)
     }
 
     /// Loads and validates a profile from disk, verifying 0600 permissions on Unix.
     pub fn load_from_file_secure(path: &Path) -> Result<Self, VoiceProfileError> {
-        let metadata = fs::symlink_metadata(path)?;
-        if !metadata.file_type().is_file() {
-            return Err(VoiceProfileError::InsecurePermissions(
-                "profile path is not a regular file".to_owned(),
-            ));
-        }
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = metadata.permissions().mode();
-            if mode & 0o077 != 0 {
-                return Err(VoiceProfileError::InsecurePermissions(format!(
-                    "file mode {mode:#o} has group/world permissions (expected 0600)"
-                )));
-            }
-        }
-
-        let bytes = fs::read(path)?;
-        let text = std::str::from_utf8(&bytes)
-            .map_err(|e| VoiceProfileError::Deserialization(e.to_string()))?;
-        Self::from_json(text)
+        let text = read_secure_utf8(path)?;
+        Self::from_json(&text)
     }
+}
+
+/// The `version` field of a profile JSON document, when it parses and has one.
+pub(crate) fn probe_schema_version(text: &str) -> Option<u32> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    u32::try_from(value.get("version")?.as_u64()?).ok()
+}
+
+/// Atomically writes `text` to `path` (temp file + rename), created with mode 0600 from the
+/// first byte. Shared by every profile schema version.
+pub(crate) fn write_secure_atomic(path: &Path, text: &str) -> Result<(), VoiceProfileError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let tmp_path = path.with_extension(format!(
+        "tmp.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+
+    // The file is created with mode 0600 from the first byte: there is no window in which
+    // biometric data is readable by group/others (unlike write-then-chmod).
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let write_result = options.open(&tmp_path).and_then(|mut file| {
+        file.write_all(text.as_bytes())?;
+        file.sync_all()
+    });
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(error.into());
+    }
+
+    if let Err(error) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+/// Reads a regular, owner-only (0600 on Unix) profile file as UTF-8 text.
+pub(crate) fn read_secure_utf8(path: &Path) -> Result<String, VoiceProfileError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() {
+        return Err(VoiceProfileError::InsecurePermissions(
+            "profile path is not a regular file".to_owned(),
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = metadata.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(VoiceProfileError::InsecurePermissions(format!(
+                "file mode {mode:#o} has group/world permissions (expected 0600)"
+            )));
+        }
+    }
+
+    let bytes = fs::read(path)?;
+    String::from_utf8(bytes).map_err(|e| VoiceProfileError::Deserialization(e.to_string()))
 }
 
 #[cfg(test)]

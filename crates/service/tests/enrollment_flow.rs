@@ -16,14 +16,16 @@ use realtime_noise_contracts::AudioFrame;
 use realtime_noise_ipc::enrollment_codes::{
     ENROLL_BACKEND_UNSUPPORTED, ENROLL_BUDGET_EXCEEDED, ENROLL_BUSY, ENROLL_FAILED,
     ENROLL_INVALID_AUDIO, ENROLL_JOB_NOT_FOUND, ENROLL_MODEL_NOT_CONFIGURED,
-    ENROLL_PAYLOAD_TOO_LARGE, ENROLL_TOO_LITTLE_SPEECH, MAX_REQUEST_LINE_BYTES,
+    ENROLL_PAYLOAD_TOO_LARGE, ENROLL_PROFILE_OUTDATED, ENROLL_TOO_LITTLE_SPEECH,
+    MAX_REQUEST_LINE_BYTES,
 };
 use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus};
-use realtime_noise_model::enrollment::{EnrollmentError, RawFilmVectors, SpeakerEmbeddingModel};
+use realtime_noise_model::enrollment::EnrollmentError;
+use realtime_noise_model::enrollment_v3::EmbeddingExtractor;
 use realtime_noise_model::wav::decode_wav_pcm16_mono;
 use realtime_noise_model::{
-    ACTIVE_PROFILE_FILE_NAME, BackendDescriptor, BandGains, FiLMVectors, InferenceBackend,
-    InferenceError, ProcessedFrame, ProfileStore, VoiceProfile,
+    ACTIVE_PROFILE_FILE_NAME, BackendDescriptor, BandGains, InferenceBackend, InferenceError,
+    ProcessedFrame, ProfileStore, SpeakerEmbedding, StoredProfile, VoiceProfile, VoiceProfileV2,
 };
 use realtime_noise_service::{
     Denoiser, EnrollError, EnrollmentHooks, IntakeTake, ServiceDaemon, VoiceSample,
@@ -95,23 +97,19 @@ impl Denoiser for GainDenoiser {
     }
 }
 
-/// Returns valid `FiLM` vectors; optionally sleeps and records the peak of its 16 kHz input.
+/// Returns a valid speaker embedding; optionally sleeps and records the peak (and length) of its
+/// 16 kHz input.
 struct FakeModel {
     delay: Duration,
     seen_peak: Arc<Mutex<Option<f32>>>,
 }
 
-impl SpeakerEmbeddingModel for FakeModel {
-    fn extract(&mut self, samples_16khz: &[f32]) -> Result<RawFilmVectors, EnrollmentError> {
+impl EmbeddingExtractor for FakeModel {
+    fn extract_embedding(&mut self, samples_16khz: &[f32]) -> Result<Vec<f32>, EnrollmentError> {
         std::thread::sleep(self.delay);
         let peak = samples_16khz.iter().fold(0.0_f32, |m, v| m.max(v.abs()));
         *self.seen_peak.lock().unwrap() = Some(peak);
-        Ok(RawFilmVectors {
-            gamma_enc: vec![1.1; 256],
-            beta_enc: vec![0.02; 256],
-            gamma_df: vec![0.9; 256],
-            beta_df: vec![-0.02; 256],
-        })
+        Ok((0..192_u16).map(|i| f32::from(i) + 1.0).collect())
     }
 }
 
@@ -157,7 +155,7 @@ fn daemon_with(dir: &Path, setup: Setup) -> (ServiceDaemon, Arc<Mutex<Option<f32
                 Ok(Box::new(FakeModel {
                     delay: model_delay,
                     seen_peak: Arc::clone(&peak_slot),
-                }) as Box<dyn SpeakerEmbeddingModel + Send>)
+                }) as Box<dyn EmbeddingExtractor + Send>)
             });
             factory
         });
@@ -310,22 +308,23 @@ fn mode_of(path: &Path) -> u32 {
     std::fs::metadata(path).expect("meta").permissions().mode() & 0o777
 }
 
-fn film_vector(base: f32, step: f32) -> Vec<f32> {
-    (0..256_u16)
-        .map(|i| step.mul_add(f32::from(i), base))
-        .collect()
+fn test_embedding(seed: f32) -> SpeakerEmbedding {
+    let raw: Vec<f32> = (0..192_u16)
+        .map(|i| ((f32::from(i) + 1.0) * seed).sin())
+        .collect();
+    SpeakerEmbedding::from_raw_normalizing(&raw).expect("embedding")
 }
 
-fn test_profile(id: &str) -> VoiceProfile {
-    let film = FiLMVectors::new(
-        film_vector(0.5, 0.003),
-        film_vector(-0.25, 0.001),
-        film_vector(0.75, 0.002),
-        film_vector(0.125, -0.0005),
-    )
-    .expect("film");
+fn test_profile(id: &str) -> VoiceProfileV2 {
     let eq = BandGains::clamped(&[1.5; 32]).expect("eq");
-    VoiceProfile::new(id, "Anterior", "2026-10-02T12:00:00Z", film, Some(eq)).expect("profile")
+    VoiceProfileV2::new(
+        id,
+        "Anterior",
+        "2026-10-02T12:00:00Z",
+        &test_embedding(0.37),
+        Some(eq),
+    )
+    .expect("profile")
 }
 
 fn now_ms() -> u64 {
@@ -1182,8 +1181,10 @@ fn a_profile_the_backend_rejects_fails_the_job_and_keeps_the_previous_one() {
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["active_voice_profile_id"], "previous");
     assert_eq!(status.payload["stored_voice_profile_id"], "previous");
-    let stored = ProfileStore::new(temp.path()).load_active().expect("load");
-    assert_eq!(stored.expect("stored").id, "previous");
+    let stored = ProfileStore::new(temp.path())
+        .load_active_any()
+        .expect("load");
+    assert!(matches!(stored, Some(StoredProfile::Current(p)) if p.id == "previous"));
 }
 
 // ---------------------------------------------------------------- peaks after decimation
@@ -1511,14 +1512,14 @@ fn a_supporting_backend_still_builds_and_status_reports_support_and_eq() {
     assert_eq!(status.payload["voice_profile_supported"], true);
     assert_eq!(status.payload["neural_eq_calibrated"], false, "no profile");
 
-    let film = FiLMVectors::new(
-        film_vector(0.5, 0.003),
-        film_vector(-0.25, 0.001),
-        film_vector(0.75, 0.002),
-        film_vector(0.125, -0.0005),
+    let no_eq = VoiceProfileV2::new(
+        "no-eq",
+        "n",
+        "2026-10-02T12:00:00Z",
+        &test_embedding(0.11),
+        None,
     )
-    .expect("film");
-    let no_eq = VoiceProfile::new("no-eq", "n", "2026-10-02T12:00:00Z", film, None).expect("p");
+    .expect("p");
     let set = send(
         &mut daemon,
         IpcCommand::SetVoiceProfile {
@@ -1575,4 +1576,161 @@ fn a_built_profile_that_cannot_be_persisted_stays_enroll_failed() {
         status.payload["active_voice_profile_id"].is_null(),
         "rolled back"
     );
+}
+
+// ---------------------------------------------------------------- profile schema v2 (pDFNet3 Pro v3)
+
+fn legacy_v1_profile(id: &str) -> VoiceProfile {
+    VoiceProfile::identity(id, "Antiga", "2026-10-02T12:00:00Z").expect("v1 profile")
+}
+
+#[test]
+fn a_built_profile_is_persisted_as_v2_with_the_embedding_eq_and_model_id() {
+    let temp = TempDir::new("enroll-v2-format");
+    let mut daemon = daemon(temp.path());
+    for _ in 0..2 {
+        add_sample(&mut daemon, 4.0, "mic-a");
+    }
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "done", "{job}");
+
+    let text = std::fs::read_to_string(temp.path().join(ACTIVE_PROFILE_FILE_NAME)).expect("file");
+    let json: Value = serde_json::from_str(&text).expect("json");
+    assert_eq!(json["version"], 2);
+    assert_eq!(json["model_id"], "pdfnet3-pro-v3-full");
+    assert_eq!(json["model_version"], 3);
+    assert_eq!(json["embedding_dim"], 192);
+    assert!(json["speaker_embedding_b64"].as_str().expect("b64").len() >= 1024);
+    assert!(json["eq"]["gains_db"].as_array().expect("eq").len() == 32);
+    assert!(json.get("film").is_none(), "no gamma/beta in v2");
+    #[cfg(unix)]
+    assert_eq!(mode_of(&temp.path().join(ACTIVE_PROFILE_FILE_NAME)), 0o600);
+
+    // The embedding is the (normalized) one the model produced.
+    let stored = match ProfileStore::new(temp.path())
+        .load_active_any()
+        .expect("load")
+        .expect("some")
+    {
+        StoredProfile::Current(p) => p,
+        other @ StoredProfile::Outdated(_) => panic!("{other:?}"),
+    };
+    let e = stored.speaker_embedding().expect("embedding");
+    let expected: Vec<f32> = (0..192_u16).map(|i| f32::from(i) + 1.0).collect();
+    let norm = expected.iter().map(|v| v * v).sum::<f32>().sqrt();
+    for (got, raw) in e.as_slice().iter().zip(&expected) {
+        assert!((got - raw / norm).abs() < 1e-6);
+    }
+
+    let status = send(&mut daemon, IpcCommand::GetStatus).payload;
+    assert_eq!(status["voice_profile_model_id"], "pdfnet3-pro-v3-full");
+    assert_eq!(status["voice_profile_model_label"], "pDFNet3 Pro v3");
+    assert_eq!(status["voice_profile_state"], "active");
+    assert_eq!(status["voice_profile_outdated"], false);
+    assert_eq!(status["has_voice_profile"], true);
+}
+
+#[test]
+fn a_stored_v1_profile_is_outdated_and_never_applied() {
+    let temp = TempDir::new("enroll-v1-outdated");
+    ProfileStore::new(temp.path())
+        .save_active(&legacy_v1_profile("old-1"))
+        .expect("save v1");
+    let (mut daemon, _) = daemon_with(temp.path(), Setup::default());
+    let status = send(&mut daemon, IpcCommand::GetStatus).payload;
+    assert_eq!(status["voice_profile_state"], "outdated");
+    assert_eq!(status["voice_profile_outdated"], true);
+    assert_eq!(status["voice_profile_error"], ENROLL_PROFILE_OUTDATED);
+    assert_eq!(status["active_voice_profile_id"], Value::Null);
+    assert_eq!(status["is_voice_profile_active"], false);
+    assert_eq!(status["stored_voice_profile_id"], Value::Null);
+    assert_eq!(status["has_voice_profile"], false);
+    assert_eq!(status["voice_profile_can_regenerate"], false, "no samples yet");
+    // The file is kept (the user regenerates over it).
+    assert!(temp.path().join(ACTIVE_PROFILE_FILE_NAME).is_file());
+}
+
+#[test]
+fn an_outdated_profile_is_regenerated_from_the_saved_samples_without_re_recording() {
+    let temp = TempDir::new("enroll-v1-regenerate");
+    // Samples first, then the v1 profile appears on disk (an upgrade of the app).
+    let (mut first, _) = daemon_with(temp.path(), Setup::default());
+    for _ in 0..2 {
+        add_sample(&mut first, 4.0, "mic-a");
+    }
+    drop(first);
+    ProfileStore::new(temp.path())
+        .save_active(&legacy_v1_profile("old-1"))
+        .expect("save v1");
+
+    let (mut daemon, _) = daemon_with(temp.path(), Setup::default());
+    assert_eq!(list(&mut daemon)["total_count"], 2, "samples survived");
+    let status = send(&mut daemon, IpcCommand::GetStatus).payload;
+    assert_eq!(status["voice_profile_state"], "outdated");
+    assert_eq!(status["voice_profile_can_regenerate"], true);
+
+    // Same command the UI sends for "Regenerar perfil"; no AddVoiceSample in between.
+    let id = job_id(&build(&mut daemon));
+    let job = wait_job(&mut daemon, &id);
+    assert_eq!(job["state"], "done", "{job}");
+    let status = send(&mut daemon, IpcCommand::GetStatus).payload;
+    assert_eq!(status["voice_profile_state"], "active");
+    assert_eq!(status["voice_profile_outdated"], false);
+    assert_eq!(status["voice_profile_error"], Value::Null);
+    assert_eq!(status["active_voice_profile_id"], job["profile_id"]);
+    assert_eq!(list(&mut daemon)["total_count"], 2, "samples untouched");
+    let stored = ProfileStore::new(temp.path()).load_active_any().expect("load");
+    assert!(matches!(stored, Some(StoredProfile::Current(_))));
+}
+
+#[test]
+fn set_voice_profile_with_a_v1_document_answers_profile_outdated() {
+    let temp = TempDir::new("enroll-v1-set");
+    let mut daemon = daemon(temp.path());
+    let resp = send(
+        &mut daemon,
+        IpcCommand::SetVoiceProfile {
+            profile_json: legacy_v1_profile("old-2").to_json().expect("json"),
+        },
+    );
+    assert_eq!(resp.status, IpcStatus::InvalidCommand, "{resp:?}");
+    assert_eq!(error_code(&resp), ENROLL_PROFILE_OUTDATED);
+    let status = send(&mut daemon, IpcCommand::GetStatus).payload;
+    assert_eq!(status["voice_profile_state"], "none");
+    assert!(!temp.path().join(ACTIVE_PROFILE_FILE_NAME).exists());
+}
+
+#[test]
+fn clearing_an_outdated_profile_removes_it() {
+    let temp = TempDir::new("enroll-v1-clear");
+    ProfileStore::new(temp.path())
+        .save_active(&legacy_v1_profile("old-3"))
+        .expect("save v1");
+    let (mut daemon, _) = daemon_with(temp.path(), Setup::default());
+    assert_eq!(send(&mut daemon, IpcCommand::ClearVoiceProfile).status, IpcStatus::Ok);
+    let status = send(&mut daemon, IpcCommand::GetStatus).payload;
+    assert_eq!(status["voice_profile_state"], "none");
+    assert_eq!(status["voice_profile_error"], Value::Null);
+    assert!(!temp.path().join(ACTIVE_PROFILE_FILE_NAME).exists());
+}
+
+#[test]
+fn a_v2_profile_survives_a_restart_and_is_applied() {
+    let temp = TempDir::new("enroll-v2-restart");
+    {
+        let mut daemon = daemon(temp.path());
+        let set = send(
+            &mut daemon,
+            IpcCommand::SetVoiceProfile {
+                profile_json: test_profile("keep").to_json().expect("json"),
+            },
+        );
+        assert_eq!(set.status, IpcStatus::Ok);
+    }
+    let (mut daemon, _) = daemon_with(temp.path(), Setup::default());
+    let status = send(&mut daemon, IpcCommand::GetStatus).payload;
+    assert_eq!(status["voice_profile_state"], "active");
+    assert_eq!(status["active_voice_profile_id"], "keep");
+    assert_eq!(status["neural_eq_calibrated"], true);
 }

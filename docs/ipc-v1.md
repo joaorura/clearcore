@@ -114,8 +114,12 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
   | `stored_voice_profile_id` | Id of the profile persisted on disk (the one reloaded at startup and after a backend swap), or `null`. |
   | `voice_profile_selected` | `true` when `stored_voice_profile_id` is not `null`. |
   | `is_voice_profile_active` | `true` when `active_voice_profile_id` is not `null`. |
-  | `voice_profile_error` | Generic, constant reason the stored profile is not applied (backend rejected it, file missing/unreadable, rollback failed), or `null`. Never carries profile data or backend error text. |
+  | `voice_profile_error` | Generic, constant reason the stored profile is not applied (backend rejected it, file missing/unreadable, rollback failed) or the fixed code `ENROLL_PROFILE_OUTDATED` (a v1 profile is stored), or `null`. Never carries profile data or backend error text. |
   | `voice_profile_supported` | `true` exactly when the live backend's model declares the `FiLM` (`gamma`/`beta`) inputs, i.e. when `SetVoiceProfile`/the `apply` stage accept a conditioned profile (there is no "DSP bridge" that would accept one without applying it). With the bundled pDFNet3 Pro it is `true`, on tract and on OpenVINO (CPU/GPU/NPU: the stateful export's `gamma`/`beta` inputs are fed); it is `false` without a backend (isolation model unavailable) and on backends that reject every profile (DirectML, RyzenAI, TensorRT, Vulkan, CoreML, mocks, the base DFNet3 on any runtime). While `false`, `BuildVoiceProfile` answers `ENROLL_BACKEND_UNSUPPORTED` immediately. Clients that do not find the field must treat support as unknown. |
+  | `voice_profile_state` | Additive (profile schema v2). `none`, `active` (stored and applied), `stored` (valid but not applied: isolation disabled or backend rejected it) or `outdated` (a v1 `FiLM` profile is on disk, see below). |
+  | `voice_profile_outdated` | Additive. `true` when the stored profile is schema v1 (gamma/beta, made for the pre-v3 model). It is never applied: the audio stays neutral, `voice_profile_error` is `ENROLL_PROFILE_OUTDATED`, `stored_voice_profile_id` and `has_voice_profile` are `null`/`false`. The samples are still valid: `BuildVoiceProfile` regenerates the profile from them (no re-recording) and replaces the v1 file. |
+  | `voice_profile_can_regenerate` | Additive. `true` when the profile is outdated and the active samples with audio add up to at least 6 s (enough for `BuildVoiceProfile`). |
+  | `voice_profile_model_id` / `voice_profile_model_label` | Additive. The model the profile conditions: `"pdfnet3-pro-v3-full"` / `"pDFNet3 Pro v3"`. |
   | `isolation_model` | Isolation model of the live backend: `"pdfnet3-pro"` (the pDFNet3 Pro bundled under `<models>/pdfnet3/`, the only production model), `"pdfnet3-dev"` (development override, §3.1.7), `"none"` (no model loaded: the bundled one is missing or invalid; no fallback model is used) or `"base"` (embedding/test seams only). |
   | `isolation_model_error` | Fixed code while the isolation model is unavailable, else `null`: `MODEL_ASSET_NOT_FOUND`, `MODEL_ASSET_UNREADABLE`, `MODEL_ASSET_TOO_LARGE`, `MODEL_HASH_MISMATCH`, `MODEL_ARCHIVE_INVALID`, `MODEL_LOAD_FAILED`, `MODEL_NO_FILM`, and for an invalid override `MODEL_CONFIG_INCOMPLETE`/`MODEL_CONFIG_INVALID`. Never a path. |
   | `backend_fallback` / `backend_fallback_reason` | Additive. Whether the last backend selection (startup, `--backend`, `SetBackend`) did not get what was requested, and why (e.g. `pDFNet3 Pro no tract (CPU): OpenVINO falhou: NPU: ...`), else `false` / `null`. Same values as the `fallback`/`fallback_reason` of the `SetBackend` response, kept for clients that only poll `GetStatus`. |
@@ -132,7 +136,8 @@ Retrieves current supervisor lifecycle state, operational mode, and crash teleme
 ### `SetVoiceProfile`
 Applies a voice profile to the service backend, then persists it. The operation is transactional:
 the profile is verified, applied to the backend and saved; if saving fails the backend returns to
-the previous profile.
+the previous profile. `profile_json` is a schema v2 document (see "Voice profile v2"); a schema v1
+(`FiLM`) document is refused with `ENROLL_PROFILE_OUTDATED` (status `InvalidCommand`).
 
 - **Request:**
   ```json
@@ -169,6 +174,38 @@ Returns the backend to the neutral voice and removes the stored profile. Idempot
   | `InternalError` | `VOICE_PROFILE_CLEAR_FAILED` | The backend could not go neutral; disk and reported state are left untouched. |
   | `InternalError` | `INTERNAL_ERROR` | Removing the stored file failed; the backend was restored. |
 
+### Voice profile v2 (pDFNet3 Pro v3)
+
+The profile no longer carries `FiLM` gamma/beta. It stores the speaker embedding of the v3
+enrollment model (`speaker_embedding`, ECAPA, `f32` x 192, L2-normalized), the microphone EQ and the
+model id. File: `active_profile.json` in the profile store (`0600`, directory `0700`), written
+atomically; `SetVoiceProfile.profile_json` carries the same document.
+
+```json
+{
+  "version": 2,
+  "id": "p-1730000000000-1", "name": "Voz", "created_at_utc": "2026-11-09T12:00:00Z",
+  "model_id": "pdfnet3-pro-v3-full", "model_version": 3,
+  "embedding_dim": 192,
+  "speaker_embedding_b64": "<192 x f32 little-endian = 768 bytes, standard base64 with padding>",
+  "eq": {"gains_db": [32 floats in [-6, 12] dB]},
+  "integrity_hash": "<sha256 hex of the canonical JSON of every other field>"
+}
+```
+
+- A document of another `model_id`/`model_version`, an embedding that is not 192 finite floats of
+  unit norm (tolerance 1e-3), an EQ out of range or a wrong hash is refused (fail-closed).
+- A **v1** file (`"version": 1`, `film` field) is reported as outdated (`voice_profile_state:
+  "outdated"`, `voice_profile_error: "ENROLL_PROFILE_OUTDATED"`) and never applied. The stored
+  samples stay valid: send `BuildVoiceProfile` (the UI's "Regenerar perfil") and the v2 profile
+  replaces the v1 file. A v1 reader (`VoiceProfile::from_json`) rejects a v2 file with
+  `UnsupportedVersion(2)`, so an old consumer stays neutral instead of misreading it.
+- Delivery inside the service: `VoiceConditioning { profile_id, model_id, speaker_embedding:
+  [f32; 192], eq: Option<BandGains>, intensity_percent }` through the `VoiceConditioningTarget`
+  trait (`crates/service/src/voice_conditioning.rs`); `None` is the neutral voice. The virtual
+  microphone filter reads the same `active_profile.json` (it must parse `version: 2` and
+  `speaker_embedding_b64`); the service bumps the shared-state generation after every change.
+
 ### 3.1 Voice enrollment
 
 Status: **development-integrated.** The pipeline runs on the service backend, but the packaged virtual microphone (`filter-capi` / helper) does not apply the profile yet, and there is no claim of improved isolation. The enrollment model is a development asset (section 3.1.7), not a distributed one.
@@ -196,7 +233,7 @@ Stores one recording as a gallery sample. Replaces the previous embedding-carryi
 - **Rules:** a raw peak of `0.99` or more is rejected as clipping; an active-speech RMS (active frames only, pauses excluded; the profile build applies the same rule and threshold to the joined audio) below -40 dBFS is rejected as too quiet; if the microphone's used speech plus the sample's speech would exceed 90 s (section 3.1.5), nothing is stored and the job fails with `ENROLL_BUDGET_EXCEEDED` carrying `remaining_seconds`.
 
 #### 3.1.2 `BuildVoiceProfile`
-Builds a profile from the active samples of the **most recent sample's microphone** and applies it. Samples of other microphones stay in the gallery, flagged `other_microphone`, and are not used. Speech is trimmed (20 ms frames, 40 ms margin), levels are matched to the group median (gain limited to +/-12 dB), segments are joined with a 20 ms crossfade, the microphone EQ is estimated, the audio is resampled 48 to 16 kHz and enrolled with the development model.
+Builds a profile from the active samples of the **most recent sample's microphone** and applies it. Samples of other microphones stay in the gallery, flagged `other_microphone`, and are not used. The microphone EQ is estimated on the trimmed (20 ms frames, 40 ms margin), level-matched (gain limited to +/-12 dB), 20 ms-crossfaded speech. The speaker embedding comes from the stored samples **as stored** (clean mix, untrimmed), resampled 48 to 16 kHz and aggregated exactly like the training: in recording order, joined with 250 ms of zeros between samples, truncated to 12 s (192 000 samples); under 6 s is refused with `ENROLL_TOO_LITTLE_SPEECH`; the v3 `enrollment.onnx` runs **once** (no averaging of per-sample embeddings). The result is a schema v2 profile (section "Voice profile v2"); it also regenerates an outdated v1 profile from the saved samples.
 
 - **Request:** `{"BuildVoiceProfile":{"name":"My voice"}}`
 - **Response Payload (immediate):** `{"success": true, "job_id": "profile-job-1"}`. Profile build jobs use the `profile-job-N` id format.
@@ -289,6 +326,7 @@ Codes are fixed strings with no free text and no echo of the payload (`crates/ip
 | `ENROLL_JOB_NOT_FOUND` | Unknown or expired `job_id`. |
 | `ENROLL_FAILED` | Generic failure of the pipeline (denoise, enrollment, persistence), including a job failed by the 10-minute watchdog (stage `timeout`). No detail is exposed. |
 | `ENROLL_BUSY` | Two enrollment jobs are already running in that table; immediate response, no job is created; retry later. |
+| `ENROLL_PROFILE_OUTDATED` | The stored voice profile is schema v1 (`FiLM`) and cannot condition the pDFNet3 Pro v3 (status `InvalidCommand`). Answer of `SetVoiceProfile` with a v1 document, and `GetStatus.voice_profile_error` while one is stored. Regenerate with `BuildVoiceProfile` from the saved samples; no re-recording. |
 | `ENROLL_BACKEND_UNSUPPORTED` | The active isolation model cannot apply a voice profile (status `InternalError`). Immediate response of `BuildVoiceProfile` when `voice_profile_supported` is `false` (no job is created), or the `apply` stage of a build job when the backend refused the built profile. Samples and earlier profiles are kept. |
 
 #### 3.1.7 Development model configuration
@@ -296,7 +334,7 @@ The enrollment model is loaded only when both environment variables are set for 
 
 | Variable | Value |
 | :--- | :--- |
-| `CLEARCORE_DEV_ENROLLMENT_ASSET` | Absolute path of the asset archive (`voice-enrollment-asset-v1.tar.gz`). |
+| `CLEARCORE_DEV_ENROLLMENT_ASSET` | Absolute path of the pDFNet3 Pro v3 enrollment asset: either the `enrollment.onnx` itself (path ending in `.onnx`, input `audio` `[1, N]` 16 kHz with `N` in 96 000..=192 000, output `speaker_embedding` `[1, 192]`; the SHA-256 is then not required) or an archive that contains it (`voice-enrollment-asset-v1.tar.gz` layout). A v1 asset (outputs `gamma_*`/`beta_*`, no `speaker_embedding`) is refused at load with `ENROLL_MODEL_NOT_CONFIGURED`. |
 | `CLEARCORE_DEV_ENROLLMENT_SHA256` | Expected SHA-256 of the **entire file**: 64 lowercase hex characters. |
 
 The hash is checked over the whole file and only an allowlisted archive member (`enrollment.onnx`) is read. Without a valid configuration (variables unset, archive missing, unreadable or oversized, or a hash mismatch), `BuildVoiceProfile` jobs fail with `ENROLL_MODEL_NOT_CONFIGURED`; sample ingestion does not need the enrollment model (it needs only the base denoiser). The asset is not pinned in the registry, not signed and not distributed. Denoising uses the approved base DFNet3. Scope: development-integrated; the packaged virtual microphone does not apply the profile yet, and no improvement of voice isolation is claimed.

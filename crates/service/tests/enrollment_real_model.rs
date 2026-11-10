@@ -3,6 +3,9 @@
 //! `CLEARCORE_DEV_ENROLLMENT_ASSET` + `CLEARCORE_DEV_ENROLLMENT_SHA256`. Development-integrated,
 //! not end-to-end and not a quality claim (spec 1, 3.1, 12.8).
 //!
+//! Since profile schema v2 the enrollment asset is the pDFNet3 Pro v3 `enrollment.onnx` (a path
+//! ending in `.onnx`; output `speaker_embedding`), no longer the M3 FiLM archive.
+//!
 //! Run: `cargo test -p realtime-noise-service --release --test enrollment_real_model
 //! -- --ignored --nocapture` with both variables set.
 #![forbid(unsafe_code)]
@@ -224,8 +227,6 @@ fn real_denoiser_and_development_model_build_and_apply_a_profile() {
 const M3_PDFNET3: &str =
     "/home/joaorura/orca/projects/clearcore-train/runs/m3/pdfnet3-release-asset-v1.tar.gz";
 const M3_PDFNET3_SHA256: &str = "42dfc577fdf8a881ecbafce7777bf6f0a4cf914ffc1aaff2580aec0cbac79505";
-const M3_ENROLLMENT: &str =
-    "/home/joaorura/orca/projects/clearcore-train/runs/m3/voice-enrollment-asset-v1.tar.gz";
 const M3_ENROLLMENT_SHA256: &str =
     "bd4d6dd941f8527b5011a2bae78169148f33155e25d30c5707e88963e7ea824d";
 
@@ -240,7 +241,9 @@ fn env_or(key: &str, default: &str) -> String {
 #[ignore = "needs the M3 pDFNet3 and enrollment archives and the approved DFNet3; run locally"]
 fn real_pdfnet3_backend_accepts_the_profile_built_from_real_samples() {
     let pdfnet3 = PathBuf::from(env_or("CLEARCORE_DEV_PDFNET3_ASSET", M3_PDFNET3));
-    let enrollment = PathBuf::from(env_or("CLEARCORE_DEV_ENROLLMENT_ASSET", M3_ENROLLMENT));
+    let enrollment = PathBuf::from(
+        std::env::var("CLEARCORE_DEV_ENROLLMENT_ASSET").expect("v3 enrollment.onnx path in env"),
+    );
     if !pdfnet3.is_file() || !enrollment.is_file() {
         eprintln!("M3 archives not present; skipping");
         return;

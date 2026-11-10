@@ -20,6 +20,7 @@ mod enrollment_jobs;
 mod ipc_voice;
 mod pdfnet3_dev_config;
 mod voice_budget;
+mod voice_conditioning;
 mod voice_storage_migration;
 
 pub use enrollment_error::EnrollError;
@@ -27,6 +28,7 @@ pub use enrollment_ingest::Denoiser;
 #[doc(hidden)]
 pub use ipc_voice::{DenoiserFactory, EnrollmentHooks, ModelFactory};
 
+pub use voice_conditioning::{ConditioningRejected, VoiceConditioning, VoiceConditioningTarget};
 pub use voice_intake::{IntakeTake, VoiceIntakeEngine, VoiceIntakeError};
 pub use voice_samples::{
     PROFILE_BIN_BYTES, PROFILE_BIN_FILE_NAME, SAMPLES_FILE_NAME, VOICE_EMBEDDING_DIM, VoiceSample,
@@ -37,7 +39,8 @@ use realtime_noise_ipc::enrollment_codes::{ENROLL_PAYLOAD_TOO_LARGE, MAX_REQUEST
 use realtime_noise_ipc::line_limit::{LineRead, is_invalid_utf8, read_line_limited};
 use realtime_noise_ipc::protocol::truncate_request_id;
 use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus, handle_request};
-use realtime_noise_model::{ProfileStore, VoiceProfile};
+use realtime_noise_model::{ProfileStore, StoredProfile, VoiceProfileV2};
+use voice_conditioning::VoiceState;
 use realtime_noise_supervisor::{
     BackendResolutionInfo, EngineSupervisor, convert_dsp_preset_to_ipc, convert_engine_mode_to_ipc,
     convert_ipc_mode_to_engine, convert_ipc_preset_to_dsp, find_repo_root, find_stateful_model_dir,
@@ -103,10 +106,8 @@ pub struct ServiceDaemon {
     shutdown: bool,
     served_client_count: usize,
     profile_store: Option<ProfileStore>,
-    /// Id of the profile persisted on disk (may differ from the one applied to the engine).
-    stored_voice_profile_id: Option<String>,
-    /// Generic reason the stored profile could not be applied at startup; never carries payload.
-    voice_profile_error: Option<String>,
+    /// What is stored on disk (valid v2 or outdated v1), what was applied and why not.
+    voice: VoiceState,
     voice_samples: VoiceSampleManager,
     voice_intake: VoiceIntakeEngine,
     settings: settings::Settings,
@@ -121,12 +122,6 @@ pub struct ServiceDaemon {
 /// received JSON may appear in a response, not even in an error.
 const INVALID_PROFILE_MESSAGE: &str = "Invalid voice profile";
 const PERSIST_FAILED_MESSAGE: &str = "Failed to persist voice profile";
-const MISSING_MESSAGE: &str = "The stored voice profile is no longer on disk";
-const NOT_APPLIED_MESSAGE: &str = "The backend could not apply the stored voice profile";
-const LOAD_FAILED_MESSAGE: &str =
-    "The stored voice profile failed validation or has insecure permissions";
-const RESTORE_FAILED_MESSAGE: &str =
-    "The previous voice profile could not be restored on the backend";
 const CLEAR_FAILED_MESSAGE: &str = "The active backend could not return to the neutral voice";
 const APPLY_FAILED_MESSAGE: &str = "The active backend cannot apply this voice profile";
 const NO_PROFILE_STORE_MESSAGE: &str = "Voice profile storage is not configured";
@@ -159,8 +154,7 @@ impl ServiceDaemon {
             shutdown: false,
             served_client_count: 0,
             profile_store: None,
-            stored_voice_profile_id: None,
-            voice_profile_error: None,
+            voice: VoiceState::default(),
             voice_samples,
             voice_intake,
             settings: settings::Settings::default(),
@@ -191,8 +185,7 @@ impl ServiceDaemon {
             shutdown: false,
             served_client_count: 0,
             profile_store: None,
-            stored_voice_profile_id: None,
-            voice_profile_error: None,
+            voice: VoiceState::default(),
             voice_samples,
             voice_intake,
             settings,
@@ -242,60 +235,31 @@ impl ServiceDaemon {
     /// invalid payload activates nothing. A valid profile the backend cannot apply stays stored
     /// (the file is kept) and the audio stays neutral; the reason is exposed in the status.
     pub fn attach_profile_store(&mut self, store: ProfileStore) {
-        self.stored_voice_profile_id = None;
-        self.voice_profile_error = None;
-        match store.load_active() {
-            Ok(Some(profile)) => {
-                self.stored_voice_profile_id = Some(profile.id.clone());
-                log_info!(
-                    "VOICE_PROFILE",
-                    "Loaded active voice profile from disk (id: {})",
-                    profile.id
-                );
-                if self.settings.voice_isolation_enabled {
-                    let profile_to_apply = match profile.with_intensity(self.settings.voice_isolation_intensity) {
-                        Ok(p) => p,
-                        Err(_) => profile.clone(),
-                    };
-                    if self.supervisor.set_voice_profile(Some(&profile_to_apply)).is_err() {
-                        log_warn!(
-                            "VOICE_PROFILE",
-                            "Stored voice profile '{}' was rejected by the active backend",
-                            profile.id
-                        );
-                        eprintln!("Stored voice profile was not applied: the backend rejected it");
-                        self.voice_profile_error = Some(NOT_APPLIED_MESSAGE.to_owned());
-                    } else {
-                        log_info!(
-                            "VOICE_PROFILE",
-                            "Stored voice profile '{}' successfully applied to backend",
-                            profile.id
-                        );
-                    }
-                } else {
-                    log_info!(
-                        "VOICE_PROFILE",
-                        "Stored voice profile '{}' present, but voice isolation is currently disabled in settings",
-                        profile.id
-                    );
-                }
+        self.voice = VoiceState::default();
+        self.voice.load_and_apply(
+            &mut self.supervisor,
+            &store,
+            self.settings.voice_isolation_enabled,
+            self.settings.voice_isolation_intensity,
+        );
+        match self.voice.status_name(self.supervisor.active_conditioning_id()) {
+            "active" => log_info!("VOICE_PROFILE", "Stored voice profile applied to the backend"),
+            "stored" => log_info!(
+                "VOICE_PROFILE",
+                "Stored voice profile present, but it is not applied (isolation disabled or backend rejected it)"
+            ),
+            "outdated" => log_warn!(
+                "VOICE_PROFILE",
+                "Stored voice profile is outdated (schema v1): regenerate it from the saved samples"
+            ),
+            _ if self.voice.error.is_some() => {
+                log_warn!("VOICE_PROFILE", "Stored voice profile was not loaded");
+                eprintln!("Stored voice profile was not loaded: it failed validation or has insecure permissions");
             }
-            Ok(None) => {
-                log_info!(
-                    "VOICE_PROFILE",
-                    "No active voice profile found in storage (neutral voice active)"
-                );
-            }
-            Err(_) => {
-                log_warn!(
-                    "VOICE_PROFILE",
-                    "Stored voice profile failed validation or has insecure permissions"
-                );
-                eprintln!(
-                    "Stored voice profile was not loaded: it failed validation or has insecure permissions"
-                );
-                self.voice_profile_error = Some(LOAD_FAILED_MESSAGE.to_owned());
-            }
+            _ => log_info!(
+                "VOICE_PROFILE",
+                "No active voice profile found in storage (neutral voice active)"
+            ),
         }
         let dir = store.dir().to_path_buf();
         // One-shot migration of the pre-pipeline gallery (spec 6.3): legacy samples arrive
@@ -324,7 +288,7 @@ impl ServiceDaemon {
     /// Id of the voice profile actually applied to the engine, if any.
     #[must_use]
     pub fn active_voice_profile_id(&self) -> Option<&str> {
-        self.supervisor.active_voice_profile_id()
+        self.supervisor.active_conditioning_id()
     }
 
     #[must_use]
@@ -390,14 +354,14 @@ impl ServiceDaemon {
     /// stored one (a previous backend may have rejected it) and refresh the diagnostic.
     fn reapply_stored_profile(&mut self) {
         if !self.settings.voice_isolation_enabled {
-            let _ = self.supervisor.set_voice_profile(None);
+            let _ = self.supervisor.apply_voice_conditioning(None);
+            self.voice.applied = None;
             return;
         }
         reapply_stored_profile(
             &mut self.supervisor,
             self.profile_store.as_ref(),
-            &mut self.stored_voice_profile_id,
-            &mut self.voice_profile_error,
+            &mut self.voice,
             self.settings.voice_isolation_intensity,
         );
     }
@@ -410,8 +374,7 @@ impl ServiceDaemon {
             self.model_dir.as_deref(),
             self.repo_root.as_deref(),
             self.profile_store.as_ref(),
-            &mut self.stored_voice_profile_id,
-            &mut self.voice_profile_error,
+            &mut self.voice,
             self.settings.voice_isolation_enabled,
             self.settings.voice_isolation_intensity,
         )
@@ -536,23 +499,33 @@ impl ServiceDaemon {
                         // audio path (filter-capi / helper) does not use it yet (stage 2).
                         // Reported in every mode, including Mute, Bypass and
                         // TerminalSafeState.
-                        "active_voice_profile_id": self.supervisor.active_voice_profile_id(),
-                        "stored_voice_profile_id": self.stored_voice_profile_id,
-                        "voice_profile_selected": self.stored_voice_profile_id.is_some(),
-                        "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
-                        "voice_profile_error": self.voice_profile_error,
+                        "active_voice_profile_id": self.supervisor.active_conditioning_id(),
+                        "stored_voice_profile_id": self.voice.stored_id,
+                        "voice_profile_selected": self.voice.stored_id.is_some(),
+                        "is_voice_profile_active": self.supervisor.active_conditioning_id().is_some(),
+                        "voice_profile_error": self.voice.error,
                         // Whether the live backend can apply a conditioned profile at all
                         // (`true` for the pDFNet3 Pro on tract and on OpenVINO, `false` on a
                         // base model without FiLM inputs).
-                        "voice_profile_supported": self.supervisor.supports_voice_profile(),
+                        "voice_profile_supported": self.supervisor.supports_voice_conditioning(),
                         // The APPLIED profile carries a calibrated microphone EQ.
-                        "neural_eq_calibrated": self
-                            .supervisor
-                            .active_voice_profile()
-                            .is_some_and(|profile| profile.eq.is_some()),
+                        "neural_eq_calibrated": self.supervisor.active_conditioning_has_eq(),
+                        // Additive (profile schema v2, pDFNet3 Pro v3): the model the profile
+                        // conditions, and whether the stored one is usable. `voice_profile_state`
+                        // is `none`, `active`, `stored` (valid, not applied) or `outdated` (a v1
+                        // FiLM profile: regenerate it from the saved samples, no re-recording).
+                        "voice_profile_model_id": VoiceState::model_id(),
+                        "voice_profile_model_label": realtime_noise_model::PDFNET3_PRO_V3_MODEL_LABEL,
+                        "voice_profile_state": self
+                            .voice
+                            .status_name(self.supervisor.active_conditioning_id()),
+                        "voice_profile_outdated": self.voice.outdated.is_some(),
+                        "voice_profile_can_regenerate": self.voice.outdated.is_some()
+                            && self.regenerable_speech_seconds()
+                                >= ipc_voice::MIN_GROUP_SPEECH_SECONDS,
                         "voice_samples_count": self.voice_samples.list_samples().len(),
                         // A stored profile, not the obsolete averaged sample embedding.
-                        "has_voice_profile": self.stored_voice_profile_id.is_some(),
+                        "has_voice_profile": self.voice.stored_id.is_some(),
                         "intake_pending_count": self.voice_intake.list_pending().len(),
                         // Additive: enrollment jobs still running (ingest of a sample, build of
                         // a profile) as `{job_id, kind: "sample"|"profile", stage}`; `[]` when idle.
@@ -615,8 +588,7 @@ impl ServiceDaemon {
                     self.model_dir.as_deref(),
                     self.repo_root.as_deref(),
                     self.profile_store.as_ref(),
-                    &mut self.stored_voice_profile_id,
-                    &mut self.voice_profile_error,
+                    &mut self.voice,
                     self.settings.voice_isolation_enabled,
                     self.settings.voice_isolation_intensity,
                 );
@@ -752,8 +724,7 @@ impl ServiceDaemon {
                 let resp = clear_voice_profile(
                     &mut self.supervisor,
                     self.profile_store.as_ref(),
-                    &mut self.stored_voice_profile_id,
-                    &mut self.voice_profile_error,
+                    &mut self.voice,
                 );
                 bump_linux_shared_state_generation();
                 resp
@@ -811,7 +782,7 @@ impl ServiceDaemon {
                             json!({
                                 "success": true,
                                 "deleted": deleted,
-                                "has_profile": self.stored_voice_profile_id.is_some(),
+                                "has_profile": self.voice.stored_id.is_some(),
                             }),
                         )
                     }
@@ -908,14 +879,15 @@ impl ServiceDaemon {
                 if enabled {
                     self.reapply_stored_profile();
                 } else {
-                    let _ = self.supervisor.set_voice_profile(None);
+                    let _ = self.supervisor.apply_voice_conditioning(None);
+                    self.voice.applied = None;
                 }
                 bump_linux_shared_state_generation();
                 IpcResponse::success(
                     "set-voice-isolation-resp",
                     json!({
                         "voice_isolation_enabled": enabled,
-                        "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
+                        "is_voice_profile_active": self.supervisor.active_conditioning_id().is_some(),
                         "success": true,
                         "persisted": persisted,
                     }),
@@ -938,7 +910,7 @@ impl ServiceDaemon {
                     json!({
                         "intensity": clamped,
                         "voice_isolation_intensity": clamped,
-                        "is_voice_profile_active": self.supervisor.active_voice_profile_id().is_some(),
+                        "is_voice_profile_active": self.supervisor.active_conditioning_id().is_some(),
                         "success": true,
                         "persisted": persisted,
                     }),
@@ -1020,36 +992,41 @@ impl ServiceDaemon {
     /// Transaction: apply to the engine, persist; if persisting fails the engine goes back to the
     /// previous profile, so the applied state never diverges from what survives a restart. Used by
     /// `SetVoiceProfile` (after `from_json`) and by the drained `BuildVoiceProfile` jobs.
-    pub(crate) fn apply_profile(&mut self, profile: &VoiceProfile) -> Result<(), ApplyError> {
+    pub(crate) fn apply_profile(&mut self, profile: &VoiceProfileV2) -> Result<(), ApplyError> {
         let Some(store) = self.profile_store.as_ref() else {
             return Err(ApplyError::NoStore);
         };
-        let previous = self.supervisor.active_voice_profile().cloned();
-        let target_profile = match profile.with_intensity(self.settings.voice_isolation_intensity) {
-            Ok(p) => p,
-            Err(_) => profile.clone(),
-        };
-        if self.supervisor.set_voice_profile(Some(&target_profile)).is_err() {
+        let previous = self.voice.applied.clone();
+        let conditioning = VoiceConditioning::from_profile(
+            profile,
+            self.settings.voice_isolation_intensity,
+        )
+        .map_err(|_| ApplyError::NotApplicable)?;
+        if self
+            .supervisor
+            .apply_voice_conditioning(Some(&conditioning))
+            .is_err()
+        {
             return Err(ApplyError::NotApplicable);
         }
+        self.voice.applied = Some(conditioning);
         if !self.settings.voice_isolation_enabled {
-            let _ = self.supervisor.set_voice_profile(None);
+            let _ = self.supervisor.apply_voice_conditioning(None);
+            self.voice.applied = None;
         }
-        if store.save_active(profile).is_err() {
-            restore_previous(
-                &mut self.supervisor,
-                previous.as_ref(),
-                &mut self.voice_profile_error,
-            );
+        if store.save_active_v2(profile).is_err() {
+            self.voice.restore(&mut self.supervisor, previous);
             return Err(ApplyError::PersistFailed);
         }
-        self.stored_voice_profile_id = Some(profile.id.clone());
-        self.voice_profile_error = None;
+        self.voice.stored_id = Some(profile.id.clone());
+        self.voice.outdated = None;
+        self.voice.error = None;
         bump_linux_shared_state_generation();
         Ok(())
     }
 
-    /// JSON entry point of the transaction (`SetVoiceProfile`).
+    /// JSON entry point of the transaction (`SetVoiceProfile`). A v1 (`FiLM`) document is refused
+    /// with `ENROLL_PROFILE_OUTDATED`: it cannot condition the pDFNet3 Pro v3.
     fn set_voice_profile_json(&mut self, profile_json: &str) -> IpcResponse {
         const REQUEST_ID: &str = "set-voice-profile-resp";
         if self.profile_store.is_none() {
@@ -1060,13 +1037,17 @@ impl ServiceDaemon {
                 NO_PROFILE_STORE_MESSAGE,
             );
         }
-        let Ok(profile) = VoiceProfile::from_json(profile_json) else {
-            return IpcResponse::invalid_command(REQUEST_ID, INVALID_PROFILE_MESSAGE);
+        let profile = match StoredProfile::from_json(profile_json) {
+            Ok(StoredProfile::Current(profile)) => profile,
+            Ok(StoredProfile::Outdated(_)) => {
+                return ipc_voice::enroll_error(REQUEST_ID, &EnrollError::ProfileOutdated);
+            }
+            Err(_) => return IpcResponse::invalid_command(REQUEST_ID, INVALID_PROFILE_MESSAGE),
         };
         match self.apply_profile(&profile) {
             Ok(()) => IpcResponse::success(
                 REQUEST_ID,
-                json!({"active_voice_profile_id": self.supervisor.active_voice_profile_id()}),
+                json!({"active_voice_profile_id": self.supervisor.active_conditioning_id()}),
             ),
             Err(ApplyError::NoStore) => IpcResponse::error(
                 REQUEST_ID,
@@ -1090,12 +1071,11 @@ impl ServiceDaemon {
 fn clear_voice_profile(
     supervisor: &mut EngineSupervisor,
     store: Option<&ProfileStore>,
-    stored_id: &mut Option<String>,
-    error: &mut Option<String>,
+    voice: &mut VoiceState,
 ) -> IpcResponse {
     const REQUEST_ID: &str = "clear-voice-profile-resp";
-    let previous = supervisor.active_voice_profile().cloned();
-    if supervisor.set_voice_profile(None).is_err() {
+    let previous = voice.applied.clone();
+    if supervisor.apply_voice_conditioning(None).is_err() {
         // The engine keeps the profile: leave disk and reported state untouched.
         return IpcResponse::error(
             REQUEST_ID,
@@ -1104,19 +1084,19 @@ fn clear_voice_profile(
             CLEAR_FAILED_MESSAGE,
         );
     }
+    voice.applied = None;
     if let Some(store) = store
         && store.clear_active().is_err()
     {
-        restore_previous(supervisor, previous.as_ref(), error);
+        voice.restore(supervisor, previous);
         return IpcResponse::internal_error(REQUEST_ID, PERSIST_FAILED_MESSAGE);
     }
-    *stored_id = None;
-    *error = None;
+    voice.stored_id = None;
+    voice.outdated = None;
+    voice.error = None;
     IpcResponse::success(REQUEST_ID, json!({"active_voice_profile_id": null}))
 }
 
-/// Puts the engine back on `previous` after a failed persist. A failed restore leaves the engine
-/// and the disk disagreeing, so it is surfaced in the status instead of being swallowed.
 /// Makes the pDFNet3 the ONLY isolation model of the daemon (production policy).
 ///
 /// The bundled pDFNet3 Pro (`<models>/pdfnet3/`, hash pinned in the model crate) is loaded by
@@ -1164,17 +1144,6 @@ fn configure_isolation_model(
     supervisor.require_isolation_model(loaded);
 }
 
-fn restore_previous(
-    supervisor: &mut EngineSupervisor,
-    previous: Option<&VoiceProfile>,
-    error: &mut Option<String>,
-) {
-    if supervisor.set_voice_profile(previous).is_err() {
-        eprintln!("Previous voice profile could not be restored on the backend");
-        *error = Some(RESTORE_FAILED_MESSAGE.to_owned());
-    }
-}
-
 /// `GetStatus.openvino_runtime`: the cached probe of the `OpenVINO` runtime.
 fn openvino_runtime_status() -> serde_json::Value {
     let probe = realtime_noise_runtime_openvino::probe_runtime_cached();
@@ -1197,22 +1166,16 @@ fn select_backend_and_reapply(
     model_dir: Option<&Path>,
     repo_root: Option<&Path>,
     store: Option<&ProfileStore>,
-    stored_slot: &mut Option<String>,
-    error: &mut Option<String>,
+    voice: &mut VoiceState,
     voice_isolation_enabled: bool,
     voice_isolation_intensity: u8,
 ) -> BackendResolutionInfo {
     let info = supervisor.select_backend(request, model_dir, repo_root);
     if voice_isolation_enabled {
-        reapply_stored_profile(
-            supervisor,
-            store,
-            stored_slot,
-            error,
-            voice_isolation_intensity,
-        );
+        reapply_stored_profile(supervisor, store, voice, voice_isolation_intensity);
     } else {
-        let _ = supervisor.set_voice_profile(None);
+        let _ = supervisor.apply_voice_conditioning(None);
+        voice.applied = None;
     }
     info
 }
@@ -1220,34 +1183,13 @@ fn select_backend_and_reapply(
 fn reapply_stored_profile(
     supervisor: &mut EngineSupervisor,
     store: Option<&ProfileStore>,
-    stored_slot: &mut Option<String>,
-    error: &mut Option<String>,
+    voice: &mut VoiceState,
     intensity: u8,
 ) {
     let Some(store) = store else {
         return;
     };
-    match store.load_active() {
-        Ok(Some(profile)) => {
-            *stored_slot = Some(profile.id.clone());
-            let profile_to_apply = match profile.with_intensity(intensity) {
-                Ok(p) => p,
-                Err(_) => profile,
-            };
-            *error = supervisor
-                .set_voice_profile(Some(&profile_to_apply))
-                .err()
-                .map(|_| NOT_APPLIED_MESSAGE.to_owned());
-        }
-        Ok(None) => {
-            if stored_slot.is_some() {
-                // The file vanished behind our back: the id no longer names anything on disk.
-                *stored_slot = None;
-                *error = Some(MISSING_MESSAGE.to_owned());
-            }
-        }
-        Err(_) => *error = Some(LOAD_FAILED_MESSAGE.to_owned()),
-    }
+    voice.load_and_apply(supervisor, store, true, intensity);
 }
 
 #[cfg(test)]

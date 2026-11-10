@@ -512,6 +512,13 @@ mod onnx {
             Ok(Self { onnx_bytes })
         }
 
+        /// Consumes the model and returns its `enrollment.onnx` bytes (lets the v3 extractor reuse
+        /// the verified-asset, development-archive and file loaders).
+        #[must_use]
+        pub fn into_onnx_bytes(self) -> Vec<u8> {
+            self.onnx_bytes
+        }
+
         /// Loads the enrollment model directly from a file path.
         pub fn from_file(path: &std::path::Path) -> Result<Self, EnrollmentError> {
             let bytes = std::fs::read(path).map_err(|e| {

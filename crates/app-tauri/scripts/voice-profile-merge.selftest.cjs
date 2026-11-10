@@ -143,4 +143,27 @@ for (const v of ['/opt/clearcore/models/pdfnet3', 'DEV_MODEL_NO_FILM', 'model_x'
 }
 assert.ok(!('isolation_model' in mergeLocalAndServiceProfile({ isolation_model: 'pdfnet3-pro' }, {})), 'never read from the local file');
 
+console.log('Testing profile schema v2 fields (state, outdated, model) are validated service fields...');
+for (const v of ['none', 'active', 'stored', 'outdated']) {
+  assert.strictEqual(mergeLocalAndServiceProfile({}, { voice_profile_state: v }).voice_profile_state, v);
+}
+assert.ok(!('voice_profile_state' in mergeLocalAndServiceProfile({}, { voice_profile_state: 'weird' })), 'unknown state dropped');
+for (const key of ['voice_profile_outdated', 'voice_profile_can_regenerate']) {
+  assert.strictEqual(mergeLocalAndServiceProfile({}, { [key]: true })[key], true);
+  assert.ok(!(key in mergeLocalAndServiceProfile({}, { [key]: 'true' })), 'non-boolean dropped');
+}
+assert.strictEqual(mergeLocalAndServiceProfile({}, { voice_profile_model_label: 'pDFNet3 Pro v3' }).voice_profile_model_label, 'pDFNet3 Pro v3');
+assert.strictEqual(mergeLocalAndServiceProfile({}, { voice_profile_model_id: 'pdfnet3-pro-v3-full' }).voice_profile_model_id, 'pdfnet3-pro-v3-full');
+for (const v of ['/home/u/model', '<b>x</b>', 3]) {
+  assert.ok(!('voice_profile_model_label' in mergeLocalAndServiceProfile({}, { voice_profile_model_label: v })), 'free text dropped');
+}
+// An outdated (v1) profile is not "a profile the service holds": the UI must offer regeneration.
+const outdated = mergeLocalAndServiceProfile({}, {
+  stored_voice_profile_id: null, has_voice_profile: false, is_voice_profile_active: false,
+  voice_profile_error: 'ENROLL_PROFILE_OUTDATED', voice_profile_state: 'outdated', voice_profile_outdated: true,
+});
+assert.strictEqual(outdated.is_enrolled, false);
+assert.strictEqual(outdated.voice_profile_outdated, true);
+assert.ok(!('voice_profile_state' in mergeLocalAndServiceProfile({ voice_profile_state: 'active' }, {})), 'never read from the local file');
+
 console.log('voice-profile-merge selftest passed.');

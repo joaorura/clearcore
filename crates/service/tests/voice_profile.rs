@@ -4,8 +4,9 @@
 use realtime_noise_contracts::AudioFrame;
 use realtime_noise_ipc::{IpcCommand, IpcRequest, IpcResponse, IpcStatus};
 use realtime_noise_model::{
-    ACTIVE_PROFILE_FILE_NAME, BackendDescriptor, BandGains, FiLMVectors, InferenceBackend,
-    InferenceError, ProcessedFrame, ProfileStore, VoiceProfile, reject_unsupported_voice_profile,
+    ACTIVE_PROFILE_FILE_NAME, BackendDescriptor, BandGains, InferenceBackend, InferenceError,
+    ProcessedFrame, ProfileStore, SpeakerEmbedding, StoredProfile, VoiceProfile, VoiceProfileV2,
+    reject_unsupported_voice_profile,
 };
 use realtime_noise_service::ServiceDaemon;
 use realtime_noise_supervisor::EngineSupervisor;
@@ -107,22 +108,13 @@ fn daemon_with(dir: &Path, supports: bool) -> (ServiceDaemon, Calls) {
 
 const SENTINEL_NAME: &str = "BIOMETRIC_SENTINEL_TOKEN_SECRET";
 
-fn film_vector(base: f32, step: f32) -> Vec<f32> {
-    (0..256_u16)
-        .map(|i| step.mul_add(f32::from(i), base))
-        .collect()
-}
-
-fn test_profile(id: &str, name: &str) -> VoiceProfile {
-    let film = FiLMVectors::new(
-        film_vector(0.5, 0.003),
-        film_vector(-0.25, 0.001),
-        film_vector(0.75, 0.002),
-        film_vector(0.125, -0.0005),
-    )
-    .expect("film");
+fn test_profile(id: &str, name: &str) -> VoiceProfileV2 {
+    let raw: Vec<f32> = (0..192_u16)
+        .map(|i| ((f32::from(i) + 1.0) * 0.37).sin())
+        .collect();
+    let embedding = SpeakerEmbedding::from_raw_normalizing(&raw).expect("embedding");
     let eq = BandGains::clamped(&[1.5; 32]).expect("eq");
-    VoiceProfile::new(id, name, "2026-10-02T12:00:00Z", film, Some(eq)).expect("profile")
+    VoiceProfileV2::new(id, name, "2026-10-02T12:00:00Z", &embedding, Some(eq)).expect("profile")
 }
 
 fn send_raw(daemon: &mut ServiceDaemon, command: IpcCommand) -> (String, IpcResponse) {
@@ -173,7 +165,7 @@ fn valid_profile_is_persisted_with_0600_and_reported_by_status() {
         !raw.contains(SENTINEL_NAME),
         "success must not echo the name"
     );
-    assert!(!raw.contains("gamma_enc"));
+    assert!(!raw.contains("speaker_embedding_b64"));
 
     let path = dir.join(ACTIVE_PROFILE_FILE_NAME);
     assert!(path.is_file());
@@ -277,7 +269,7 @@ fn tampered_profile_is_rejected_without_writing_or_echoing() {
     assert_eq!(response.status, IpcStatus::InvalidCommand);
     assert!(!raw.contains(SENTINEL_NAME));
     assert!(!raw.contains(&original.integrity_hash));
-    assert!(!raw.contains("gamma_enc"));
+    assert!(!raw.contains("speaker_embedding_b64"));
     assert!(!dir.join(ACTIVE_PROFILE_FILE_NAME).exists());
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["active_voice_profile_id"], json!(null));
@@ -364,7 +356,7 @@ fn preexisting_world_readable_profile_is_not_loaded() {
     let dir = temp.path().join("profiles");
     let store = ProfileStore::new(&dir);
     store
-        .save_active(&test_profile("spk-1", "Alice"))
+        .save_active_v2(&test_profile("spk-1", "Alice"))
         .expect("save");
     std::fs::set_permissions(
         store.active_profile_path(),
@@ -385,7 +377,7 @@ fn preexisting_tampered_profile_is_not_loaded() {
     let dir = temp.path().join("profiles");
     let store = ProfileStore::new(&dir);
     store
-        .save_active(&test_profile("spk-1", "Alice"))
+        .save_active_v2(&test_profile("spk-1", "Alice"))
         .expect("save");
     let path = store.active_profile_path();
     let tampered = std::fs::read_to_string(&path)
@@ -475,10 +467,10 @@ fn persistence_failure_rolls_back_to_previous_backend_profile() {
         ]
     );
     let on_disk = ProfileStore::new(&dir)
-        .load_active()
+        .load_active_any()
         .expect("load")
         .expect("some");
-    assert_eq!(on_disk.id, "a");
+    assert!(matches!(on_disk, StoredProfile::Current(p) if p.id == "a"));
     let status = send(&mut daemon, IpcCommand::GetStatus);
     assert_eq!(status.payload["active_voice_profile_id"], "a");
     assert_eq!(status.payload["stored_voice_profile_id"], "a");
@@ -506,7 +498,7 @@ fn restart_distinguishes_stored_from_active() {
     let temp = tempfile::tempdir().expect("tempdir");
     let dir = temp.path().join("profiles");
     ProfileStore::new(&dir)
-        .save_active(&test_profile("spk-9", "Alice"))
+        .save_active_v2(&test_profile("spk-9", "Alice"))
         .expect("save");
 
     let (mut daemon, _) = daemon_with(&dir, false);
@@ -525,7 +517,7 @@ fn restart_with_supporting_backend_restores_active() {
     let temp = tempfile::tempdir().expect("tempdir");
     let dir = temp.path().join("profiles");
     ProfileStore::new(&dir)
-        .save_active(&test_profile("spk-9", "Alice"))
+        .save_active_v2(&test_profile("spk-9", "Alice"))
         .expect("save");
 
     let (mut daemon, calls) = daemon_with(&dir, true);
@@ -582,7 +574,7 @@ fn startup_load_failure_is_reported_and_keeps_the_file() {
     let dir = temp.path().join("profiles");
     let store = ProfileStore::new(&dir);
     store
-        .save_active(&test_profile("spk-1", "Alice"))
+        .save_active_v2(&test_profile("spk-1", "Alice"))
         .expect("save");
     let path = store.active_profile_path();
     let tampered = std::fs::read_to_string(&path)
