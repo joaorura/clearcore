@@ -84,11 +84,9 @@ jobs:
           for entry in \
             "Clearcore-linux-x64/resources/bin/pipewire_helper" \
             "Clearcore-linux-x64/resources/scripts/check-virtual-mic.sh" \
-            "Clearcore-linux-x64/resources/models/pdfnet3/pdfnet3-release-asset-v1.tar.gz" \
-            "Clearcore-linux-x64/resources/models/pdfnet3/pdfnet3-stateful-asset-v1.tar.gz" \
+            "Clearcore-linux-x64/resources/models/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz" \
             "Clearcore-linux-x64/resources/models/enrollment/enrollment.onnx" \
-            "Clearcore-linux-x64/models/pdfnet3/pdfnet3-release-asset-v1.tar.gz" \
-            "Clearcore-linux-x64/models/pdfnet3/pdfnet3-stateful-asset-v1.tar.gz" \
+            "Clearcore-linux-x64/models/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz" \
             "Clearcore-linux-x64/models/enrollment/enrollment.onnx"; do
             if ! grep -qx "./${entry}\|${entry}" "${RUNNER_TEMP}/linux-package-listing.txt"; then
               echo "::error::${entry} ausente em ${TARBALL}"
@@ -119,10 +117,18 @@ jobs:
           done
           node crates/app-tauri/scripts/openvino-runtime.mjs verify --dir "${OV_DIR}"
           du -sh "${OV_DIR}"
+          # Pins mirrored from crates/model/src/pdfnet3_bundle.rs (Pro v3 full and enrollment v3).
           (cd "${EXTRACT_DIR}/Clearcore-linux-x64/models/pdfnet3" && printf '%s\n' \
-            "1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8  pdfnet3-release-asset-v1.tar.gz" \
-            "d1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5  pdfnet3-stateful-asset-v1.tar.gz" \
+            "c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee  pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz" \
             | sha256sum -c -)
+          (cd "${EXTRACT_DIR}/Clearcore-linux-x64/models/enrollment" && printf '%s\n' \
+            "82a292b95121dd7d7e82a2f4515497512693d499f06bafa0d3d627bed34ad3c1  enrollment.onnx" \
+            | sha256sum -c -)
+          # The old exports (v2 tract/stateful) must not ship any more.
+          if grep -E "pdfnet3-release-asset-v1|pdfnet3-stateful-asset-v1" "${RUNNER_TEMP}/linux-package-listing.txt"; then
+            echo "::error::exports antigos do pDFNet3 Pro ainda presentes em ${TARBALL}"
+            exit 1
+          fi
           echo "Pacote Linux OK: pipewire_helper, check-virtual-mic.sh, pDFNet3 Pro (SHA-256 conferido) e modelo de cadastro presentes"
 
       - name: Build Linux AppImage Package

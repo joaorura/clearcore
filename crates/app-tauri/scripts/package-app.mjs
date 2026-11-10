@@ -201,22 +201,26 @@ if (embedsOpenVino(platform, arch)) {
 }
 
 // 8. Bundle Neural Models (All Platforms)
-// The pDFNet3 Pro (FiLM voice-profile conditioning) is the ONLY isolation model shipped. Bundles:
-// - models/pdfnet3/ (pDFNet3 Pro: tract export for the daemon, stateful export for the virtual-mic
-//   filter) into both resources/models/pdfnet3/ and bundle root models/pdfnet3/. Mandatory: the
-//   package build fails if an archive is missing or its SHA-256 is not the one pinned in
-//   crates/model/src/pdfnet3_bundle.rs (the runtime refuses it anyway, with no fallback).
-// - models/enrollment/ (voice enrollment model paired with the pDFNet3 Pro) likewise.
+// The pDFNet3 Pro v3 full (speaker-embedding conditioning) is the ONLY isolation model shipped:
+// ONE stateful manifest export run by the daemon (tract/OpenVINO) and by the virtual-mic filter
+// (ONNX Runtime/OpenVINO). Bundles:
+// - models/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz into both resources/models/pdfnet3/
+//   and bundle root models/pdfnet3/. Mandatory: the package build fails if the archive is missing or
+//   its SHA-256 is not the one pinned in crates/model/src/pdfnet3_bundle.rs (the runtime refuses it
+//   anyway, with no fallback).
+// - models/enrollment/enrollment.onnx (enrollment v3: ECAPA speaker embedding [192] for the Pro v3)
+//   likewise, SHA-256 pinned in the same file.
 // - governance/model-assets/ (provenance and license records of the DeepFilterNet3 weights the
 //   pDFNet3 Pro derives from) into bundle root and resources.
 // The base DeepFilterNet3 (models/stateful/, its TensorRT engines and vendor/approved/) is NOT
 // shipped: it stays in the repository for tests and development only.
 console.log('🧠 Bundling the pDFNet3 Pro isolation model and the enrollment model...');
 
+// Mirrors PDFNET3_PRO_V3_FULL_SHA256 and ENROLLMENT_V3_SHA256 in crates/model/src/pdfnet3_bundle.rs.
 const PDFNET3_BUNDLE = {
-  'pdfnet3-release-asset-v1.tar.gz': '1cfa86c75e44e8ac45ace8a905bb3368c143d72e0d6b963fb8c2a3a3a1e782c8',
-  'pdfnet3-stateful-asset-v1.tar.gz': 'd1b9c2fd49ba602ed48cd503d256885c5e174a869d23b62204e8d668de95d6a5',
+  'pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz': 'c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee',
 };
+const ENROLLMENT_V3_SHA256 = '82a292b95121dd7d7e82a2f4515497512693d499f06bafa0d3d627bed34ad3c1';
 const pdfnet3Src = path.join(repoRoot, 'models', 'pdfnet3');
 for (const [file, expected] of Object.entries(PDFNET3_BUNDLE)) {
   const source = path.join(pdfnet3Src, file);
@@ -237,23 +241,27 @@ for (const dest of [path.join(resourcesDir, 'models', 'pdfnet3'), path.join(bund
     if (fs.existsSync(source)) fs.copyFileSync(source, path.join(dest, file));
   }
 }
-console.log('✓ Bundled models/pdfnet3 (pDFNet3 Pro, SHA-256 verified) into resources/models/pdfnet3 and bundle root');
+console.log('✓ Bundled models/pdfnet3 (pDFNet3 Pro v3 full, SHA-256 verified) into resources/models/pdfnet3 and bundle root');
 
 const modelsEnrollmentSrc = path.join(repoRoot, 'models', 'enrollment');
-if (fs.existsSync(path.join(modelsEnrollmentSrc, 'enrollment.onnx'))) {
-  const destResourcesEnrollment = path.join(resourcesDir, 'models', 'enrollment');
-  const destBundleEnrollment = path.join(bundleDir, 'models', 'enrollment');
-
-  fs.mkdirSync(destResourcesEnrollment, { recursive: true });
-  fs.mkdirSync(destBundleEnrollment, { recursive: true });
-
-  fs.cpSync(modelsEnrollmentSrc, destResourcesEnrollment, { recursive: true });
-  fs.cpSync(modelsEnrollmentSrc, destBundleEnrollment, { recursive: true });
-  console.log('✓ Bundled models/enrollment (Voice enrollment model) into resources/models/enrollment and bundle root');
-} else {
+const enrollmentModel = path.join(modelsEnrollmentSrc, 'enrollment.onnx');
+if (!fs.existsSync(enrollmentModel)) {
   console.error(`❌ models/enrollment/enrollment.onnx not found at ${modelsEnrollmentSrc}`);
   process.exit(1);
 }
+const enrollmentSha = createHash('sha256').update(fs.readFileSync(enrollmentModel)).digest('hex');
+if (enrollmentSha !== ENROLLMENT_V3_SHA256) {
+  console.error(`❌ enrollment.onnx has SHA-256 ${enrollmentSha}, expected ${ENROLLMENT_V3_SHA256} (enrollment v3)`);
+  process.exit(1);
+}
+for (const dest of [path.join(resourcesDir, 'models', 'enrollment'), path.join(bundleDir, 'models', 'enrollment')]) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const file of ['enrollment.onnx', 'README.md']) {
+    const source = path.join(modelsEnrollmentSrc, file);
+    if (fs.existsSync(source)) fs.copyFileSync(source, path.join(dest, file));
+  }
+}
+console.log('✓ Bundled models/enrollment (enrollment v3, SHA-256 verified) into resources/models/enrollment and bundle root');
 
 const governanceDir = path.join(repoRoot, 'governance', 'model-assets');
 if (fs.existsSync(governanceDir)) {
