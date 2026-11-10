@@ -50,6 +50,13 @@ const DF_ORDER: usize = 5;
 /// Values per hop in the `coefs` output: `NB_DF` bins x `DF_ORDER` taps x (re, im).
 const DF_COEFS_LEN: usize = NB_DF * DF_ORDER * 2;
 const EMB_DIM: i64 = 512;
+/// Tensor-shape (`i64`) forms of the band counts above.
+#[allow(clippy::cast_possible_wrap)] // compile-time constant far below `i64::MAX`
+const NB_ERB_DIM: i64 = NB_ERB as i64;
+#[allow(clippy::cast_possible_wrap)] // compile-time constant far below `i64::MAX`
+const NB_DF_DIM: i64 = NB_DF as i64;
+#[allow(clippy::cast_possible_wrap)] // compile-time constant far below `i64::MAX`
+const FILM_DIM: i64 = FILM_HIDDEN_DIM as i64;
 const GRU_HIDDEN: i64 = 256;
 
 /// File names of the three stateful graphs inside the model directory.
@@ -82,8 +89,9 @@ pub const APPROVED_STATEFUL_DIGESTS: StatefulDigests = StatefulDigests {
     df_dec: "26470a38540042085608fc4d57beb6bd02152706bdcfbd583fe292d7e9874181",
 };
 
-/// Digests of the graphs in the pDFNet3 Pro v2 stateful archive
-/// (`pdfnet3-stateful-asset-v1.tar.gz`; whole-archive SHA-256
+/// Digests of the graphs in the pDFNet3 Pro v2 stateful archive.
+///
+/// Archive `pdfnet3-stateful-asset-v1.tar.gz` (whole-archive SHA-256
 /// `a14a97c57159d2d1b5fc28b76755da9dd98ef83b0051651a38f7fa5032b362c2`). These graphs carry the
 /// `FiLM` (`gamma`/`beta`) ports, so [`InferenceBackend::supports_voice_profile`] is `true` when
 /// they are loaded. Exported for directory-based Pro loads; the archive-based path
@@ -187,6 +195,7 @@ fn extract_stateful_onnx(
     }
 }
 
+#[allow(clippy::needless_pass_by_value)] // by value so it can be passed to `map_err` point-free
 fn ort_error<R>(error: ort::Error<R>) -> InferenceError {
     InferenceError::InferenceExecution(error.to_string())
 }
@@ -291,7 +300,7 @@ struct FilmConditioning {
 
 impl FilmConditioning {
     fn new() -> Result<Self, InferenceError> {
-        let shape = [1, 1, FILM_HIDDEN_DIM as i64];
+        let shape = [1, 1, FILM_DIM];
         Ok(Self {
             enc_gamma: ones(&shape)?,
             enc_beta: zeros(&shape)?,
@@ -349,11 +358,11 @@ impl OrtSpectralModel {
         };
         Ok(Self {
             descriptor,
-            feat_erb: zeros(&[1, 1, 1, NB_ERB as i64])?,
-            feat_spec: zeros(&[1, 2, 1, NB_DF as i64])?,
+            feat_erb: zeros(&[1, 1, 1, NB_ERB_DIM])?,
+            feat_spec: zeros(&[1, 2, 1, NB_DF_DIM])?,
             enc_h: zeros(&[1, 1, GRU_HIDDEN])?,
-            enc_erb_buf: zeros(&[1, 1, 2, NB_ERB as i64])?,
-            enc_spec_buf: zeros(&[1, 2, 2, NB_DF as i64])?,
+            enc_erb_buf: zeros(&[1, 1, 2, NB_ERB_DIM])?,
+            enc_spec_buf: zeros(&[1, 2, 2, NB_DF_DIM])?,
             erb_emb: zeros(&[1, 1, EMB_DIM])?,
             erb_e0: zeros(&[1, 64, 1, 32])?,
             erb_e1: zeros(&[1, 64, 1, 16])?,
@@ -361,9 +370,9 @@ impl OrtSpectralModel {
             erb_e3: zeros(&[1, 64, 1, 8])?,
             erb_h: zeros(&[2, 1, GRU_HIDDEN])?,
             df_emb: zeros(&[1, 1, EMB_DIM])?,
-            df_c0: zeros(&[1, 64, 1, NB_DF as i64])?,
+            df_c0: zeros(&[1, 64, 1, NB_DF_DIM])?,
             df_h: zeros(&[2, 1, GRU_HIDDEN])?,
-            df_c0_buf: zeros(&[1, 64, 4, NB_DF as i64])?,
+            df_c0_buf: zeros(&[1, 64, 4, NB_DF_DIM])?,
             enc,
             erb_dec,
             df_dec,
@@ -398,6 +407,7 @@ impl SpectralModelBackend for OrtSpectralModel {
     /// `feat_spec` is `[real; 96]` followed by `[imag; 96]`. State is committed only after all
     /// three stages succeeded; on error the caller should [`Self::reset`] before reusing the
     /// session, because the decoders may have run with a half-updated hop.
+#[allow(clippy::too_many_lines)] // linear pipeline; splitting it before the release risks behaviour changes
     fn process_spectrum(
         &mut self,
         features: &ExtractedFeatures,

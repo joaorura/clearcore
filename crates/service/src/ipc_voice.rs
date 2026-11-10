@@ -407,7 +407,7 @@ const fn message_for(error: &EnrollError) -> &'static str {
     }
 }
 
-pub(crate) fn enroll_error(request_id: &str, error: &EnrollError) -> IpcResponse {
+pub fn enroll_error(request_id: &str, error: &EnrollError) -> IpcResponse {
     IpcResponse::error(
         request_id,
         status_for(error),
@@ -799,9 +799,7 @@ impl ServiceDaemon {
                 )
             }
             Err(f) => {
-                debug_voice_file_log(&format!(
-                    "spawn_ingest: FAILED spawning job (busy or error)"
-                ));
+                debug_voice_file_log("spawn_ingest: FAILED spawning job (busy or error)");
                 busy_or_failed(request_id, f)
             }
         }
@@ -1043,7 +1041,7 @@ impl ServiceDaemon {
             self.settings.voice_isolation_enabled = was_enabled;
         } else if !was_enabled {
             let _ = crate::settings::persist_settings(
-                self.settings.clone(),
+                &self.settings,
                 self.settings_path.as_deref(),
             );
             crate::bump_linux_shared_state_generation();

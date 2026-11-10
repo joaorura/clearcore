@@ -120,7 +120,7 @@ impl WindowsVirtualMicrophone {
     }
 
     /// Updates the active streams count in transport statistics (simulating driver status update).
-    pub fn set_active_streams_count(&mut self, count: u32) {
+    pub const fn set_active_streams_count(&mut self, count: u32) {
         self.stats.active_streams_count = count;
     }
 

@@ -1,4 +1,4 @@
-//! Dedicated file logger with rolling 24-hour retention for the ClearCore Daemon.
+//! Dedicated file logger with rolling 24-hour retention for the `ClearCore` Daemon.
 //!
 //! Log file defaults to `<data_dir>/clearcore/logs/daemon.log`.
 //! Rotated logs: `daemon.YYYY-MM-DD.log`.
@@ -85,10 +85,9 @@ impl DaemonLogger {
         instance.prune_old_logs();
         instance.open_current_writer()?;
 
-        let mut lock = GLOBAL_LOGGER
+        *GLOBAL_LOGGER
             .lock()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Logger mutex poisoned"))?;
-        *lock = Some(instance);
+            .map_err(|_| std::io::Error::other("Logger mutex poisoned"))? = Some(instance);
         Ok(())
     }
 
@@ -143,21 +142,19 @@ impl DaemonLogger {
                 continue;
             }
             let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !filename.starts_with("daemon.") || !filename.ends_with(".log") {
+            if !filename.starts_with("daemon.") || filename.rsplit_once('.').is_none_or(|(_, ext)| ext != "log") {
                 continue;
             }
             if filename == CURRENT_LOG_NAME {
                 continue;
             }
 
-            if let Ok(metadata) = entry.metadata() {
-                if let Ok(modified) = metadata.modified() {
-                    if let Ok(age) = now.duration_since(modified) {
-                        if age.as_secs() > RETENTION_SECS {
-                            let _ = fs::remove_file(&path);
-                        }
-                    }
-                }
+            if let Ok(metadata) = entry.metadata()
+                && let Ok(modified) = metadata.modified()
+                && let Ok(age) = now.duration_since(modified)
+                && age.as_secs() > RETENTION_SECS
+            {
+                let _ = fs::remove_file(&path);
             }
         }
     }
@@ -209,9 +206,9 @@ fn seconds_to_utc_parts(epoch_secs: u64) -> (u64, u64, u64, u64, u64, u64) {
     let doe = z - era * 146_097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
     let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
+    let day_of_year = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let d = day_of_year - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
 
@@ -219,11 +216,11 @@ fn seconds_to_utc_parts(epoch_secs: u64) -> (u64, u64, u64, u64, u64, u64) {
 }
 
 pub fn log(level: LogLevel, target: &str, message: &str) {
-    if let Ok(mut lock) = GLOBAL_LOGGER.lock() {
-        if let Some(ref mut logger) = *lock {
-            logger.write_entry(level, target, message);
-            return;
-        }
+    if let Ok(mut lock) = GLOBAL_LOGGER.lock()
+        && let Some(ref mut logger) = *lock
+    {
+        logger.write_entry(level, target, message);
+        return;
     }
     // Fallback if logger is uninitialized: print to stderr/stdout
     let ts = iso8601_now();

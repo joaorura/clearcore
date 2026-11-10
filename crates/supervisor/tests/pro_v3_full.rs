@@ -1,5 +1,5 @@
 //! pDFNet3 Pro v3 full in the daemon: the single manifest export runs on tract (generic stateful
-//! executor) and on OpenVINO, and the supervisor's speaker-conditioning API (the data of the
+//! executor) and on `OpenVINO`, and the supervisor's speaker-conditioning API (the data of the
 //! service's `VoiceConditioning`: embedding [192] + EQ + intensity) is coherent with
 //! `supports_speaker_embedding`, survives backend switches and refuses `FiLM` profiles.
 #![forbid(unsafe_code)]
@@ -35,7 +35,7 @@ fn conditioning(id: &str) -> SpeakerConditioning {
         *value = ((index as f32) * 0.37).sin();
     }
     let norm = speaker_embedding.iter().map(|v| v * v).sum::<f32>().sqrt();
-    speaker_embedding.iter_mut().for_each(|v| *v /= norm);
+    for v in &mut speaker_embedding { *v /= norm; }
     SpeakerConditioning {
         profile_id: id.to_owned(),
         model_id: "pdfnet3-pro-v3-full".to_owned(),

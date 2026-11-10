@@ -40,7 +40,7 @@ pub fn qualify_backend_runtime(backend: &mut dyn InferenceBackend, max_hop_ms: f
     }
 
     // Benchmark frames: Measure runtime inference latency under steady state
-    let benchmark_runs = 3;
+    let benchmark_runs: u8 = 3;
     let mut total_duration_ms = 0.0f32;
 
     for i in 0..benchmark_runs {
@@ -70,7 +70,7 @@ pub fn qualify_backend_runtime(backend: &mut dyn InferenceBackend, max_hop_ms: f
         }
     }
 
-    let avg_ms = total_duration_ms / (benchmark_runs as f32);
+    let avg_ms = total_duration_ms / f32::from(benchmark_runs);
     eprintln!(
         "[supervisor] Backend runtime qualified successfully: avg {avg_ms:.3} ms (threshold <= {max_hop_ms:.3} ms)"
     );
@@ -94,7 +94,7 @@ fn has_stateful_models(p: &Path) -> bool {
         || p.join("enc.engine").exists()
 }
 
-/// Attempts to locate the directory containing stateful model graphs (`models/stateful/enc.onnx` or TensorRT engines).
+/// Attempts to locate the directory containing stateful model graphs (`models/stateful/enc.onnx` or `TensorRT` engines).
 #[must_use]
 pub fn find_stateful_model_dir() -> Option<PathBuf> {
     if let Ok(path) =
@@ -195,10 +195,11 @@ enum OpenVinoTarget {
     Device(String),
 }
 
-/// `OpenVINO` devices to try, in order, for a request that targets `OpenVINO` (`openvino` = every
-/// device `OpenVINO` lists, NPU then GPU then CPU; `openvino-npu`/`npu`/`intel-npu`,
-/// `openvino-gpu`/`intel-gpu`/`arc`/`gpu`, `openvino-cpu`/`intel-cpu` = that device), or `None`
-/// for any other request.
+/// `OpenVINO` devices to try, in order, for a request that targets `OpenVINO`.
+///
+/// `openvino` = every device `OpenVINO` lists, NPU then GPU then CPU; `openvino-npu`/`npu`/
+/// `intel-npu`, `openvino-gpu`/`intel-gpu`/`arc`/`gpu`, `openvino-cpu`/`intel-cpu` = that device.
+/// `None` for any other request.
 #[must_use]
 pub fn openvino_devices_for_request(request: &str) -> Option<Vec<String>> {
     let trimmed = request.trim();
@@ -291,6 +292,7 @@ fn instantiate_tensorrt_backend(
 /// compiles and instantiates the respective hardware backend. If hardware or models are missing,
 /// or if Tract CPU is explicitly requested, instantiates `TractBackend` (or pure-Rust Tract baseline).
 #[must_use]
+#[allow(clippy::too_many_lines, clippy::cognitive_complexity)] // ordered fallback chain; splitting it before the release risks behaviour changes
 pub fn instantiate_backend_with_fallback(
     request: &str,
     model_dir: Option<&Path>,
@@ -314,75 +316,73 @@ pub fn instantiate_backend_with_fallback(
         if matches!(norm.as_str(), "auto" | "" | "default") {
             // Auto order: NPU -> iGPU -> dGPU -> CPU fallback (prioritizing minimal power & zero CPU load)
             // 1. Try NPU first via OpenVINO (minimal power, dedicated neural accelerator)
-            if OpenVINOBackend::is_available() {
-                if let Some(ref dir) = resolved_model_dir {
-                    match OpenVINOBackend::load_stateful(
-                        dir,
-                        "NPU",
-                        "df-compatible-release-asset-v1",
-                        APPROVED_ASSET_SHA256,
-                    ) {
-                        Ok(mut backend) => {
-                            if qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
-                                let device = backend.device().to_string();
-                                let descriptor = backend.descriptor();
-                                let is_accelerated = backend.is_hardware_accelerated();
-                                let name = format!("openvino-{}", device.to_lowercase());
-                                let info = BackendResolutionInfo {
-                                    name,
-                                    runtime: descriptor.runtime.to_string(),
-                                    device,
-                                    is_hardware_accelerated: is_accelerated,
-                                    is_fallback: false,
-                                    fallback_reason: None,
-                                };
-                                return (Box::new(backend), info);
-                            }
-                            fallback_reason = Some(format!(
-                                "OpenVINO NPU exceeded real-time deadline of {AUTO_QUALIFICATION_MAX_HOP_MS:.1}ms in runtime qualification"
-                            ));
+            if OpenVINOBackend::is_available()
+                && let Some(ref dir) = resolved_model_dir {
+                match OpenVINOBackend::load_stateful(
+                    dir,
+                    "NPU",
+                    "df-compatible-release-asset-v1",
+                    APPROVED_ASSET_SHA256,
+                ) {
+                    Ok(mut backend) => {
+                        if qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
+                            let device = backend.device().to_string();
+                            let descriptor = backend.descriptor();
+                            let is_accelerated = backend.is_hardware_accelerated();
+                            let name = format!("openvino-{}", device.to_lowercase());
+                            let info = BackendResolutionInfo {
+                                name,
+                                runtime: descriptor.runtime.to_string(),
+                                device,
+                                is_hardware_accelerated: is_accelerated,
+                                is_fallback: false,
+                                fallback_reason: None,
+                            };
+                            return (Box::new(backend), info);
                         }
-                        Err(err) => {
-                            fallback_reason =
-                                Some(format!("OpenVINO NPU auto initialization skipped/failed: {err}"));
-                        }
+                        fallback_reason = Some(format!(
+                            "OpenVINO NPU exceeded real-time deadline of {AUTO_QUALIFICATION_MAX_HOP_MS:.1}ms in runtime qualification"
+                        ));
+                    }
+                    Err(err) => {
+                        fallback_reason =
+                            Some(format!("OpenVINO NPU auto initialization skipped/failed: {err}"));
                     }
                 }
             }
 
             // 2. Try iGPU second via OpenVINO GPU (integrated GPU, low power, offloads CPU)
-            if OpenVINOBackend::is_available() {
-                if let Some(ref dir) = resolved_model_dir {
-                    match OpenVINOBackend::load_stateful(
-                        dir,
-                        "GPU",
-                        "df-compatible-release-asset-v1",
-                        APPROVED_ASSET_SHA256,
-                    ) {
-                        Ok(mut backend) => {
-                            if qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
-                                let device = backend.device().to_string();
-                                let descriptor = backend.descriptor();
-                                let is_accelerated = backend.is_hardware_accelerated();
-                                let name = format!("openvino-{}", device.to_lowercase());
-                                let info = BackendResolutionInfo {
-                                    name,
-                                    runtime: descriptor.runtime.to_string(),
-                                    device,
-                                    is_hardware_accelerated: is_accelerated,
-                                    is_fallback: false,
-                                    fallback_reason: None,
-                                };
-                                return (Box::new(backend), info);
-                            }
-                            fallback_reason = Some(format!(
-                                "OpenVINO GPU exceeded real-time deadline of {AUTO_QUALIFICATION_MAX_HOP_MS:.1}ms in runtime qualification"
-                            ));
+            if OpenVINOBackend::is_available()
+                && let Some(ref dir) = resolved_model_dir {
+                match OpenVINOBackend::load_stateful(
+                    dir,
+                    "GPU",
+                    "df-compatible-release-asset-v1",
+                    APPROVED_ASSET_SHA256,
+                ) {
+                    Ok(mut backend) => {
+                        if qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
+                            let device = backend.device().to_string();
+                            let descriptor = backend.descriptor();
+                            let is_accelerated = backend.is_hardware_accelerated();
+                            let name = format!("openvino-{}", device.to_lowercase());
+                            let info = BackendResolutionInfo {
+                                name,
+                                runtime: descriptor.runtime.to_string(),
+                                device,
+                                is_hardware_accelerated: is_accelerated,
+                                is_fallback: false,
+                                fallback_reason: None,
+                            };
+                            return (Box::new(backend), info);
                         }
-                        Err(err) => {
-                            fallback_reason =
-                                Some(format!("OpenVINO GPU auto initialization skipped/failed: {err}"));
-                        }
+                        fallback_reason = Some(format!(
+                            "OpenVINO GPU exceeded real-time deadline of {AUTO_QUALIFICATION_MAX_HOP_MS:.1}ms in runtime qualification"
+                        ));
+                    }
+                    Err(err) => {
+                        fallback_reason =
+                            Some(format!("OpenVINO GPU auto initialization skipped/failed: {err}"));
                     }
                 }
             }
@@ -429,32 +429,31 @@ pub fn instantiate_backend_with_fallback(
                         .into_iter()
                         .filter(|d| !d.eq_ignore_ascii_case("CPU"))
                         .collect();
-                    if !accel_devices.is_empty() {
-                        if let Ok(mut backend) = OpenVINOBackend::load_stateful_with_fallback(
-                            dir,
-                            &accel_devices,
-                            "df-compatible-release-asset-v1",
-                            APPROVED_ASSET_SHA256,
-                        ) {
-                            if qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
-                                let device = backend.device().to_string();
-                                let descriptor = backend.descriptor();
-                                let is_accelerated = backend.is_hardware_accelerated();
-                                let name = format!("openvino-{}", device.to_lowercase());
-                                let info = BackendResolutionInfo {
-                                    name,
-                                    runtime: descriptor.runtime.to_string(),
-                                    device,
-                                    is_hardware_accelerated: is_accelerated,
-                                    is_fallback: false,
-                                    fallback_reason: None,
-                                };
-                                return (Box::new(backend), info);
-                            }
-                            fallback_reason = Some(format!(
-                                "OpenVINO accelerator exceeded real-time deadline of {AUTO_QUALIFICATION_MAX_HOP_MS:.1}ms in runtime qualification"
-                            ));
+                    if !accel_devices.is_empty()
+                        && let Ok(mut backend) = OpenVINOBackend::load_stateful_with_fallback(
+                        dir,
+                        &accel_devices,
+                        "df-compatible-release-asset-v1",
+                        APPROVED_ASSET_SHA256,
+                    ) {
+                        if qualify_backend_runtime(&mut backend, AUTO_QUALIFICATION_MAX_HOP_MS) {
+                            let device = backend.device().to_string();
+                            let descriptor = backend.descriptor();
+                            let is_accelerated = backend.is_hardware_accelerated();
+                            let name = format!("openvino-{}", device.to_lowercase());
+                            let info = BackendResolutionInfo {
+                                name,
+                                runtime: descriptor.runtime.to_string(),
+                                device,
+                                is_hardware_accelerated: is_accelerated,
+                                is_fallback: false,
+                                fallback_reason: None,
+                            };
+                            return (Box::new(backend), info);
                         }
+                        fallback_reason = Some(format!(
+                            "OpenVINO accelerator exceeded real-time deadline of {AUTO_QUALIFICATION_MAX_HOP_MS:.1}ms in runtime qualification"
+                        ));
                     }
                 } else if fallback_reason.is_none() {
                     fallback_reason = Some(

@@ -8,6 +8,7 @@ use ort::value::Tensor;
 use crate::InferenceError;
 use crate::stateful_graph::{GraphSession, TensorSpec, pin_dynamic_dims};
 
+#[allow(clippy::needless_pass_by_value)] // by value so it can be passed to `map_err` point-free
 fn ort_error<R>(error: ort::Error<R>) -> InferenceError {
     InferenceError::InferenceExecution(error.to_string())
 }

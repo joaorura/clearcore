@@ -18,7 +18,8 @@ use crate::{PdfNet3DevArchive, PdfNet3DevError};
 
 /// Sub-directory of the models directory that holds the bundled archives.
 pub const PDFNET3_BUNDLE_DIR: &str = "pdfnet3";
-/// pDFNet3 Pro v3 **full** (speaker memory + cross-attention, `speaker_embedding` conditioning):
+/// pDFNet3 Pro v3 **full** archive (speaker memory + cross-attention, `speaker_embedding` conditioning).
+///
 /// ONE stateful manifest export (`manifest.json` + `enc`/`erb_dec`/`df_dec`, opset 12, `S = 1`) run
 /// by the generic stateful executor on every runtime (tract in the daemon, `OpenVINO` CPU/GPU/NPU,
 /// ONNX Runtime in the virtual microphone), so the daemon and the filter run the same graphs.
@@ -27,8 +28,10 @@ pub const PDFNET3_PRO_V3_FULL_FILE: &str = "pdfnet3-pro-v3-full-stateful-asset-v
 /// handed off on 2026-11-09; per-graph SHA-256 in its `manifest.json`).
 pub const PDFNET3_PRO_V3_FULL_SHA256: &str =
     "c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee";
-/// Per-graph SHA-256 of the Pro v3 full export (`clearcore-train/runs/m3_deploy_pro_v3_full`,
-/// parity ORT/`OpenVINO`/tract >= 107.6 dB against `PyTorch`). Checked against the archive's
+/// Per-graph SHA-256 of the Pro v3 full export.
+///
+/// Export `clearcore-train/runs/m3_deploy_pro_v3_full`, parity ORT/`OpenVINO`/tract >= 107.6 dB
+/// against `PyTorch`. Checked against the archive's
 /// `manifest.json` on top of the whole-archive pin.
 pub const PDFNET3_PRO_V3_FULL_GRAPH_SHA256: [(&str, &str); 3] = [
     (
@@ -97,7 +100,9 @@ impl std::fmt::Display for BundledModelError {
 
 impl std::error::Error for BundledModelError {}
 
-/// Candidate models directories, most specific first: [`ENV_MODELS_DIR`], `models/` (and
+/// Candidate models directories, most specific first.
+///
+/// Order: [`ENV_MODELS_DIR`], `models/` (and
 /// `resources/models/`) in the current directory, the executable's directory and their
 /// ancestors, the user data directory, then the system prefixes.
 #[must_use]

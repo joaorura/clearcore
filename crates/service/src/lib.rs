@@ -50,8 +50,10 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Bumps the 32-bit generation counter at byte offset 8 in `$XDG_RUNTIME_DIR/clearcore_state`
-/// (or `/tmp/clearcore_state`). This notifies the native PipeWire C helper that voice profile
+/// Bumps the 32-bit generation counter of the Linux shared state file.
+///
+/// The counter is at byte offset 8 in `$XDG_RUNTIME_DIR/clearcore_state`
+/// (or `/tmp/clearcore_state`). This notifies the native `PipeWire` C helper that voice profile
 /// configuration has changed so it reloads the active profile.
 pub fn bump_linux_shared_state_generation() {
     #[cfg(target_os = "linux")]
@@ -70,9 +72,7 @@ pub fn bump_linux_shared_state_generation() {
 #[must_use]
 pub fn linux_shared_state_path() -> PathBuf {
     let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
+        .filter(|v| !v.is_empty()).map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     runtime_dir.join("clearcore_state")
 }
 
@@ -383,8 +383,9 @@ impl ServiceDaemon {
             self.repo_root.as_deref(),
             self.profile_store.as_ref(),
             &mut self.voice,
-            self.settings.voice_isolation_enabled,
-            self.settings.voice_isolation_intensity,
+            self.settings
+                .voice_isolation_enabled
+                .then_some(self.settings.voice_isolation_intensity),
         )
     }
 
@@ -597,8 +598,9 @@ impl ServiceDaemon {
                     self.repo_root.as_deref(),
                     self.profile_store.as_ref(),
                     &mut self.voice,
-                    self.settings.voice_isolation_enabled,
-                    self.settings.voice_isolation_intensity,
+                    self.settings
+                        .voice_isolation_enabled
+                        .then_some(self.settings.voice_isolation_intensity),
                 );
                 log_info!(
                     "DAEMON_IPC",
@@ -612,7 +614,7 @@ impl ServiceDaemon {
                 );
                 self.settings.backend = Some(req_name.to_string());
                 let persisted = settings::persist_settings(
-                    self.settings.clone(),
+                    &self.settings,
                     self.settings_path.as_deref(),
                 );
                 IpcResponse::success(
@@ -659,7 +661,7 @@ impl ServiceDaemon {
                 self.supervisor.set_dsp_preset(dsp_preset);
                 self.settings.preset = dsp_preset;
                 let persisted = settings::persist_settings(
-                    self.settings.clone(),
+                    &self.settings,
                     self.settings_path.as_deref(),
                 );
                 IpcResponse::success(
@@ -862,7 +864,7 @@ impl ServiceDaemon {
                 log_info!("DAEMON_IPC", "SetFilterIntensity received: {clamped}%");
                 self.settings.filter_intensity = clamped;
                 let persisted = settings::persist_settings(
-                    self.settings.clone(),
+                    &self.settings,
                     self.settings_path.as_deref(),
                 );
                 let beta = settings::intensity_to_post_filter_beta(clamped);
@@ -881,7 +883,7 @@ impl ServiceDaemon {
                 log_info!("DAEMON_IPC", "SetVoiceIsolation received: {enabled}");
                 self.settings.voice_isolation_enabled = enabled;
                 let persisted = settings::persist_settings(
-                    self.settings.clone(),
+                    &self.settings,
                     self.settings_path.as_deref(),
                 );
                 if enabled {
@@ -906,7 +908,7 @@ impl ServiceDaemon {
                 log_info!("DAEMON_IPC", "SetVoiceIsolationIntensity received: {clamped}%");
                 self.settings.voice_isolation_intensity = clamped;
                 let persisted = settings::persist_settings(
-                    self.settings.clone(),
+                    &self.settings,
                     self.settings_path.as_deref(),
                 );
                 if self.settings.voice_isolation_enabled {
@@ -930,7 +932,7 @@ impl ServiceDaemon {
                 self.supervisor.set_voice_leveler_intensity(clamped);
                 self.settings.voice_leveler = clamped;
                 let persisted = settings::persist_settings(
-                    self.settings.clone(),
+                    &self.settings,
                     self.settings_path.as_deref(),
                 );
                 IpcResponse::success(
@@ -1168,6 +1170,7 @@ fn openvino_runtime_status() -> serde_json::Value {
 }
 
 /// Single path for every backend selection (IPC `SetBackend` and `ServiceDaemon::select_backend`).
+/// `voice_isolation_intensity` is `Some(intensity)` when voice isolation is enabled.
 fn select_backend_and_reapply(
     supervisor: &mut EngineSupervisor,
     request: &str,
@@ -1175,12 +1178,11 @@ fn select_backend_and_reapply(
     repo_root: Option<&Path>,
     store: Option<&ProfileStore>,
     voice: &mut VoiceState,
-    voice_isolation_enabled: bool,
-    voice_isolation_intensity: u8,
+    voice_isolation_intensity: Option<u8>,
 ) -> BackendResolutionInfo {
     let info = supervisor.select_backend(request, model_dir, repo_root);
-    if voice_isolation_enabled {
-        reapply_stored_profile(supervisor, store, voice, voice_isolation_intensity);
+    if let Some(intensity) = voice_isolation_intensity {
+        reapply_stored_profile(supervisor, store, voice, intensity);
     } else {
         let _ = supervisor.apply_voice_conditioning(None);
         voice.applied = None;

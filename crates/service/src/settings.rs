@@ -16,6 +16,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use studio_dsp::Preset;
 
+/// Current settings file version.
+///
 /// v2: the voice profile (pDFNet3 Pro v3 speaker conditioning) is OFF by default. A v1 file's
 /// `voice_isolation_enabled` was written from the old `true` default, not by the user, so it is
 /// ignored and the profile stays off until the user turns it on.
@@ -39,7 +41,7 @@ pub struct Settings {
     /// Whether the user turned the voice profile (speaker conditioning) on. Off by default: a
     /// stored profile is never applied without this explicit opt-in.
     pub voice_isolation_enabled: bool,
-    /// Voice isolation intensity 0–100 (percentage scale for FiLM vectors).
+    /// Voice isolation intensity 0–100 (percentage scale for `FiLM` vectors).
     pub voice_isolation_intensity: u8,
     /// Voice auto-leveler intensity 0–100 (0 = bypass, 50 = balanced, 100 = firm).
     pub voice_leveler: u8,
@@ -128,7 +130,13 @@ impl Settings {
                 parsed
             }
             Err(err) => {
-                if err.kind() != io::ErrorKind::NotFound {
+                if err.kind() == io::ErrorKind::NotFound {
+                    log_info!(
+                        "SETTINGS",
+                        "Settings file not found at {}; using defaults",
+                        path.display()
+                    );
+                } else {
                     log_warn!(
                         "SETTINGS",
                         "Could not read settings file {}: {err}; using defaults",
@@ -136,12 +144,6 @@ impl Settings {
                     );
                     eprintln!(
                         "Could not read settings file {}: {err}; using defaults",
-                        path.display()
-                    );
-                } else {
-                    log_info!(
-                        "SETTINGS",
-                        "Settings file not found at {}; using defaults",
                         path.display()
                     );
                 }
@@ -186,7 +188,7 @@ impl Settings {
 
 /// Persiste sem propagar erro: devolve `true` se gravou. `None` desliga a persistência.
 #[must_use]
-pub fn persist_settings(settings: Settings, path: Option<&Path>) -> bool {
+pub fn persist_settings(settings: &Settings, path: Option<&Path>) -> bool {
     let Some(path) = path else {
         return false;
     };
@@ -299,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_intensity_to_post_filter_beta() {
-        assert_eq!(intensity_to_post_filter_beta(0), 0.0);
+        assert!(intensity_to_post_filter_beta(0).abs() < f32::EPSILON);
         assert!((intensity_to_post_filter_beta(50) - 0.02).abs() < f32::EPSILON);
         assert!((intensity_to_post_filter_beta(75) - 0.05).abs() < f32::EPSILON);
         assert!((intensity_to_post_filter_beta(100) - 0.10).abs() < f32::EPSILON);

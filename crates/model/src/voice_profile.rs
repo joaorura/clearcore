@@ -144,10 +144,11 @@ impl FiLMVectors {
             && self.beta_df.iter().all(|&v| v.abs() < f32::EPSILON)
     }
 
-    /// Scales the FiLM vectors by intensity percentage (0–100%).
+    /// Scales the `FiLM` vectors by intensity percentage (0–100%).
     ///
     /// At 0%, returns identity (gamma = 1.0, beta = 0.0).
     /// At 100%, returns the vectors unchanged.
+    #[must_use]
     pub fn with_intensity(&self, intensity: u8) -> Self {
         let alpha = (f32::from(intensity.min(100))) / 100.0;
         Self {
@@ -388,7 +389,7 @@ impl VoiceProfile {
         Ok(self)
     }
 
-    /// Returns a new profile with FiLM vectors scaled by voice isolation intensity (0–100%), recalculating integrity hash.
+    /// Returns a new profile with `FiLM` vectors scaled by voice isolation intensity (0–100%), recalculating integrity hash.
     pub fn with_intensity(&self, intensity: u8) -> Result<Self, VoiceProfileError> {
         let film = self.film.with_intensity(intensity);
         Self::new(
@@ -749,19 +750,19 @@ mod tests {
         .expect("valid vectors");
 
         // 100% intensity is unchanged
-        let at_100 = original.with_intensity(100);
-        assert_eq!(at_100, original);
+        let full = original.with_intensity(100);
+        assert_eq!(full, original);
 
         // 0% intensity is identity
-        let at_0 = original.with_intensity(0);
-        assert!(at_0.is_identity());
+        let identity = original.with_intensity(0);
+        assert!(identity.is_identity());
 
         // 50% intensity is midpoint
-        let at_50 = original.with_intensity(50);
-        assert!((at_50.gamma_enc[0] - 1.2).abs() < 1e-6);
-        assert!((at_50.beta_enc[0] - 0.1).abs() < 1e-6);
-        assert!((at_50.gamma_df[0] - 0.9).abs() < 1e-6);
-        assert!((at_50.beta_df[0] - (-0.05)).abs() < 1e-6);
+        let midpoint = original.with_intensity(50);
+        assert!((midpoint.gamma_enc[0] - 1.2).abs() < 1e-6);
+        assert!((midpoint.beta_enc[0] - 0.1).abs() < 1e-6);
+        assert!((midpoint.gamma_df[0] - 0.9).abs() < 1e-6);
+        assert!((midpoint.beta_df[0] - (-0.05)).abs() < 1e-6);
     }
 
     #[test]

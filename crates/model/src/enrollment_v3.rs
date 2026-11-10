@@ -304,14 +304,15 @@ mod tests {
     }
 
     fn five_samples(seconds: usize) -> (Vec<f32>, Vec<Vec<f32>>) {
-        let parts: Vec<Vec<f32>> = (0..5)
-            .map(|i| speech_48k(seconds, 140.0 + 10.0 * i as f32))
+        let parts: Vec<Vec<f32>> = (0_u8..5)
+            .map(|i| speech_48k(seconds, 140.0 + 10.0 * f32::from(i)))
             .collect();
         let refs: Vec<&[f32]> = parts.iter().map(Vec::as_slice).collect();
         (crate::speech_trim::join_crossfade(&refs, 48_000, 20), parts)
     }
 
     #[test]
+    #[allow(clippy::float_cmp)] // exact equality is the assertion: samples are copied verbatim
     fn aggregation_puts_250_ms_of_zeros_between_samples_in_order() {
         let samples = vec![vec![1.0_f32; 10], vec![2.0; 20], vec![3.0; 5]];
         let out = aggregate_samples(&samples);
@@ -327,6 +328,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)] // exact equality is the assertion: samples are copied verbatim
     fn aggregation_truncates_to_192000_samples() {
         let samples = vec![
             vec![1.0_f32; 100_000],

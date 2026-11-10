@@ -208,6 +208,7 @@ fn check_parity_vector() {
     let profiled = read_f32(&out.join("expected_daemon_profile.f32"));
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(out.join("conditioning.json")).unwrap()).unwrap();
+    #[allow(clippy::cast_possible_truncation)] // the fixture stores f32 values widened to f64
     let embedding: Vec<f32> = json["speaker_embedding"]
         .as_array()
         .unwrap()
@@ -238,15 +239,15 @@ fn check_parity_vector() {
         ort_profile
             .set_speaker_conditioning(Some(&conditioning))
             .unwrap();
-        let ort = (
+        let ort_snr = (
             snr_db(&neutral, &run(&mut ort_neutral, &hops)),
             snr_db(&profiled, &run(&mut ort_profile, &hops)),
         );
         eprintln!(
             "ONNX Runtime executor vs daemon: neutral {:.1} dB, profile {:.1} dB",
-            ort.0, ort.1
+            ort_snr.0, ort_snr.1
         );
-        assert!(ort.0 >= 60.0 && ort.1 >= 60.0);
+        assert!(ort_snr.0 >= 60.0 && ort_snr.1 >= 60.0);
     }
     // The profile must actually change the output.
     assert!(snr_db(&neutral, &profiled) < 40.0);

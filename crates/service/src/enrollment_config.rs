@@ -373,7 +373,6 @@ mod tests {
 
         let home_val = tmp.path().to_string_lossy().to_string();
         let found = find_in_user_data_dirs(|k| match k {
-            "XDG_DATA_HOME" => None,
             "HOME" => Some(home_val.clone()),
             _ => None,
         });
@@ -412,8 +411,6 @@ mod tests {
 
         let data_dirs_val = format!("{}:{}", tmp1.path().display(), tmp2.path().display());
         let found = find_in_user_data_dirs(|k| match k {
-            "XDG_DATA_HOME" => None,
-            "HOME" => None,
             "XDG_DATA_DIRS" => Some(data_dirs_val.clone()),
             _ => None,
         });

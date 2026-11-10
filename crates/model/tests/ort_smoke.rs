@@ -3,7 +3,7 @@
 
 //! Smoke gate for the ONNX Runtime (`ort` rc.13) streaming backend.
 //!
-//! Fixture (R10): the git-tracked stateful DeepFilterNet3 graphs in
+//! Fixture (R10): the git-tracked stateful `DeepFilterNet3` graphs in
 //! `models/stateful/` — the exact bytes production loads, each pinned by
 //! `APPROVED_STATEFUL_DIGESTS` inside `OrtBackend::new`.
 

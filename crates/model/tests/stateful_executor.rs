@@ -8,7 +8,7 @@
 
 //! Generic stateful executor (tract, and ONNX Runtime when `ort` is on) against
 //! (a) the synthetic Pro v3 full stand-in `tests/fixtures/pdfnet3-pro-v3-full-synthetic.tar.gz`
-//! (`tools/models/make_synthetic_pro_v3_full.py`, one graph, GRU + LayerNorm + Softmax + Einsum,
+//! (`tools/models/make_synthetic_pro_v3_full.py`, one graph, GRU + `LayerNorm` + Softmax + Einsum,
 //! `speaker_embedding`/`speaker_present`) and (b) the bundled pDFNet3 Pro v3 full
 //! (`models/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz`, trio, opset 12).
 
@@ -38,10 +38,13 @@ fn synthetic() -> PdfNet3DevArchive {
     .unwrap();
     let sha = {
         use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
         Sha256::digest(&bytes)
             .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
+            .fold(String::new(), |mut hex, b| {
+                let _ = write!(hex, "{b:02x}");
+                hex
+            })
     };
     PdfNet3DevArchive::verify(bytes, &sha).unwrap()
 }
@@ -77,11 +80,12 @@ fn embedding(seed: u32) -> Vec<f32> {
         })
         .collect();
     let norm = values.iter().map(|v| v * v).sum::<f32>().sqrt();
-    values.iter_mut().for_each(|v| *v /= norm);
+    for v in &mut values { *v /= norm; }
     values
 }
 
 /// Speech-like test signal: harmonic stack with a syllabic envelope plus pseudo-random noise.
+#[allow(clippy::suboptimal_flops)] // keep the reference arithmetic; `mul_add` changes rounding; the parity fixtures depend on it
 fn signal(frames: usize) -> Vec<AudioFrame> {
     let mut noise = 0x1234_5678u32;
     (0..frames)
@@ -232,7 +236,7 @@ fn conditioning_api_is_coherent_with_the_graph() -> TestResult {
     let full = run(&mut backend, &input);
     let mut half = conditioning(7);
     half.intensity_percent = 50;
-    assert_eq!(half.speaker_present(), 1.0);
+    assert!((half.speaker_present() - 1.0).abs() < f32::EPSILON);
     backend.set_speaker_conditioning(Some(&half))?;
     backend.reset()?;
     assert_eq!(run(&mut backend, &input), full);

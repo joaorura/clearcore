@@ -36,14 +36,14 @@ use realtime_noise_supervisor::EngineSupervisor;
 use realtime_noise_ipc::enrollment_codes::ENROLL_PROFILE_OUTDATED;
 
 /// Generic, constant reasons (never payload).
-pub(crate) const NOT_APPLIED_MESSAGE: &str = "The backend could not apply the stored voice profile";
-pub(crate) const LOAD_FAILED_MESSAGE: &str =
+pub const NOT_APPLIED_MESSAGE: &str = "The backend could not apply the stored voice profile";
+pub const LOAD_FAILED_MESSAGE: &str =
     "The stored voice profile failed validation or has insecure permissions";
-pub(crate) const MISSING_MESSAGE: &str = "The stored voice profile is no longer on disk";
-pub(crate) const RESTORE_FAILED_MESSAGE: &str =
+pub const MISSING_MESSAGE: &str = "The stored voice profile is no longer on disk";
+pub const RESTORE_FAILED_MESSAGE: &str =
     "The previous voice profile could not be restored on the backend";
 /// `GetStatus.voice_profile_error` of a stored v1 profile: the IPC code itself.
-pub(crate) const OUTDATED_ERROR: &str = ENROLL_PROFILE_OUTDATED;
+pub const OUTDATED_ERROR: &str = ENROLL_PROFILE_OUTDATED;
 
 /// What the audio backend needs of a voice profile.
 #[derive(Clone, PartialEq)]
@@ -133,17 +133,17 @@ impl VoiceConditioningTarget for EngineSupervisor {
     }
 
     fn active_conditioning_id(&self) -> Option<&str> {
-        EngineSupervisor::active_conditioning_id(self)
+        Self::active_conditioning_id(self)
     }
 
     fn active_conditioning_has_eq(&self) -> bool {
-        EngineSupervisor::active_conditioning_has_eq(self)
+        Self::active_conditioning_has_eq(self)
     }
 }
 
 /// What the service knows about the stored profile and what it has delivered.
 #[derive(Debug, Default)]
-pub(crate) struct VoiceState {
+pub struct VoiceState {
     /// Id of the valid (v2) profile persisted on disk.
     pub stored_id: Option<String>,
     /// Generic reason the stored profile is not applied; `ENROLL_PROFILE_OUTDATED` for a v1 file.

@@ -56,7 +56,7 @@ pub struct WasapiAudioBackend {
     devices: Vec<WasapiDeviceInfo>,
     current_device: Option<String>,
     status: DeviceStatus,
-    /// Indicates whether the physical IAudioClient capture stream is currently active (IAudioClient::Start).
+    /// Indicates whether the physical `IAudioClient` capture stream is currently active (`IAudioClient::Start`).
     is_client_started: bool,
     /// Timestamp when virtual mic stream count dropped to 0, arming the 3.5s release timer.
     idle_since: Option<Instant>,
@@ -70,7 +70,7 @@ impl Default for WasapiAudioBackend {
 
 impl WasapiAudioBackend {
     /// Creates a new WASAPI audio backend in [`DeviceStatus::Ready`] state.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             devices: Vec::new(),
             current_device: None,
@@ -81,7 +81,7 @@ impl WasapiAudioBackend {
     }
 
     /// Creates a WASAPI audio backend pre-populated with known devices.
-    pub fn with_devices(devices: Vec<WasapiDeviceInfo>) -> Self {
+    pub const fn with_devices(devices: Vec<WasapiDeviceInfo>) -> Self {
         Self {
             devices,
             current_device: None,
@@ -123,7 +123,7 @@ impl WasapiAudioBackend {
             .is_some_and(WasapiDeviceInfo::is_bluetooth_device)
     }
 
-    /// Returns whether the underlying physical IAudioClient capture stream is currently running (`IAudioClient::Start`).
+    /// Returns whether the underlying physical `IAudioClient` capture stream is currently running (`IAudioClient::Start`).
     pub const fn is_client_started(&self) -> bool {
         self.is_client_started
     }

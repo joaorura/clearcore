@@ -222,6 +222,7 @@ pub struct StatefulGraphExecutor<S> {
 impl<S: GraphSession> StatefulGraphExecutor<S> {
     /// Resolves every input of `graphs` (name, session) and the execution order.
     /// `state_pairs` are the manifest's explicit `(input, output)` pairs (may be empty).
+#[allow(clippy::too_many_lines)] // linear pipeline; splitting it before the release risks behaviour changes
     pub fn new(
         graphs: Vec<(String, S)>,
         state_pairs: &[(String, String)],
@@ -472,7 +473,7 @@ impl<S: GraphSession> StatefulGraphExecutor<S> {
 
     /// Number of fed-back state tensors.
     #[must_use]
-    pub fn state_count(&self) -> usize {
+    pub const fn state_count(&self) -> usize {
         self.states.len()
     }
 
@@ -757,8 +758,9 @@ struct ResolvedConditioning {
     eq_factors: Option<Vec<f32>>,
 }
 
-/// A complete [`InferenceBackend`]: [`DspPipeline`] + [`StatefulGraphExecutor`] on any runtime,
-/// with the speaker conditioning (Pro v3 full embedding, or legacy `FiLM` profile), the profile's
+/// A complete [`InferenceBackend`]: [`DspPipeline`] + [`StatefulGraphExecutor`] on any runtime.
+///
+/// Adds the speaker conditioning (Pro v3 full embedding, or legacy `FiLM` profile), the profile's
 /// spectral EQ applied right before the iSTFT, and the digital-silence shortcut.
 pub struct StatefulGraphBackend<S> {
     pipeline: DspPipeline,
@@ -835,7 +837,7 @@ impl<S: GraphSession> StatefulGraphBackend<S> {
         }
     }
 
-    fn neutral(eq_factors: Option<Vec<f32>>) -> ResolvedConditioning {
+    const fn neutral(eq_factors: Option<Vec<f32>>) -> ResolvedConditioning {
         ResolvedConditioning {
             embedding: None,
             present: 0.0,
@@ -1076,6 +1078,7 @@ mod tests {
 
     /// A split export like the Pro v3 full: `enc` (state `h`, outputs `emb`, `lsnr`) and a decoder
     /// `dec` (state `d`, input `emb`, outputs `m`, `coefs`). `lsnr` is fixed; `h`/`d` count hops.
+    #[allow(clippy::suboptimal_flops)] // keep the reference arithmetic; `mul_add` changes rounding in the mock graph
     fn split(lsnr: f32, runs: &Arc<AtomicUsize>, decoder_first: bool) -> Vec<(String, Mock)> {
         let enc = Mock {
             inputs: vec![

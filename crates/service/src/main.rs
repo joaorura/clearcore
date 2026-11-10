@@ -67,26 +67,23 @@ fn main() -> ExitCode {
                 ..Default::default()
             };
             let mut bootstrap = ServiceBootstrap::new(config);
-            match ProfileStore::default_dir() {
-                Some(dir) => {
-                    realtime_noise_service::log_info!(
-                        "DAEMON",
-                        "Attaching profile store at {}",
-                        dir.display()
-                    );
-                    bootstrap
-                        .daemon_mut()
-                        .attach_profile_store(ProfileStore::new(dir));
-                }
-                None => {
-                    realtime_noise_service::log_warn!(
-                        "DAEMON",
-                        "No data directory available: voice profiles cannot be stored or restored"
-                    );
-                    eprintln!(
-                        "No data directory available: voice profiles cannot be stored or restored"
-                    );
-                }
+            if let Some(dir) = ProfileStore::default_dir() {
+                realtime_noise_service::log_info!(
+                    "DAEMON",
+                    "Attaching profile store at {}",
+                    dir.display()
+                );
+                bootstrap
+                    .daemon_mut()
+                    .attach_profile_store(ProfileStore::new(dir));
+            } else {
+                realtime_noise_service::log_warn!(
+                    "DAEMON",
+                    "No data directory available: voice profiles cannot be stored or restored"
+                );
+                eprintln!(
+                    "No data directory available: voice profiles cannot be stored or restored"
+                );
             }
             if let Err(err) = bootstrap.run() {
                 eprintln!("Daemon execution error: {err}");

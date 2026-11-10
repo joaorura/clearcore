@@ -27,7 +27,7 @@ fn conditioned(id: &str) -> SpeakerConditioning {
         *value = ((index as f32) * 0.21).cos();
     }
     let norm = speaker_embedding.iter().map(|v| v * v).sum::<f32>().sqrt();
-    speaker_embedding.iter_mut().for_each(|v| *v /= norm);
+    for v in &mut speaker_embedding { *v /= norm; }
     SpeakerConditioning {
         profile_id: id.to_owned(),
         model_id: "pdfnet3-pro-v3-full".to_owned(),
@@ -51,7 +51,7 @@ fn assert_supports_matches_set(supervisor: &mut EngineSupervisor, context: &str)
     );
 }
 
-/// Bundled Pro v3 full; OpenVINO requests may run it on OpenVINO when the host has it.
+/// Bundled Pro v3 full; `OpenVINO` requests may run it on `OpenVINO` when the host has it.
 fn pro_supervisor() -> EngineSupervisor {
     let archive = pdfnet3_bundle::load_isolation_archive_from(&[repository_models()]).unwrap();
     let mut supervisor = EngineSupervisor::default();

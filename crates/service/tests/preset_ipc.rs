@@ -198,8 +198,8 @@ fn diagnostics_includes_preset_and_dsp_preset() {
 fn click_free_preset_switching_during_audio_processing() {
     let mut daemon = ServiceDaemon::new();
     let mut input: AudioFrame = [0.0; HOP_SAMPLES];
-    for (i, sample) in input.iter_mut().enumerate() {
-        *sample = (i as f32 * 0.05).sin() * 0.5;
+    for (i, sample) in (0_u16..).zip(input.iter_mut()) {
+        *sample = (f32::from(i) * 0.05).sin() * 0.5;
     }
 
     // Process initially with Off: neural network processes and DSP preset Off passes it through

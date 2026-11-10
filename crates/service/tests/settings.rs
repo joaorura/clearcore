@@ -221,15 +221,15 @@ fn persist_settings_reports_success_failure_and_absence_of_a_path() {
     };
 
     assert!(persist_settings(
-        settings.clone(),
+        &settings,
         Some(&dir.path().join("settings.json"))
     ));
-    assert!(!persist_settings(settings.clone(), None));
+    assert!(!persist_settings(&settings, None));
 
     let blocker = dir.path().join("blocker");
     std::fs::write(&blocker, "a file, not a directory").unwrap();
     assert!(!persist_settings(
-        settings,
+        &settings,
         Some(&blocker.join("settings.json"))
     ));
 }
@@ -309,7 +309,7 @@ fn settings_round_trips_filter_intensity_and_voice_isolation() {
     settings.save(&path).unwrap();
     let loaded = Settings::load(&path);
     assert_eq!(loaded.filter_intensity, 75);
-    assert_eq!(loaded.voice_isolation_enabled, false);
+    assert!(!loaded.voice_isolation_enabled);
 
     let raw = std::fs::read_to_string(&path).unwrap();
     assert!(raw.contains("\"filter_intensity\": 75"));

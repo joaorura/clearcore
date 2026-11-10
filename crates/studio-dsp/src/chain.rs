@@ -269,7 +269,7 @@ impl StudioChain {
 
     /// Clears all filter, envelope, AGC and limiter state; the selected preset is kept and any
     /// pending crossfade is dropped.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.outgoing = None;
         self.fading = false;
         if let Some(path) = self.main.as_mut() {

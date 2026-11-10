@@ -259,14 +259,14 @@ mod tests {
         let mut agc = Agc::with_intensity(0);
         let input = sine(1_000.0, amplitude_for(-26.0), HOP_SAMPLES * 5);
         let output = run(&mut agc, &input);
-        assert_eq!(agc.gain_db(), 0.0);
+        assert!(agc.gain_db().abs() < f64::EPSILON);
         assert_eq!(input, output);
     }
 
     #[test]
     fn intensity_hundred_steers_to_minus_twelve_lufs() {
         let mut agc = Agc::with_intensity(100);
-        assert_eq!(Agc::target_lufs_for_intensity(100), -12.0);
+        assert!((Agc::target_lufs_for_intensity(100) + 12.0).abs() < f64::EPSILON);
         let output = run_tone(&mut agc, -20.0, 40);
         assert!((lufs_of_tail(&output) - (-12.0)).abs() < 0.5);
     }

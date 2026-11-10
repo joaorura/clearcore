@@ -233,6 +233,7 @@ mod tests {
     }
 
     /// Deterministic uniform noise with the given RMS in dBFS.
+    #[allow(clippy::suboptimal_flops)] // keep the reference arithmetic; `mul_add` changes rounding
     fn noise(len: usize, rms_dbfs: f32, seed: u32) -> Vec<f32> {
         let mut state = seed;
         let amp = 10f32.powf(rms_dbfs / 20.0) * 3f32.sqrt();
@@ -245,6 +246,7 @@ mod tests {
     }
 
     /// Syllable-like bursts over a light (-60 dBFS) room-noise floor, like a quiet room.
+    #[allow(clippy::suboptimal_flops)] // keep the reference arithmetic; `mul_add` changes rounding
     fn bursts(secs: f32, amp: f32) -> Vec<f32> {
         let n = (secs * 48_000.0) as usize;
         let floor = noise(n, -60.0, 7);

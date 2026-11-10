@@ -853,8 +853,10 @@ fn the_backend_setting_selects_openvino_and_the_env_overrides_it() {
         return;
     }
     env.use_synthetic_v3();
-    let mut settings = Settings::default();
-    settings.backend = Some("openvino-cpu".to_owned());
+    let settings = Settings {
+        backend: Some("openvino-cpu".to_owned()),
+        ..Settings::default()
+    };
     settings.save(&default_settings_path()).expect("settings");
     let filter = create_ffi();
     assert!(!filter.is_null());

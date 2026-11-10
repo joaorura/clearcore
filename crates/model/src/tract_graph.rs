@@ -1,4 +1,6 @@
-//! tract (`tract-onnx` 0.19) as a [`GraphSession`]: one stateful ONNX graph compiled with every
+//! tract (`tract-onnx` 0.19) as a [`GraphSession`].
+//!
+//! One stateful ONNX graph compiled with every
 //! dynamic dimension pinned to 1 (`S = 1`), run hop by hop. The same stateful export runs here,
 //! on `OpenVINO` and on ONNX Runtime, so the daemon and the virtual microphone share one model.
 //!

@@ -289,9 +289,16 @@ pub fn has_manifest(bytes: &[u8]) -> bool {
     false
 }
 
-/// Walks a manifest archive (already verified by its whole-archive SHA-256): flat regular
-/// members only, bounded sizes and count, `manifest.json` required, at least one `.onnx`, no
+/// Walks a manifest archive (already verified by its whole-archive SHA-256).
+///
+/// Flat regular members only, bounded sizes and count, `manifest.json` required, at least one `.onnx`, no
 /// duplicates, no other member kinds; every graph pinned by the manifest must match.
+/// `name.ends_with(".{extension}")`, spelled so the case-sensitivity is explicit.
+fn has_extension(name: &str, extension: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(_, ext)| ext == extension)
+}
+
+#[allow(clippy::too_many_lines)] // linear pipeline; splitting it before the release risks behaviour changes
 pub fn read_manifest_archive(bytes: &[u8]) -> Result<StatefulModelFiles, InferenceError> {
     let mut archive = Archive::new(GzDecoder::new(bytes).take(MAX_DECOMPRESSED_BYTES));
     let entries = archive
@@ -321,12 +328,12 @@ pub fn read_manifest_archive(bytes: &[u8]) -> Result<StatefulModelFiles, Inferen
             return Err(invalid("duplicate archive member"));
         }
         seen.push(name.clone());
-        let limit = if name.ends_with(".onnx") {
+        let limit = if has_extension(&name, "onnx") {
             MAX_GRAPH_BYTES
         } else if name == MANIFEST_FILE
             || name == "config.ini"
-            || name.ends_with(".txt")
-            || name.ends_with(".md")
+            || has_extension(&name, "txt")
+            || has_extension(&name, "md")
         {
             MAX_TEXT_BYTES
         } else {

@@ -177,7 +177,7 @@ impl PdfNet3DevArchive {
 
     /// Replaces the asset id reported by the backends built from this archive.
     #[must_use]
-    pub fn with_asset_id(mut self, asset_id: &'static str) -> Self {
+    pub const fn with_asset_id(mut self, asset_id: &'static str) -> Self {
         self.asset_id = asset_id;
         self
     }

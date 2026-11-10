@@ -1,5 +1,5 @@
-//! The development pDFNet3 (unsigned, FiLM) overrides every backend selection while set,
-//! accelerator requests included (they could only run a model without FiLM).
+//! The development pDFNet3 (unsigned, `FiLM`) overrides every backend selection while set,
+//! accelerator requests included (they could only run a model without `FiLM`).
 #![forbid(unsafe_code)]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

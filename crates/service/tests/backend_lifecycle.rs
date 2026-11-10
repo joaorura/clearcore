@@ -18,7 +18,7 @@ fn send(daemon: &mut ServiceDaemon, command: IpcCommand) -> IpcResponse {
     IpcResponse::from_json(resp_str.trim()).expect("parse")
 }
 
-/// Production policy: the bundled pDFNet3 Pro (FiLM) is the only isolation model and runs on
+/// Production policy: the bundled pDFNet3 Pro (`FiLM`) is the only isolation model and runs on
 /// tract, whatever accelerators the host has. `auto` is not a fallback.
 #[test]
 fn service_starts_with_the_bundled_pdfnet3_pro_on_auto() {
@@ -33,9 +33,9 @@ fn service_starts_with_the_bundled_pdfnet3_pro_on_auto() {
     assert_eq!(resp.payload["backend_device"], "CPU");
 }
 
-/// An accelerator request runs the pDFNet3 Pro on OpenVINO when that works on this host, and
+/// An accelerator request runs the pDFNet3 Pro on `OpenVINO` when that works on this host, and
 /// otherwise resolves to tract with the Pro model and says why; it never loads the base `DFNet3`.
-/// TensorRT cannot feed the FiLM inputs at all.
+/// `TensorRT` cannot feed the `FiLM` inputs at all.
 #[test]
 fn service_switches_backend_via_set_backend_ipc() {
     let mut daemon = ServiceDaemon::new();

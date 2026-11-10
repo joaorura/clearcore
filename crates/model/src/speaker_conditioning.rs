@@ -1,4 +1,6 @@
-//! Conditioning of the pDFNet3 Pro v3 full on a voice profile: the ECAPA speaker embedding
+//! Conditioning of the pDFNet3 Pro v3 full on a voice profile.
+//!
+//! Fields: the ECAPA speaker embedding
 //! (`speaker_embedding`, `[1, 192]`, L2-normalised), the profile's spectral EQ and the isolation
 //! intensity. Same fields as the service's `VoiceConditioning`, so the service hands it to
 //! [`crate::InferenceBackend::set_speaker_conditioning`] (through the supervisor) as is.
@@ -70,7 +72,7 @@ impl SpeakerConditioning {
     /// Value fed to `speaker_present`: binary (`0.0` at intensity 0, `1.0` otherwise); a
     /// fractional value would be outside the training distribution (the mask is 0/1).
     #[must_use]
-    pub fn speaker_present(&self) -> f32 {
+    pub const fn speaker_present(&self) -> f32 {
         if self.intensity_percent == 0 {
             0.0
         } else {

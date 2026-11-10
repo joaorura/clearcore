@@ -4,7 +4,7 @@
 //! not end-to-end and not a quality claim (spec 1, 3.1, 12.8).
 //!
 //! Since profile schema v2 the enrollment asset is the pDFNet3 Pro v3 `enrollment.onnx` (a path
-//! ending in `.onnx`; output `speaker_embedding`), no longer the M3 FiLM archive.
+//! ending in `.onnx`; output `speaker_embedding`), no longer the M3 `FiLM` archive.
 //!
 //! Run: `cargo test -p realtime-noise-service --release --test enrollment_real_model
 //! -- --ignored --nocapture` with both variables set.
@@ -249,7 +249,7 @@ fn env_or(key: &str, default: &str) -> String {
 }
 
 /// The runtime that receives the profile is the REAL tract backend running the development
-/// pDFNet3 (FiLM), not a test double: the build must end `done` and the profile must be active.
+/// pDFNet3 (`FiLM`), not a test double: the build must end `done` and the profile must be active.
 /// Ingestion still denoises with the approved base `DFNet3` (decision D2).
 #[test]
 #[ignore = "needs the M3 pDFNet3 and enrollment archives and the approved DFNet3; run locally"]

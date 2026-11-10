@@ -84,7 +84,12 @@ fn supervisor_process_frame_honours_bypass_and_mute() {
     // Bypass mode: returns identical input
     supervisor.set_mode(DenoiseMode::Bypass);
     let bypass_out = supervisor.process_frame(&test_frame).expect("bypass");
-    assert_eq!(bypass_out, test_frame);
+    assert!(
+        bypass_out
+            .iter()
+            .zip(&test_frame)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+    );
 
     // Mute mode: returns digital silence
     supervisor.set_mode(DenoiseMode::Mute);
@@ -122,7 +127,11 @@ fn supervisor_selects_openvino_npu_explicitly_when_available() {
 
     let info = supervisor.select_backend("openvino-npu", stateful_dir.as_deref(), root.as_deref());
     if realtime_noise_accelerators::OpenVINOBackend::is_available() && stateful_dir.is_some() {
-        if !info.is_fallback {
+        if info.is_fallback {
+            // Graceful fallback when host driver does not support dynamic shapes on NPU
+            assert_eq!(info.name, "tract");
+            assert!(!info.is_hardware_accelerated);
+        } else {
             assert_eq!(info.name, "openvino-npu");
             assert!(info.is_hardware_accelerated);
             assert_eq!(supervisor.active_backend_name(), "openvino-npu");
@@ -132,10 +141,6 @@ fn supervisor_selects_openvino_npu_explicitly_when_available() {
             let test_frame: AudioFrame = [0.1; HOP_SAMPLES];
             let processed = supervisor.process_frame(&test_frame).expect("inference");
             assert!(processed.iter().all(|&s| s.is_finite()));
-        } else {
-            // Graceful fallback when host driver does not support dynamic shapes on NPU
-            assert_eq!(info.name, "tract");
-            assert!(!info.is_hardware_accelerated);
         }
     }
 }

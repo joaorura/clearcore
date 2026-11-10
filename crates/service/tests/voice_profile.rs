@@ -85,13 +85,14 @@ impl InferenceBackend for ProfileBackend {
 impl ProfileBackend {
     /// Records the call and applies the injected failures.
     fn record(&self, id: Option<String>) -> Result<(), InferenceError> {
-        let injected = match &id {
-            None => self
-                .knobs
-                .fail_none
-                .load(std::sync::atomic::Ordering::SeqCst),
-            Some(id) => self.knobs.fail_id.lock().unwrap().as_deref() == Some(id.as_str()),
-        };
+        let injected = id.as_ref().map_or_else(
+            || {
+                self.knobs
+                    .fail_none
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            },
+            |id| self.knobs.fail_id.lock().unwrap().as_deref() == Some(id.as_str()),
+        );
         self.calls.lock().unwrap().push(id);
         if injected {
             return Err(InferenceError::UnsupportedFeature("injected".into()));
@@ -729,7 +730,7 @@ fn public_select_backend_reapplies_the_stored_profile() {
     );
 }
 
-/// No "DSP bridge": a backend without FiLM inputs (here an accelerator mock) never reports a
+/// No "DSP bridge": a backend without `FiLM` inputs (here an accelerator mock) never reports a
 /// stored profile as applied, and `voice_profile_supported` says so up front.
 #[test]
 fn backend_without_film_never_fakes_an_applied_profile() {

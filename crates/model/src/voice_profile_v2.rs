@@ -362,9 +362,10 @@ mod tests {
     use super::*;
     use crate::voice_profile::NUM_ERB_BANDS;
 
-    pub(crate) fn unit_embedding(seed: f32) -> SpeakerEmbedding {
-        let raw: Vec<f32> = (0..SPEAKER_EMBEDDING_DIM)
-            .map(|i| ((i as f32 + 1.0) * seed).sin())
+    pub fn unit_embedding(seed: f32) -> SpeakerEmbedding {
+        let raw: Vec<f32> = (1_u16..)
+            .take(SPEAKER_EMBEDDING_DIM)
+            .map(|n| (f32::from(n) * seed).sin())
             .collect();
         SpeakerEmbedding::from_raw_normalizing(&raw).expect("embedding")
     }
@@ -494,6 +495,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp, clippy::suboptimal_flops)] // exact zeros/copies are the assertion
     fn scaled_embedding_follows_intensity() {
         let e = unit_embedding(0.3);
         assert!(e.scaled(0).iter().all(|v| *v == 0.0));

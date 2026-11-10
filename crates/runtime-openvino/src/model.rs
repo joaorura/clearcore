@@ -9,6 +9,9 @@ use crate::ffi::{
 };
 use crate::infer::OpenVinoInferRequest;
 
+/// Port name and dimensions (`None` = dynamic).
+pub type PortShape = (String, Vec<Option<i64>>);
+
 /// Safe wrapper for an uncompiled OpenVINO model (IR / ONNX representation).
 pub struct OpenVinoModel {
     ptr: *mut ov_model_t,
@@ -80,7 +83,7 @@ impl OpenVinoModel {
 
     /// Name and dimensions (`None` = dynamic) of every input (`outputs == false`) or output
     /// port, in port order.
-    pub fn ports(&self, outputs: bool) -> Result<Vec<(String, Vec<Option<i64>>)>, OpenVinoError> {
+    pub fn ports(&self, outputs: bool) -> Result<Vec<PortShape>, OpenVinoError> {
         let mut count = 0usize;
         let status = unsafe {
             if outputs {
