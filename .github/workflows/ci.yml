@@ -44,7 +44,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy
-        continue-on-error: true # TEMP-DIAG
         run: |
           # deep_filter_fork is a vendored path dependency (an implicit workspace member) whose
           # `dataset` feature needs hdf5/hound, which are not declared; --all-features cannot build it.
