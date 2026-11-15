@@ -1,0 +1,128 @@
+{
+  "target_spk": "cv27-pt:9245aaf57befadc7d5f135ea532706e93dacd7db51783ebaff49ab977c6c1ead9fdbb2b7332e1ce4a76f518605a032212d8dfa9fe118ddf2f0254c312ba3cd6f",
+  "recipe": "matrix|n1|sir+0|lv-45|silent|overlap#006",
+  "snr_db": 10.0,
+  "target_absent": false,
+  "nogate": {
+    "frames": 500,
+    "max_abs_lsnr_db": 1.9788742065429688e-05,
+    "max_abs_m": 2.0563602447509766e-06,
+    "max_abs_coefs": 3.0994724511401728e-06,
+    "max_abs_q": 5.364418029785156e-07,
+    "max_abs_gate": 0.0,
+    "stage_mismatch_frames": 0,
+    "audio_snr_db": 126.29565609519732,
+    "audio_max_abs": 2.7008354663848877e-08,
+    "files": {
+      "frames": 500,
+      "lsnr_nogate": {
+        "file": "lsnr_nogate.f32",
+        "shape": [
+          500
+        ],
+        "dtype": "float32-le"
+      },
+      "q_nogate": {
+        "file": "q_nogate.f32",
+        "shape": [
+          500
+        ],
+        "dtype": "float32-le"
+      }
+    }
+  },
+  "gateC": {
+    "frames": 500,
+    "max_abs_lsnr_db": 1.9788742065429688e-05,
+    "max_abs_m": 2.0563602447509766e-06,
+    "max_abs_coefs": 3.0994724511401728e-06,
+    "max_abs_q": 5.364418029785156e-07,
+    "max_abs_gate": 0.0,
+    "stage_mismatch_frames": 0,
+    "audio_snr_db": 126.29576541175283,
+    "audio_max_abs": 2.7008354663848877e-08,
+    "files": {
+      "frames": 500,
+      "lsnr_gateC": {
+        "file": "lsnr_gateC.f32",
+        "shape": [
+          500
+        ],
+        "dtype": "float32-le"
+      },
+      "q_gateC": {
+        "file": "q_gateC.f32",
+        "shape": [
+          500
+        ],
+        "dtype": "float32-le"
+      },
+      "gate_gain": {
+        "file": "gate_gain.f32",
+        "shape": [
+          500
+        ],
+        "dtype": "float32-le"
+      }
+    }
+  },
+  "files": {
+    "input": "input.wav",
+    "enroll": "enroll.wav",
+    "speaker_embedding": {
+      "file": "speaker_embedding.f32",
+      "shape": [
+        1,
+        192
+      ],
+      "dtype": "float32-le"
+    },
+    "enr_feat_erb": {
+      "file": "enr_feat_erb.f32",
+      "shape": [
+        1,
+        4,
+        64,
+        32
+      ],
+      "dtype": "float32-le"
+    },
+    "enr_feat_spec": {
+      "file": "enr_feat_spec.f32",
+      "shape": [
+        1,
+        4,
+        64,
+        96,
+        2
+      ],
+      "dtype": "float32-le"
+    },
+    "enr_act": {
+      "file": "enr_act.f32",
+      "shape": [
+        1,
+        4,
+        64
+      ],
+      "dtype": "float32-le"
+    },
+    "tokens": {
+      "file": "tokens.f32",
+      "shape": [
+        1,
+        48,
+        128
+      ],
+      "dtype": "float32-le"
+    },
+    "level": {
+      "file": "level.f32",
+      "shape": [
+        500,
+        3
+      ],
+      "dtype": "float32-le"
+    }
+  }
+}

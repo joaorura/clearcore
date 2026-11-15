@@ -61,6 +61,16 @@ pub trait SpectralModelBackend: Send {
     fn reset(&mut self) -> Result<(), InferenceError>;
 }
 
+/// How the local SNR selects what [`DspPipeline`] applies to the spectrum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagePolicy {
+    /// libDF `DfTract` regimes: zero below `min_db_thresh`, unprocessed above
+    /// `max_db_erb_thresh`, ERB only above `max_db_df_thresh`, else ERB + deep filter.
+    LibDf,
+    /// Zero below `min_db_thresh`, else ERB + deep filter (pDFNet3 Pro v7 manifest `gating`).
+    ZeroOrFull,
+}
+
 /// Configuration options for the DSP pipeline.
 ///
 /// The defaults equal `RuntimeParams::default()` of the libDF `DfTract` (post-filter off, no
@@ -181,8 +191,32 @@ impl DspPipeline {
         self.spec_buf.fill(Complex32::default());
     }
 
-    /// Step 1: Forward STFT and feature extraction from a time-domain frame.
+    /// Step 1: Forward STFT and feature extraction from a time-domain frame; the spectrum
+    /// enters the rolling rings right away (the frame the next synthesis enhances).
     pub fn step_analysis(
+        &mut self,
+        input: &AudioFrame,
+    ) -> Result<ExtractedFeatures, InferenceError> {
+        let features = self.analyze_detached(input)?;
+        self.push_spectrum(&features.spec_noisy);
+        Ok(features)
+    }
+
+    fn push_spectrum(&mut self, spec: &[Complex32]) {
+        if let Some(mut buf) = self.rolling_spec_x.pop_front() {
+            buf.copy_from_slice(spec);
+            self.rolling_spec_x.push_back(buf);
+        }
+        if let Some(mut buf) = self.rolling_spec_y.pop_front() {
+            buf.copy_from_slice(spec);
+            self.rolling_spec_y.push_back(buf);
+        }
+    }
+
+    /// Forward STFT and features only: the rolling rings are NOT updated. For a model whose
+    /// prediction belongs to an older frame (pDFNet3 Pro v7): the caller keeps the spectrum and
+    /// hands it back to [`Self::synthesize_delayed`] when the prediction for it is ready.
+    pub fn analyze_detached(
         &mut self,
         input: &AudioFrame,
     ) -> Result<ExtractedFeatures, InferenceError> {
@@ -194,13 +228,6 @@ impl DspPipeline {
 
         let mut spec_current = vec![Complex32::default(); N_FREQS];
         self.state.analysis(input.as_slice(), &mut spec_current);
-
-        // Update rolling spectra buffers
-        self.rolling_spec_x.pop_front();
-        self.rolling_spec_x.push_back(spec_current.clone());
-
-        self.rolling_spec_y.pop_front();
-        self.rolling_spec_y.push_back(spec_current.clone());
 
         // Extract ERB band energy features
         let mut feat_erb = [0.0f32; DEFAULT_NB_ERB];
@@ -234,8 +261,14 @@ impl DspPipeline {
     /// Evaluates which stages to execute based on local SNR.
     /// Returns (`apply_gains`, `apply_gain_zeros`, `apply_df`).
     pub fn apply_stages(&self, lsnr: f32) -> (bool, bool, bool) {
+        self.stages_for(lsnr, StagePolicy::LibDf)
+    }
+
+    fn stages_for(&self, lsnr: f32, policy: StagePolicy) -> (bool, bool, bool) {
         if lsnr < self.config.min_db_thresh {
             (false, true, false)
+        } else if policy == StagePolicy::ZeroOrFull {
+            (true, false, true)
         } else if lsnr > self.config.max_db_erb_thresh {
             (false, false, false)
         } else if lsnr > self.config.max_db_df_thresh {
@@ -250,8 +283,43 @@ impl DspPipeline {
         &mut self,
         output_pred: &ModelFrameOutput,
     ) -> Result<AudioFrame, InferenceError> {
-        self.validate_prediction(output_pred)?;
-        let (apply_gains, apply_gain_zeros, apply_df) = self.apply_stages(output_pred.lsnr);
+        self.synthesize(output_pred, StagePolicy::LibDf, 1.0)
+    }
+
+    /// Pushes `spec` (a spectrum returned earlier by [`Self::analyze_detached`]) into the rolling
+    /// rings and synthesizes one hop for it, exactly as [`Self::step_synthesis`] does for the
+    /// current frame, with the stage `policy` and the enhanced spectrum scaled by `gain` (the
+    /// silence gate) before the iSTFT.
+    pub fn synthesize_delayed(
+        &mut self,
+        spec: &[Complex32],
+        output_pred: &ModelFrameOutput,
+        policy: StagePolicy,
+        gain: f32,
+    ) -> Result<AudioFrame, InferenceError> {
+        if spec.len() != N_FREQS {
+            return Err(InferenceError::InputContract(format!(
+                "delayed spectrum holds {} bins, expected {N_FREQS}",
+                spec.len()
+            )));
+        }
+        if !gain.is_finite() || gain < 0.0 {
+            return Err(InferenceError::InputContract(
+                "output gain must be finite and non-negative".to_owned(),
+            ));
+        }
+        self.push_spectrum(spec);
+        self.synthesize(output_pred, policy, gain)
+    }
+
+    fn synthesize(
+        &mut self,
+        output_pred: &ModelFrameOutput,
+        policy: StagePolicy,
+        gain: f32,
+    ) -> Result<AudioFrame, InferenceError> {
+        self.validate_prediction(output_pred, policy)?;
+        let (apply_gains, apply_gain_zeros, apply_df) = self.stages_for(output_pred.lsnr, policy);
 
         // Spectrum to enhance is at index (DEFAULT_DF_ORDER - 1) in rolling_spec_y
         let target_idx = DEFAULT_DF_ORDER.saturating_sub(1);
@@ -306,6 +374,13 @@ impl DspPipeline {
             }
         }
 
+        // Output gain (silence gate); exactly 1.0 leaves the spectrum bit-identical.
+        if gain != 1.0 {
+            for bin in &mut self.spec_buf {
+                *bin *= gain;
+            }
+        }
+
         // Inverse STFT synthesis
         let mut out_frame = [0.0f32; HOP_SAMPLES];
         self.state.synthesis(&mut self.spec_buf, &mut out_frame);
@@ -328,7 +403,11 @@ impl DspPipeline {
 
     /// Fail-closed contract with the model: every stage the local SNR calls for must come with
     /// its data, otherwise the noisy spectrum would silently reach the output.
-    fn validate_prediction(&self, prediction: &ModelFrameOutput) -> Result<(), InferenceError> {
+    fn validate_prediction(
+        &self,
+        prediction: &ModelFrameOutput,
+        policy: StagePolicy,
+    ) -> Result<(), InferenceError> {
         let missing = |what: &str| {
             InferenceError::InferenceExecution(format!(
                 "model returned no {what} for a stage that requires them"
@@ -339,7 +418,7 @@ impl DspPipeline {
                 "model returned a non-finite local SNR".to_owned(),
             ));
         }
-        let (apply_gains, _, apply_df) = self.apply_stages(prediction.lsnr);
+        let (apply_gains, _, apply_df) = self.stages_for(prediction.lsnr, policy);
         if apply_gains && prediction.erb_gains.is_none() {
             return Err(missing("ERB gains"));
         }

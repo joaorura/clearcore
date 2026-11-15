@@ -23,6 +23,8 @@ pub mod ort_graph;
 pub mod pdfnet3_bundle;
 #[cfg(any(feature = "tract", feature = "ort"))]
 pub mod pdfnet3_dev;
+#[cfg(any(feature = "tract", feature = "ort"))]
+pub mod pdfnet3_v7;
 pub mod profile_store;
 pub mod resample;
 pub mod speaker_conditioning;

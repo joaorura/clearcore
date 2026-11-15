@@ -1,0 +1,399 @@
+{
+  "cases": {
+    "alvo_interf_sir0_snr10": {
+      "target_spk": "cv27-pt:9245aaf57befadc7d5f135ea532706e93dacd7db51783ebaff49ab977c6c1ead9fdbb2b7332e1ce4a76f518605a032212d8dfa9fe118ddf2f0254c312ba3cd6f",
+      "recipe": "matrix|n1|sir+0|lv-45|silent|overlap#006",
+      "snr_db": 10.0,
+      "target_absent": false,
+      "nogate": {
+        "frames": 500,
+        "max_abs_lsnr_db": 1.9788742065429688e-05,
+        "max_abs_m": 2.0563602447509766e-06,
+        "max_abs_coefs": 3.0994724511401728e-06,
+        "max_abs_q": 5.364418029785156e-07,
+        "max_abs_gate": 0.0,
+        "stage_mismatch_frames": 0,
+        "audio_snr_db": 126.29565609519732,
+        "audio_max_abs": 2.7008354663848877e-08,
+        "files": {
+          "frames": 500,
+          "lsnr_nogate": {
+            "file": "lsnr_nogate.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "q_nogate": {
+            "file": "q_nogate.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          }
+        }
+      },
+      "gateC": {
+        "frames": 500,
+        "max_abs_lsnr_db": 1.9788742065429688e-05,
+        "max_abs_m": 2.0563602447509766e-06,
+        "max_abs_coefs": 3.0994724511401728e-06,
+        "max_abs_q": 5.364418029785156e-07,
+        "max_abs_gate": 0.0,
+        "stage_mismatch_frames": 0,
+        "audio_snr_db": 126.29576541175283,
+        "audio_max_abs": 2.7008354663848877e-08,
+        "files": {
+          "frames": 500,
+          "lsnr_gateC": {
+            "file": "lsnr_gateC.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "q_gateC": {
+            "file": "q_gateC.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "gate_gain": {
+            "file": "gate_gain.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          }
+        }
+      },
+      "files": {
+        "input": "input.wav",
+        "enroll": "enroll.wav",
+        "speaker_embedding": {
+          "file": "speaker_embedding.f32",
+          "shape": [
+            1,
+            192
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_feat_erb": {
+          "file": "enr_feat_erb.f32",
+          "shape": [
+            1,
+            4,
+            64,
+            32
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_feat_spec": {
+          "file": "enr_feat_spec.f32",
+          "shape": [
+            1,
+            4,
+            64,
+            96,
+            2
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_act": {
+          "file": "enr_act.f32",
+          "shape": [
+            1,
+            4,
+            64
+          ],
+          "dtype": "float32-le"
+        },
+        "tokens": {
+          "file": "tokens.f32",
+          "shape": [
+            1,
+            48,
+            128
+          ],
+          "dtype": "float32-le"
+        },
+        "level": {
+          "file": "level.f32",
+          "shape": [
+            500,
+            3
+          ],
+          "dtype": "float32-le"
+        }
+      }
+    },
+    "alvo_snr0": {
+      "target_spk": "cv27-pt:2b787a64144974baeaee01fd6ba589745a3306eb4bcd4cdac1f94270109cc8db55ba244e108b06edc46b5e66c5c2b144a3ae58e53c801a34bac788aea7b7f259",
+      "recipe": "matrix|n0|sirna|lv-45|silent|overlap#000",
+      "snr_db": 0.0,
+      "target_absent": false,
+      "nogate": {
+        "frames": 500,
+        "max_abs_lsnr_db": 1.8596649169921875e-05,
+        "max_abs_m": 1.7583370208740234e-06,
+        "max_abs_coefs": 1.7287043192482088e-06,
+        "max_abs_q": 4.172325134277344e-07,
+        "max_abs_gate": 0.0,
+        "stage_mismatch_frames": 0,
+        "audio_snr_db": 127.79706591877486,
+        "audio_max_abs": 1.3271346688270569e-08,
+        "files": {
+          "frames": 500,
+          "lsnr_nogate": {
+            "file": "lsnr_nogate.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "q_nogate": {
+            "file": "q_nogate.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          }
+        }
+      },
+      "gateC": {
+        "frames": 500,
+        "max_abs_lsnr_db": 1.8596649169921875e-05,
+        "max_abs_m": 1.7583370208740234e-06,
+        "max_abs_coefs": 1.7287043192482088e-06,
+        "max_abs_q": 4.172325134277344e-07,
+        "max_abs_gate": 0.0,
+        "stage_mismatch_frames": 0,
+        "audio_snr_db": 127.79706591877486,
+        "audio_max_abs": 1.3271346688270569e-08,
+        "files": {
+          "frames": 500,
+          "lsnr_gateC": {
+            "file": "lsnr_gateC.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "q_gateC": {
+            "file": "q_gateC.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "gate_gain": {
+            "file": "gate_gain.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          }
+        }
+      },
+      "files": {
+        "input": "input.wav",
+        "enroll": "enroll.wav",
+        "speaker_embedding": {
+          "file": "speaker_embedding.f32",
+          "shape": [
+            1,
+            192
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_feat_erb": {
+          "file": "enr_feat_erb.f32",
+          "shape": [
+            1,
+            4,
+            64,
+            32
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_feat_spec": {
+          "file": "enr_feat_spec.f32",
+          "shape": [
+            1,
+            4,
+            64,
+            96,
+            2
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_act": {
+          "file": "enr_act.f32",
+          "shape": [
+            1,
+            4,
+            64
+          ],
+          "dtype": "float32-le"
+        },
+        "tokens": {
+          "file": "tokens.f32",
+          "shape": [
+            1,
+            48,
+            128
+          ],
+          "dtype": "float32-le"
+        },
+        "level": {
+          "file": "level.f32",
+          "shape": [
+            500,
+            3
+          ],
+          "dtype": "float32-le"
+        }
+      }
+    },
+    "so_interf_snr20": {
+      "target_spk": "cv27-pt:9245aaf57befadc7d5f135ea532706e93dacd7db51783ebaff49ab977c6c1ead9fdbb2b7332e1ce4a76f518605a032212d8dfa9fe118ddf2f0254c312ba3cd6f",
+      "recipe": "matrix|n1|sir+0|lv-45|silent|overlap#006",
+      "snr_db": 20.0,
+      "target_absent": true,
+      "nogate": {
+        "frames": 500,
+        "max_abs_lsnr_db": 1.621246337890625e-05,
+        "max_abs_m": 7.748603820800781e-07,
+        "max_abs_coefs": 3.799803494075604e-07,
+        "max_abs_q": 2.682209014892578e-07,
+        "max_abs_gate": 0.0,
+        "stage_mismatch_frames": 0,
+        "audio_snr_db": 131.48819757755143,
+        "audio_max_abs": 4.0745362639427185e-10,
+        "files": {
+          "frames": 500,
+          "lsnr_nogate": {
+            "file": "lsnr_nogate.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "q_nogate": {
+            "file": "q_nogate.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          }
+        }
+      },
+      "gateC": {
+        "frames": 500,
+        "max_abs_lsnr_db": 1.621246337890625e-05,
+        "max_abs_m": 7.748603820800781e-07,
+        "max_abs_coefs": 3.799803494075604e-07,
+        "max_abs_q": 2.682209014892578e-07,
+        "max_abs_gate": 0.0,
+        "stage_mismatch_frames": 0,
+        "audio_snr_db": 131.7503565379517,
+        "audio_max_abs": 4.0745362639427185e-10,
+        "files": {
+          "frames": 500,
+          "lsnr_gateC": {
+            "file": "lsnr_gateC.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "q_gateC": {
+            "file": "q_gateC.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          },
+          "gate_gain": {
+            "file": "gate_gain.f32",
+            "shape": [
+              500
+            ],
+            "dtype": "float32-le"
+          }
+        }
+      },
+      "files": {
+        "input": "input.wav",
+        "enroll": "enroll.wav",
+        "speaker_embedding": {
+          "file": "speaker_embedding.f32",
+          "shape": [
+            1,
+            192
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_feat_erb": {
+          "file": "enr_feat_erb.f32",
+          "shape": [
+            1,
+            4,
+            64,
+            32
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_feat_spec": {
+          "file": "enr_feat_spec.f32",
+          "shape": [
+            1,
+            4,
+            64,
+            96,
+            2
+          ],
+          "dtype": "float32-le"
+        },
+        "enr_act": {
+          "file": "enr_act.f32",
+          "shape": [
+            1,
+            4,
+            64
+          ],
+          "dtype": "float32-le"
+        },
+        "tokens": {
+          "file": "tokens.f32",
+          "shape": [
+            1,
+            48,
+            128
+          ],
+          "dtype": "float32-le"
+        },
+        "level": {
+          "file": "level.f32",
+          "shape": [
+            500,
+            3
+          ],
+          "dtype": "float32-le"
+        }
+      }
+    }
+  },
+  "cost": {
+    "ort_1thread_ms_per_s_audio": {
+      "enroll_tokens": 3.946667533212652,
+      "enc_conv": 43.51051176781766,
+      "detector": 26.193043671082705,
+      "enc_post": 58.50253772805445,
+      "erb_dec": 30.585234332829714,
+      "df_dec": 28.995820198906586
+    },
+    "ort_1thread_ms_per_s_audio_total": 191.73381523190378
+  }
+}

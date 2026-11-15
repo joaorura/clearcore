@@ -1,8 +1,9 @@
 //! Manifest-described stateful model archives (pDFNet3 Pro v3 full and later).
 //!
 //! Layout: a flat `.tar.gz` with `manifest.json` and the ONNX graph(s) — one graph, or a split
-//! export (`enc.onnx`/`erb_dec.onnx`/`df_dec.onnx`) — optionally `config.ini` and text notes
-//! (`*.txt`, `*.md`). The manifest:
+//! export (`enc.onnx`/`erb_dec.onnx`/`df_dec.onnx`) — optionally `config.ini`, text notes
+//! (`*.txt`, `*.md`) and raw `f32` little-endian data (`*.f32`, e.g. the 48→16 kHz FIR of the
+//! pDFNet3 Pro v7; at most 1 MiB each, they must be pinned by the manifest). The manifest:
 //!
 //! ```json
 //! { "model": "pdfnet3-pro-v3-full", "hop": 480, "sample_rate": 48000,
@@ -30,6 +31,7 @@ use crate::InferenceError;
 pub const MANIFEST_FILE: &str = "manifest.json";
 const MAX_GRAPH_BYTES: u64 = 48 * 1024 * 1024;
 const MAX_TEXT_BYTES: u64 = 256 * 1024;
+const MAX_F32_BYTES: u64 = 1024 * 1024;
 const MAX_DECOMPRESSED_BYTES: u64 = 160 * 1024 * 1024;
 const MAX_ENTRIES: usize = 16;
 
@@ -256,6 +258,19 @@ pub struct StatefulModelFiles {
     pub manifest: StatefulManifest,
     /// `(graph name = file stem, ONNX bytes)` in archive order.
     pub graphs: Vec<(String, Vec<u8>)>,
+    /// `(file name, values)` of every `*.f32` member (little-endian `f32`), in archive order.
+    pub f32_members: Vec<(String, Vec<f32>)>,
+}
+
+impl StatefulModelFiles {
+    /// The values of the `*.f32` member `name`, if the archive has it.
+    #[must_use]
+    pub fn f32_member(&self, name: &str) -> Option<&[f32]> {
+        self.f32_members
+            .iter()
+            .find(|(file, _)| file == name)
+            .map(|(_, values)| values.as_slice())
+    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -331,6 +346,8 @@ pub fn read_manifest_archive(bytes: &[u8]) -> Result<StatefulModelFiles, Inferen
         seen.push(name.clone());
         let limit = if has_extension(&name, "onnx") {
             MAX_GRAPH_BYTES
+        } else if has_extension(&name, "f32") {
+            MAX_F32_BYTES
         } else if name == MANIFEST_FILE
             || name == "config.ini"
             || has_extension(&name, "txt")
@@ -352,6 +369,11 @@ pub fn read_manifest_archive(bytes: &[u8]) -> Result<StatefulModelFiles, Inferen
         if content.len() as u64 != expected {
             return Err(invalid("archive member is truncated"));
         }
+        if has_extension(&name, "f32") && content.len() % 4 != 0 {
+            return Err(invalid(
+                "f32 archive member is not a whole number of f32 values",
+            ));
+        }
         if name == MANIFEST_FILE {
             manifest_bytes = Some(content);
         } else if let Some(stem) = name.strip_suffix(".onnx") {
@@ -365,6 +387,12 @@ pub fn read_manifest_archive(bytes: &[u8]) -> Result<StatefulModelFiles, Inferen
     )?;
     if graphs.is_empty() {
         return Err(invalid("archive has no ONNX graph"));
+    }
+    // A raw data member is only accepted when the manifest pins it.
+    for (name, _) in texts.iter().filter(|(name, _)| has_extension(name, "f32")) {
+        if !manifest.sha256.iter().any(|(file, _)| file == name) {
+            return Err(invalid("f32 archive member is not pinned by the manifest"));
+        }
     }
     for (file, hex) in &manifest.sha256 {
         let graph = if file.is_empty() {
@@ -403,7 +431,22 @@ pub fn read_manifest_archive(bytes: &[u8]) -> Result<StatefulModelFiles, Inferen
         }
         graphs = named;
     }
-    Ok(StatefulModelFiles { manifest, graphs })
+    let f32_members = texts
+        .iter()
+        .filter(|(name, _)| has_extension(name, "f32"))
+        .map(|(name, bytes)| {
+            let values = bytes
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            (name.clone(), values)
+        })
+        .collect();
+    Ok(StatefulModelFiles {
+        manifest,
+        graphs,
+        f32_members,
+    })
 }
 
 #[cfg(test)]
@@ -502,6 +545,54 @@ mod tests {
         let bytes = archive(&[
             ("manifest.json", good.as_bytes()),
             ("sub/model.onnx", graph),
+        ]);
+        assert!(read_manifest_archive(&bytes).is_err());
+    }
+
+    #[test]
+    fn pinned_f32_members_are_decoded_and_unpinned_or_ragged_ones_refused() {
+        let graph = b"onnx-bytes".as_slice();
+        let coeffs: Vec<u8> = [0.5f32, -1.25, 3.0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let pinned = format!(
+            r#"{{"model":"m","hop":480,"sample_rate":48000,
+               "sha256":{{"model.onnx":"{}","fir.coeffs.f32":"{}"}}}}"#,
+            sha256_hex(graph),
+            sha256_hex(&coeffs)
+        );
+        let bytes = archive(&[
+            ("manifest.json", pinned.as_bytes()),
+            ("model.onnx", graph),
+            ("fir.coeffs.f32", &coeffs),
+        ]);
+        let files = read_manifest_archive(&bytes).unwrap();
+        assert_eq!(
+            files.f32_member("fir.coeffs.f32"),
+            Some(&[0.5f32, -1.25, 3.0][..])
+        );
+        assert_eq!(files.f32_member("other.f32"), None);
+
+        let unpinned = manifest(&sha256_hex(graph));
+        let bytes = archive(&[
+            ("manifest.json", unpinned.as_bytes()),
+            ("model.onnx", graph),
+            ("fir.coeffs.f32", &coeffs),
+        ]);
+        assert!(read_manifest_archive(&bytes).is_err());
+
+        let ragged = &coeffs[..5];
+        let pinned = format!(
+            r#"{{"model":"m","hop":480,"sample_rate":48000,
+               "sha256":{{"model.onnx":"{}","fir.coeffs.f32":"{}"}}}}"#,
+            sha256_hex(graph),
+            sha256_hex(ragged)
+        );
+        let bytes = archive(&[
+            ("manifest.json", pinned.as_bytes()),
+            ("model.onnx", graph),
+            ("fir.coeffs.f32", ragged),
         ]);
         assert!(read_manifest_archive(&bytes).is_err());
     }

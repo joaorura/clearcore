@@ -39,8 +39,18 @@ fn dims(outlet: &ort::value::Outlet) -> Vec<Option<i64>> {
 }
 
 impl OrtGraphSession {
-    /// Compiles `onnx` (already verified by the caller).
+    /// Compiles `onnx` (already verified by the caller), 2 intra-op threads.
     pub fn load(name: &str, onnx: &[u8]) -> Result<Self, InferenceError> {
+        Self::load_with_threads(name, onnx, 2)
+    }
+
+    /// Compiles `onnx` with `intra_threads` intra-op threads (1: the whole hop on the caller's
+    /// thread, as the pDFNet3 Pro v7 stream runs).
+    pub fn load_with_threads(
+        name: &str,
+        onnx: &[u8],
+        intra_threads: usize,
+    ) -> Result<Self, InferenceError> {
         let fail = |error: InferenceError| {
             InferenceError::ModelCorruption(format!(
                 "ONNX Runtime cannot load graph `{name}`: {error}"
@@ -52,7 +62,7 @@ impl OrtGraphSession {
                 b.with_optimization_level(GraphOptimizationLevel::Level3)
                     .map_err(ort_error)
             })
-            .and_then(|b| b.with_intra_threads(2).map_err(ort_error))
+            .and_then(|b| b.with_intra_threads(intra_threads).map_err(ort_error))
             .and_then(|b| b.with_inter_threads(1).map_err(ort_error))
             .and_then(|mut b| b.commit_from_memory(onnx).map_err(ort_error))
             .map_err(fail)?;
