@@ -41,7 +41,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
+        run: # deep_filter_fork is a vendored path dependency (an implicit workspace member) whose
+          # `dataset` feature needs hdf5/hound, which are not declared; --all-features cannot build it.
+          cargo clippy --workspace --exclude deep_filter_fork --all-targets --all-features --locked --offline -- -D warnings
       - name: Build PipeWire helper
         run: |
           meson setup platform/linux/helper/build platform/linux/helper
