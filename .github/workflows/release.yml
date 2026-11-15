@@ -525,6 +525,8 @@ jobs:
     needs: [build-linux-x64, build-linux-arm64, build-windows, build-windows-arm64, build-macos-arm64]
     runs-on: ubuntu-latest
     if: always() && !cancelled() && (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag_name != '' || github.event_name == 'workflow_dispatch')
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
     env:
       COPR_WEBHOOK_URL: ${{ secrets.COPR_WEBHOOK_URL }}
     steps:
@@ -532,6 +534,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Resolve Release Tag & Notes
+        id: resolve
         run: |
           set -euo pipefail
           RELEASE_TAG="${{ github.event.inputs.tag_name }}"
@@ -568,6 +571,7 @@ jobs:
           fi
 
           echo "TARGET_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
           echo "NOTES_PATH=${NOTES_FILE}" >> "$GITHUB_ENV"
 
       - name: Download all built artifacts
@@ -620,3 +624,38 @@ jobs:
         with:
           folder: repo-site
           branch: gh-pages
+
+  winget:
+    name: Publish to WinGet
+    needs: publish-github-release
+    # Runs for prereleases too; the release is already published at this point,
+    # so a WinGet failure must never fail the release run.
+    if: always() && !cancelled() && needs.publish-github-release.result == 'success'
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Check WINGET_TOKEN
+        id: token
+        shell: bash
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if [ -n "${WINGET_TOKEN}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=WinGet skipped::Secret WINGET_TOKEN is not set; skipping WinGet submission for ${{ needs.publish-github-release.outputs.release_tag }}."
+          fi
+
+      - name: Submit joaorura.Clearcore to winget-pkgs
+        if: steps.token.outputs.present == 'true'
+        # vedantmgoyal9/winget-releaser v2 (Komac), pinned by commit
+        uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54
+        with:
+          identifier: joaorura.Clearcore
+          release-tag: ${{ needs.publish-github-release.outputs.release_tag }}
+          # Only the NSIS x64 installer; Windows ARM64 ships as a portable zip, not an installer.
+          installers-regex: '^Clearcore-Setup\.exe$'
+          max-versions-to-keep: 0
+          fork-user: joaorura
+          token: ${{ secrets.WINGET_TOKEN }}
