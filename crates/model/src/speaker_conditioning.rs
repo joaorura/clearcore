@@ -26,6 +26,9 @@ pub struct SpeakerConditioning {
     /// 0-100. Only gates the speaker: 0 → `speaker_present = 0.0` (neutral voice), anything else
     /// → `1.0` with the whole embedding (binary, as the training mask; the same rule as the filter).
     pub intensity_percent: u8,
+    /// pDFNet3 Pro v7 speaker tokens (`enroll_tokens`, 48 x 128) of a v7 profile; `None` for a
+    /// profile built for the v3 model, which the v7 runtime refuses.
+    pub speaker_tokens: Option<std::sync::Arc<[f32]>>,
 }
 
 impl fmt::Debug for SpeakerConditioning {
@@ -36,6 +39,7 @@ impl fmt::Debug for SpeakerConditioning {
             .field("model_id", &self.model_id)
             .field("has_eq", &self.eq.is_some())
             .field("intensity_percent", &self.intensity_percent)
+            .field("has_tokens", &self.speaker_tokens.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -65,6 +69,14 @@ impl SpeakerConditioning {
         }
         if let Some(eq) = &self.eq {
             eq.validate()?;
+        }
+        if let Some(tokens) = &self.speaker_tokens
+            && (tokens.len() != crate::voice_profile_v2::SPEAKER_TOKENS_LEN
+                || tokens.iter().any(|v| !v.is_finite()))
+        {
+            return Err(invalid(
+                "speaker tokens must be 48 x 128 finite values".to_owned(),
+            ));
         }
         Ok(())
     }

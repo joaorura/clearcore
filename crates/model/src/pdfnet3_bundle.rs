@@ -47,6 +47,49 @@ pub const PDFNET3_PRO_V3_FULL_GRAPH_SHA256: [(&str, &str); 3] = [
         "42c5c8b610022125c88553a323e0566c2f9553ccaf5f466d3a637bc5bc2b9df4",
     ),
 ];
+/// pDFNet3 Pro **v7** (A2-300k) archive: the isolation model while a voice profile is active.
+///
+/// It keeps the enrolled voice and cuts the others; run by [`crate::pdfnet3_v7`] on tract (daemon) and
+/// ONNX Runtime (virtual microphone). Six graphs + the 48 → 16 kHz FIR of its level feature.
+/// Without a profile the Pro v3 full above keeps running (the v7 has no neutral mode).
+pub const PDFNET3_PRO_V7_FILE: &str = "pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz";
+/// SHA-256 of the whole [`PDFNET3_PRO_V7_FILE`] (14 175 123 bytes, handed off on 2026-11-15,
+/// checkpoint `runs/v7-A2/snapshots/ckpt-00006249.pt`).
+pub const PDFNET3_PRO_V7_SHA256: &str =
+    "b0f125d71d8764e3b73e91b667b2cb7aba1ef1e4b6987c53e9019958f5369608";
+/// Per-member SHA-256 of the v7 export (checked against its `manifest.json`).
+pub const PDFNET3_PRO_V7_MEMBER_SHA256: [(&str, &str); 7] = [
+    (
+        "detector.onnx",
+        "79abd235b1e828ddf7a91ca55b1736837fb76dbb644f968c4fbc26803f31c58c",
+    ),
+    (
+        "df_dec.onnx",
+        "6329548d0d3f3b9025b09f3dc0eb80b4a27a7476e2ee57dd19fce83c6dab2cbe",
+    ),
+    (
+        "enc_conv.onnx",
+        "860ddebbebee6652a60ad47d43a42d19df11ef471d2203873f3ec66b04fef204",
+    ),
+    (
+        "enc_post.onnx",
+        "3994f5eadeac2bb2cd53c835c536bb55f4d0d13807c2dbe7a5a8d5016a2169e5",
+    ),
+    (
+        "enroll_tokens.onnx",
+        "acbffc71d371f3e4dc8e39e6e8afb7b38444d030934a0cb7e6a9ac009c8b0b83",
+    ),
+    (
+        "erb_dec.onnx",
+        "8560d3e532bbaa33c32949233dff5ede36fc7ce4ea4937dcd3407156b1fb4333",
+    ),
+    (
+        "resampler-48k-16k-v1.coeffs.f32",
+        "d230da4dc7dd9ebbdee979dc33a11d3ee61cf2fe29477c768745442865fd7043",
+    ),
+];
+/// Asset id reported while the v7 runs.
+pub const PDFNET3_PRO_V7_ASSET_ID: &str = "pdfnet3-pro-v7";
 /// Sub-directory of the models directory that holds the enrollment model.
 pub const ENROLLMENT_BUNDLE_DIR: &str = "enrollment";
 /// Enrollment v3 model (speaker embedding of the Pro v3 full).
@@ -184,6 +227,42 @@ pub fn load_isolation_archive() -> Result<PdfNet3DevArchive, BundledModelError> 
     load_isolation_archive_from(&candidate_model_dirs())
 }
 
+/// Reads and verifies the bundled pDFNet3 Pro v7 export found over `dirs` (whole-file pin, then
+/// every member pin of [`PDFNET3_PRO_V7_MEMBER_SHA256`] against the manifest).
+pub fn load_v7_asset_from(
+    dirs: &[PathBuf],
+) -> Result<crate::pdfnet3_v7::V7Asset, BundledModelError> {
+    let archive = PdfNet3DevArchive::read_pinned(
+        &find_in(dirs, PDFNET3_PRO_V7_FILE).ok_or(BundledModelError::NotFound)?,
+        PDFNET3_PRO_V7_SHA256,
+        PDFNET3_PRO_V7_ASSET_ID,
+    )
+    .map_err(BundledModelError::Invalid)?;
+    let files = archive
+        .stateful_files()
+        .map_err(BundledModelError::Invalid)?;
+    let pinned = PDFNET3_PRO_V7_MEMBER_SHA256.iter().all(|(file, hex)| {
+        files
+            .manifest
+            .sha256
+            .iter()
+            .any(|(listed, digest)| listed == file && digest == hex)
+    });
+    if !pinned {
+        return Err(BundledModelError::Invalid(PdfNet3DevError::HashMismatch));
+    }
+    crate::pdfnet3_v7::V7Asset::from_files(files).map_err(|_| {
+        BundledModelError::Invalid(PdfNet3DevError::ArchiveInvalid(
+            "not a pDFNet3 Pro v7 export",
+        ))
+    })
+}
+
+/// [`load_v7_asset_from`] over [`candidate_model_dirs`].
+pub fn load_v7_asset() -> Result<crate::pdfnet3_v7::V7Asset, BundledModelError> {
+    load_v7_asset_from(&candidate_model_dirs())
+}
+
 fn load_from(
     dirs: &[PathBuf],
     file: &str,
@@ -238,6 +317,14 @@ mod tests {
         let backend = archive.instantiate_stateful_ort(CpuProfile::Avx2Minimum)?;
         assert!(backend.supports_speaker_embedding());
         assert_eq!(backend.descriptor().asset_id, PDFNET3_PRO_ASSET_ID);
+        Ok(())
+    }
+
+    #[test]
+    fn bundled_v7_archive_loads_and_matches_its_pins() -> TestResult {
+        let asset = load_v7_asset_from(&[repository_models()])?;
+        assert_eq!(asset.files.manifest.model, crate::pdfnet3_v7::V7_MODEL_ID);
+        assert_eq!(asset.fir.len(), crate::pdfnet3_v7::V7_FIR_TAPS);
         Ok(())
     }
 

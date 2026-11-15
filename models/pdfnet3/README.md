@@ -1,6 +1,10 @@
-# pDFNet3 Pro v3 completo (modelo de isolamento embutido)
+# pDFNet3 Pro v3 completo e Pro v7 (modelos de isolamento embutidos)
 
-Único modelo de isolamento distribuído nos pacotes do Clearcore: o pDFNet3 Pro v3 **completo** (memória de
+Sem perfil de voz (ou com intensidade 0) roda o Pro v3 completo em modo neutro; com um perfil v7
+(embedding + tokens do `enroll_tokens`) roda o Pro v7. Um perfil antigo, sem os tokens do v7, é
+recusado com erro no log (voz neutra) e precisa de um novo cadastro.
+
+O modelo de isolamento sem perfil é o pDFNet3 Pro v3 **completo** (memória de
 locutor + cross-attention), condicionado por `speaker_embedding` [1,192] (ECAPA, L2) e `speaker_present` [1]
 (binário: 0 com intensidade 0 ou sem perfil, 1 caso contrário). O DFNet3 base (`models/stateful/`,
 `vendor/approved/`) não é distribuído e não há fallback para ele: se o arquivo faltar ou o SHA-256 não bater,
@@ -10,6 +14,7 @@ o daemon não carrega modelo nenhum e o `GetStatus` informa `isolation_model: "n
 | Arquivo | Bytes | SHA-256 (arquivo inteiro) | Quem usa |
 |---|---:|---|---|
 | `pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz` | 12375900 | `c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee` | UM export stateful com `manifest.json` (`enc`/`erb_dec`/`df_dec`, opset 12, `S = 1`) para todos os runtimes: daemon (tract ou OpenVINO, executor genérico, `pdfnet3_bundle::load_isolation_archive`) e `libclearcore_filter` (ONNX Runtime ou OpenVINO) |
+| `pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz` | 14175123 | `b0f125d71d8764e3b73e91b667b2cb7aba1ef1e4b6987c53e9019958f5369608` | pDFNet3 Pro **v7** A2-300k com gate de silêncio C: o modelo do **modo isolamento** quando há perfil de voz v7 (intensidade > 0). Seis grafos (`enroll_tokens`, `enc_conv`, `detector`, `enc_post`, `erb_dec`, `df_dec`) + FIR 48→16 kHz (`.f32`); contrato em `docs/pdfnet3-pro-v7-stream.md`. Daemon: tract (`pdfnet3_v7::V7IsolationBackend`); filtro: ONNX Runtime, 1 thread. Latência total 240 ms |
 
 O hash do arquivo e os de cada grafo estão fixados em `crates/model/src/pdfnet3_bundle.rs` e conferidos também
 por `crates/app-tauri/scripts/package-app.mjs` (o build do pacote falha se não baterem) e pelo workflow de

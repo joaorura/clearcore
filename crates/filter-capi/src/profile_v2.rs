@@ -12,8 +12,14 @@
 //!   "model_id": "pdfnet3-pro-v3-full", "model_version": 3, "embedding_dim": 192,
 //!   "speaker_embedding_b64": "<192 x f32 little-endian, standard base64 with padding>",
 //!   "eq": { "gains_db": [32 floats] } | null,
+//!   "speaker_tokens_b64": "<48 x 128 f32 LE, base64>",   // pDFNet3 Pro v7 profiles only
 //!   "integrity_hash": "<sha256 hex of serde_json::to_vec of every field above, in this order>" }
 //! ```
+//!
+//! `model_id` `pdfnet3-pro-v7-a2-300k` (version 7, with tokens) or `pdfnet3-pro-v3-full`
+//! (version 3, earlier releases, no tokens; the field is absent from the JSON and the hash). Only
+//! a v7 profile turns the v7 isolation on; a v3 one is refused (logged) and the voice stays
+//! neutral.
 
 use std::path::Path;
 
@@ -27,6 +33,9 @@ use crate::engine::SPEAKER_EMBEDDING_DIM;
 pub const PROFILE_V2_SCHEMA_VERSION: u32 = 2;
 pub const PDFNET3_PRO_V3_MODEL_ID: &str = "pdfnet3-pro-v3-full";
 pub const PDFNET3_PRO_V3_MODEL_VERSION: u32 = 3;
+pub const PDFNET3_PRO_V7_MODEL_ID: &str = realtime_noise_model::pdfnet3_v7::V7_MODEL_ID;
+pub const PDFNET3_PRO_V7_MODEL_VERSION: u32 = 7;
+pub const SPEAKER_TOKENS_LEN: usize = realtime_noise_model::pdfnet3_v7::V7_TOKENS_LEN;
 /// Largest deviation of the embedding L2 norm from 1.0 accepted.
 pub const EMBEDDING_NORM_TOLERANCE: f32 = 1e-3;
 const MAX_PROFILE_BYTES: u64 = 1024 * 1024;
@@ -42,6 +51,8 @@ pub struct VoiceProfileV2 {
     pub embedding_dim: u32,
     pub speaker_embedding_b64: String,
     pub eq: Option<BandGains>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_tokens_b64: Option<String>,
     pub integrity_hash: String,
 }
 
@@ -56,6 +67,8 @@ struct CanonicalV2<'a> {
     embedding_dim: u32,
     speaker_embedding_b64: &'a str,
     eq: &'a Option<BandGains>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speaker_tokens_b64: Option<&'a str>,
 }
 
 fn l2_norm(values: &[f32]) -> f32 {
@@ -129,6 +142,7 @@ impl VoiceProfileV2 {
             embedding_dim: 192,
             speaker_embedding_b64: embedding_to_base64(embedding),
             eq,
+            speaker_tokens_b64: None,
             integrity_hash: String::new(),
         };
         profile.integrity_hash = profile.compute_integrity_hash()?;
@@ -147,6 +161,7 @@ impl VoiceProfileV2 {
             embedding_dim: self.embedding_dim,
             speaker_embedding_b64: &self.speaker_embedding_b64,
             eq: &self.eq,
+            speaker_tokens_b64: self.speaker_tokens_b64.as_deref(),
         })
         .map_err(|e| e.to_string())?;
         Ok(format!("{:x}", Sha256::digest(&bytes)))
@@ -157,16 +172,64 @@ impl VoiceProfileV2 {
         embedding_from_base64(&self.speaker_embedding_b64)
     }
 
+    /// Reference writer of a v7 profile (tests): the v3 fields plus the speaker tokens.
+    pub fn new_v7(
+        id: &str,
+        name: &str,
+        created_at_utc: &str,
+        embedding: &[f32],
+        tokens: &[f32],
+        eq: Option<BandGains>,
+    ) -> Result<Self, String> {
+        let mut profile = Self::new(id, name, created_at_utc, embedding, eq)?;
+        profile.model_id = PDFNET3_PRO_V7_MODEL_ID.to_owned();
+        profile.model_version = PDFNET3_PRO_V7_MODEL_VERSION;
+        profile.speaker_tokens_b64 = Some(embedding_to_base64(tokens));
+        profile.integrity_hash = profile.compute_integrity_hash()?;
+        profile.verify()?;
+        Ok(profile)
+    }
+
+    /// The v7 speaker tokens (48 x 128, finite), or `None` for a v3 profile.
+    pub fn speaker_tokens(&self) -> Result<Option<Vec<f32>>, String> {
+        let Some(text) = &self.speaker_tokens_b64 else {
+            return Ok(None);
+        };
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(text.trim())
+            .map_err(|e| format!("speaker_tokens_b64: {e}"))?;
+        if bytes.len() != SPEAKER_TOKENS_LEN * 4 {
+            return Err(format!(
+                "speaker_tokens_b64 decodes to {} bytes, want {}",
+                bytes.len(),
+                SPEAKER_TOKENS_LEN * 4
+            ));
+        }
+        let tokens: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        if tokens.iter().any(|v| !v.is_finite()) {
+            return Err("speaker tokens hold a non-finite value".to_owned());
+        }
+        Ok(Some(tokens))
+    }
+
     /// Version, model id/version, embedding dimension and value, EQ range, integrity hash.
     pub fn verify(&self) -> Result<(), String> {
         if self.version != PROFILE_V2_SCHEMA_VERSION {
             return Err(format!("schema version {}", self.version));
         }
-        if self.model_id != PDFNET3_PRO_V3_MODEL_ID
-            || self.model_version != PDFNET3_PRO_V3_MODEL_VERSION
-        {
+        let v3 = self.model_id == PDFNET3_PRO_V3_MODEL_ID
+            && self.model_version == PDFNET3_PRO_V3_MODEL_VERSION
+            && self.speaker_tokens_b64.is_none();
+        let v7 = self.model_id == PDFNET3_PRO_V7_MODEL_ID
+            && self.model_version == PDFNET3_PRO_V7_MODEL_VERSION
+            && self.speaker_tokens_b64.is_some();
+        if !(v3 || v7) {
             return Err("profile belongs to another model".to_owned());
         }
+        self.speaker_tokens()?;
         if usize::try_from(self.embedding_dim) != Ok(SPEAKER_EMBEDDING_DIM) {
             return Err(format!("embedding_dim {}", self.embedding_dim));
         }

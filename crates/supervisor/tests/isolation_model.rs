@@ -36,6 +36,7 @@ fn conditioned(id: &str) -> SpeakerConditioning {
         speaker_embedding,
         eq: None,
         intensity_percent: 100,
+        speaker_tokens: None,
     }
 }
 

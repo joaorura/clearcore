@@ -17,7 +17,11 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::print_stdout
+    clippy::print_stdout,
+    clippy::float_cmp,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
 )]
 
 use std::path::{Path, PathBuf};

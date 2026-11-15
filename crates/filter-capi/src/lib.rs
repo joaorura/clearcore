@@ -8,6 +8,10 @@
 //!   the v2 stateful Pro (`FiLM`) until v3 is installed — see [`select`].
 //! - Runtime: ONNX Runtime CPU, or OpenVINO NPU → GPU → CPU per the `backend` setting with ONNX
 //!   Runtime as hot standby on failure or overrun — see [`engine`].
+//! - Isolation with a voice profile: the pDFNet3 Pro v7 (A2-300k, gate C) on ONNX Runtime CPU (1
+//!   thread), from `<models>/pdfnet3/pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz` (pinned):
+//!   a v7 profile (with speaker tokens) at intensity > 0 switches every hop to it (240 ms of
+//!   latency instead of 30 ms); a profile without tokens is refused (logged, neutral voice).
 //! - Profile: `active_profile.json` v2 (speaker embedding + EQ) — a v1 (`FiLM`) file is outdated
 //!   for the v3 model (neutral voice); the EQ is applied before the iSTFT — see [`core`],
 //!   [`profile_v2`] and `docs/virtual-mic-filter.md`.
@@ -34,6 +38,8 @@ use studio_dsp::{Preset, StudioChain, StudioControl};
 use crate::core::{ModelKind, NeuralCore};
 use crate::engine::{Conditioning, LatencyPolicy};
 use crate::profile_v2::StoredProfile;
+use realtime_noise_model::GraphSession;
+use realtime_noise_model::pdfnet3_v7::{V7_LATENCY_SAMPLES, V7_MODEL_ID, V7Stream};
 
 pub use crate::select::{ENV_DEV_STATEFUL_ASSET, ENV_DEV_STATEFUL_SHA256};
 
@@ -44,6 +50,36 @@ pub struct ClearcoreFilter {
     applied_preset: Preset,
     applied_leveler: u8,
     active_profile_id: Option<String>,
+    /// pDFNet3 Pro v7 stream (`None`: archive missing or failed to load, logged at creation).
+    v7: Option<V7Stream<Box<dyn GraphSession>>>,
+    /// The v7 processes the hops (a v7 profile is applied at intensity > 0).
+    v7_active: bool,
+}
+
+/// Loads the bundled pDFNet3 Pro v7 on ONNX Runtime (1 intra-op thread), or logs why not.
+fn load_v7(repo_root: &Path) -> Option<V7Stream<Box<dyn GraphSession>>> {
+    let dirs = select::model_dirs(repo_root);
+    let result = realtime_noise_model::pdfnet3_bundle::load_v7_asset_from(&dirs)
+        .map_err(|e| e.code().to_owned())
+        .and_then(|asset| {
+            asset
+                .stream(|name: &str, bytes: &[u8]| {
+                    realtime_noise_model::ort_graph::OrtGraphSession::load_with_threads(
+                        name, bytes, 1,
+                    )
+                    .map(|s| Box::new(s) as Box<dyn GraphSession>)
+                })
+                .map_err(|e| format!("{e:?}"))
+        });
+    match result {
+        Ok(stream) => Some(stream),
+        Err(reason) => {
+            eprintln!(
+                "[clearcore_filter] pDFNet3 Pro v7 unavailable ({reason}); voice profiles off"
+            );
+            None
+        }
+    }
 }
 
 /// What [`ClearcoreFilter::apply_profile`] did with a profile.
@@ -74,12 +110,65 @@ impl ClearcoreFilter {
             applied_preset,
             applied_leveler,
             active_profile_id: None,
+            v7: load_v7(repo_root),
+            v7_active: false,
         })
+    }
+
+    /// Whether the v7 processes the hops now.
+    #[must_use]
+    pub const fn v7_active(&self) -> bool {
+        self.v7_active
+    }
+
+    /// Drops the v7 (tests of the v3 conditioning path, i.e. a package without the v7 archive).
+    #[doc(hidden)]
+    pub fn disable_v7(&mut self) {
+        self.v7 = None;
+        self.v7_active = false;
+    }
+
+    /// Whether the pDFNet3 Pro v7 is loaded.
+    #[must_use]
+    pub const fn v7_loaded(&self) -> bool {
+        self.v7.is_some()
+    }
+
+    /// Switches the hops to the v7 conditioned on a v7 profile (fresh stream when it was off).
+    fn activate_v7(
+        &mut self,
+        embedding: &[f32],
+        tokens: &[f32],
+        eq: Option<&realtime_noise_model::BandGains>,
+    ) -> Result<(), String> {
+        let Some(v7) = &mut self.v7 else {
+            return Err("pDFNet3 Pro v7 not loaded".to_owned());
+        };
+        let factors = match eq {
+            Some(gains) if !gains.is_neutral() => Some(
+                realtime_noise_model::spectral_eq::bin_factors(gains, v7.erb_band_widths())
+                    .map_err(|e| format!("{e:?}"))?,
+            ),
+            _ => None,
+        };
+        v7.set_profile(embedding, tokens)
+            .map_err(|e| format!("{e:?}"))?;
+        v7.set_spectral_eq_factors(factors)
+            .map_err(|e| format!("{e:?}"))?;
+        if !self.v7_active {
+            v7.reset();
+        }
+        self.v7_active = true;
+        Ok(())
     }
 
     /// One hop through the neural core and the studio chain.
     pub fn process(&mut self, input: &AudioFrame) -> Result<AudioFrame, String> {
-        let mut out = self.core.process(input).map_err(|e| format!("{e:?}"))?;
+        let mut out = match (&mut self.v7, self.v7_active) {
+            (Some(v7), true) => v7.process(input),
+            _ => self.core.process(input),
+        }
+        .map_err(|e| format!("{e:?}"))?;
         let preset = self.control.preset();
         if preset != self.applied_preset {
             self.chain.set_preset(preset);
@@ -100,7 +189,12 @@ impl ClearcoreFilter {
 
     #[must_use]
     pub fn algorithmic_latency_samples(&self) -> u32 {
-        ALGORITHM_LATENCY_SAMPLES + self.chain.latency_samples()
+        let model = if self.v7_active {
+            V7_LATENCY_SAMPLES
+        } else {
+            ALGORITHM_LATENCY_SAMPLES
+        };
+        model + self.chain.latency_samples()
     }
 
     #[must_use]
@@ -131,6 +225,32 @@ impl ClearcoreFilter {
         profile: &StoredProfile,
         intensity: u8,
     ) -> Result<ProfileOutcome, String> {
+        if let (ModelKind::V3Full, StoredProfile::V2(p)) = (self.core.kind, profile)
+            && self.v7.is_some()
+        {
+            // The v7 is the isolation model with a profile; the v3 runs neutral (intensity 0
+            // keeps the profile EQ on it, as before).
+            let Some(tokens) = p.speaker_tokens()? else {
+                eprintln!(
+                    "[clearcore_filter] voice profile built for {} has no pDFNet3 Pro v7 data \
+                     (speaker tokens): not applied, record a new voice profile",
+                    p.model_id
+                );
+                self.clear_profile()?;
+                return Ok(ProfileOutcome::Outdated);
+            };
+            if intensity == 0 {
+                self.set_profile_parts(p.eq.clone(), Conditioning::default())?;
+                self.v7_active = false;
+            } else {
+                let embedding = p.speaker_embedding()?;
+                self.activate_v7(&embedding, &tokens, p.eq.as_ref())?;
+                // Neutral v3 underneath, ready for the switch back.
+                let _ = self.set_profile_parts(None, Conditioning::default());
+            }
+            self.active_profile_id = Some(profile.id().to_owned());
+            return Ok(ProfileOutcome::Applied);
+        }
         let (eq, conditioning) = match (self.core.kind, profile) {
             (ModelKind::V3Full, StoredProfile::V2(p)) => (
                 p.eq.clone(),
@@ -164,6 +284,7 @@ impl ClearcoreFilter {
     /// Neutral conditioning, no EQ.
     pub fn clear_profile(&mut self) -> Result<(), String> {
         self.set_profile_parts(None, Conditioning::default())?;
+        self.v7_active = false;
         self.active_profile_id = None;
         Ok(())
     }
@@ -217,12 +338,14 @@ impl ClearcoreFilter {
     pub fn status_json(&self) -> String {
         let latency = self.core.engine.latency();
         serde_json::json!({
-            "model": self.core.kind.name(),
+            "model": if self.v7_active { V7_MODEL_ID } else { self.core.kind.name() },
+            "v7_loaded": self.v7.is_some(),
+            "latency_samples": self.algorithmic_latency_samples(),
             "backend": self.core.engine.label(),
             "fallback_reason": self.core.engine.fallback_reason(),
             "standby": self.core.engine.has_standby(),
             "profile_id": self.active_profile_id,
-            "speaker_conditioning": self.core.speaker_active(),
+            "speaker_conditioning": self.v7_active || self.core.speaker_active(),
             "eq": self.core.eq_active(),
             "silent_hops": self.core.silent_hops(),
             "latency_us": {

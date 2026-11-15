@@ -101,6 +101,12 @@ fn synthetic_asset() -> V3Asset {
     V3Asset::read(&synthetic_path(), &synthetic_sha()).expect("synthetic v3 asset")
 }
 
+/// The filter without the v7: the v3 conditioning path (a package without the v7 archive).
+fn v3_only(mut filter: ClearcoreFilter) -> ClearcoreFilter {
+    filter.disable_v7();
+    filter
+}
+
 fn create_ffi() -> *mut ClearcoreFilter {
     let root = CString::new(repo_root().to_string_lossy().as_bytes()).expect("root");
     unsafe { clearcore_filter_create(root.as_ptr()) }
@@ -259,6 +265,8 @@ fn v3_profile_through_the_c_api_and_tamper_detection() {
     env.use_synthetic_v3();
     let filter = create_ffi();
     assert!(!filter.is_null());
+    unsafe { (*filter).disable_v7() };
+    assert!(!filter.is_null());
     let StoredProfile::V2(profile) = v2_profile(3, None) else {
         unreachable!()
     };
@@ -327,13 +335,13 @@ fn v3_states_advance_and_matter_and_reset_reproduces() {
 fn v3_speaker_embedding_changes_the_output_and_no_profile_is_the_zero_fallback() {
     let env = EnvGuard::new();
     env.use_synthetic_v3();
-    let mut neutral = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    let mut neutral = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
     let reference = run(&mut neutral, 0..60);
 
-    let mut a = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    let mut a = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
     a.apply_profile(&v2_profile(1, None), 100).expect("profile");
     let with_a = run(&mut a, 0..60);
-    let mut b = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    let mut b = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
     b.apply_profile(&v2_profile(2, None), 100).expect("profile");
     let with_b = run(&mut b, 0..60);
     let (effect, between) = (snr_db(&reference, &with_a), snr_db(&with_a, &with_b));
@@ -345,13 +353,13 @@ fn v3_speaker_embedding_changes_the_output_and_no_profile_is_the_zero_fallback()
     );
 
     // Intensity 0 = speaker_present 0 + zeros: identical to no profile at all.
-    let mut off = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    let mut off = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
     off.apply_profile(&v2_profile(1, None), 0).expect("profile");
     assert!(!off.core().speaker_active());
     assert_eq!(run(&mut off, 0..60), reference);
 
     // Clearing mid-stream returns to the no-profile conditioning (state kept: compare deltas).
-    let mut c = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    let mut c = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
     c.apply_profile(&v2_profile(1, None), 100).expect("profile");
     let _ = run(&mut c, 0..10);
     c.clear_profile().expect("clear");
@@ -362,10 +370,10 @@ fn v3_speaker_embedding_changes_the_output_and_no_profile_is_the_zero_fallback()
 fn v3_profile_eq_is_applied_and_a_v1_profile_is_outdated_and_neutral() {
     let env = EnvGuard::new();
     env.use_synthetic_v3();
-    let mut flat = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    let mut flat = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
     let reference = run(&mut flat, 0..40);
     let gains = BandGains::from_array([-6.0; 32]).expect("gains");
-    let mut eq = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    let mut eq = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
     eq.apply_profile(&v2_profile(1, Some(gains.clone())), 0)
         .expect("profile");
     assert!(eq.core().eq_active() && !eq.core().speaker_active());
@@ -381,7 +389,7 @@ fn v3_profile_eq_is_applied_and_a_v1_profile_is_outdated_and_neutral() {
         "flat -6 dB profile EQ is a pure gain ({worst})"
     );
 
-    let mut v1 = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    let mut v1 = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
     v1.apply_profile(&v2_profile(3, Some(gains.clone())), 100)
         .expect("v2 first");
     let profile = v1_conditioned("spk-v1").with_eq(Some(gains)).expect("eq");
@@ -406,6 +414,8 @@ fn reload_reads_v2_from_disk_honours_settings_and_rejects_bad_files() {
     let env = EnvGuard::new();
     env.use_synthetic_v3();
     let filter = create_ffi();
+    assert!(!filter.is_null());
+    unsafe { (*filter).disable_v7() };
     assert!(!filter.is_null());
     let path = env.profiles_dir().join(ACTIVE_PROFILE_FILE_NAME);
     let StoredProfile::V2(profile) = v2_profile(5, None) else {
@@ -525,8 +535,8 @@ fn v3_openvino_cpu_matches_onnx_runtime_and_swaps_seamlessly() {
         return;
     }
     env.use_synthetic_v3();
-    let mut ort = ClearcoreFilter::new(&repo_root(), None).expect("ort");
-    let mut ov = ClearcoreFilter::new(&repo_root(), Some("openvino-cpu")).expect("ov");
+    let mut ort = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("ort"));
+    let mut ov = v3_only(ClearcoreFilter::new(&repo_root(), Some("openvino-cpu")).expect("ov"));
     assert_eq!(
         ov.core.engine.label(),
         "openvino:CPU",
@@ -867,4 +877,117 @@ fn the_backend_setting_selects_openvino_and_the_env_overrides_it() {
         assert_eq!((*filter).core.engine.label(), "ort:CPU");
         clearcore_filter_free(filter);
     }
+}
+
+// ------------------------------------------------------------------ pDFNet3 Pro v7 ------
+
+fn v7_vector(file: &str) -> Vec<f32> {
+    let path = repo_root()
+        .join("crates/model/tests/fixtures/pdfnet3_v7/alvo_snr0")
+        .join(file);
+    std::fs::read(path)
+        .expect("vector")
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
+}
+
+/// A v7 profile as the daemon writes it (model crate writer), read by the filter's parser.
+fn v7_profile_json(eq: Option<BandGains>) -> String {
+    let embedding = realtime_noise_model::SpeakerEmbedding::from_raw_normalizing(&v7_vector(
+        "speaker_embedding.f32",
+    ))
+    .expect("embedding");
+    realtime_noise_model::VoiceProfileV2::new_v7(
+        "spk-v7",
+        "Ana",
+        "2026-11-15T12:00:00Z",
+        &embedding,
+        &v7_vector("tokens.f32"),
+        eq,
+    )
+    .expect("v7 profile")
+    .to_json()
+    .expect("json")
+}
+
+#[test]
+fn v7_profile_switches_the_hops_to_the_v7_and_a_v3_profile_is_refused() {
+    let _env = EnvGuard::new();
+    let mut filter = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    assert!(filter.v7_loaded(), "bundled v7 archive");
+    let chain = filter.algorithmic_latency_samples() - ALGORITHM_LATENCY_SAMPLES;
+
+    // A profile built for the v3 model (no tokens): refused, neutral voice, v3 path.
+    assert_eq!(
+        filter.apply_profile(&v2_profile(3, None), 100),
+        Ok(ProfileOutcome::Outdated)
+    );
+    assert!(!filter.v7_active());
+    assert_eq!(
+        unsafe { clearcore_filter_is_voice_profile_active(&raw mut filter) },
+        0
+    );
+
+    // The daemon's v7 profile parses here and turns the v7 on.
+    let profile = StoredProfile::from_json(&v7_profile_json(None)).expect("filter parses v7");
+    assert_eq!(
+        filter.apply_profile(&profile, 100),
+        Ok(ProfileOutcome::Applied)
+    );
+    assert!(filter.v7_active());
+    assert_eq!(filter.algorithmic_latency_samples(), 11_520 + chain);
+    let status: serde_json::Value = serde_json::from_str(&filter.status_json()).expect("json");
+    assert_eq!(status["model"], "pdfnet3-pro-v7-a2-300k");
+    assert_eq!(status["speaker_conditioning"], true);
+    // The vector's input (target speaker in noise) through the filter.
+    let bytes = std::fs::read(
+        repo_root().join("crates/model/tests/fixtures/pdfnet3_v7/alvo_snr0/input.wav"),
+    )
+    .expect("input.wav");
+    let data = bytes
+        .windows(4)
+        .position(|w| w == b"data")
+        .expect("data chunk");
+    let input: Vec<f32> = bytes[data + 8..]
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+    let mut out = Vec::new();
+    for chunk in input.chunks_exact(480).take(200) {
+        let frame: [f32; 480] = chunk.try_into().expect("hop");
+        out.extend_from_slice(&filter.process(&frame).expect("hop"));
+    }
+    assert!(out.iter().all(|s| s.is_finite()));
+    // 21 frames of v7 delay: the first 21 hops are silent, the target's speech comes out later.
+    assert!(out[..21 * 480].iter().all(|s| *s == 0.0));
+    assert!(out[21 * 480..].iter().any(|s| s.abs() > 1e-3));
+
+    // Intensity 0: back to the base model (neutral), profile still applied (EQ).
+    assert_eq!(
+        filter.apply_profile(&profile, 0),
+        Ok(ProfileOutcome::Applied)
+    );
+    assert!(!filter.v7_active());
+    assert_eq!(filter.algorithmic_latency_samples(), 1_440 + chain);
+    filter.clear_profile().expect("clear");
+    assert!(!filter.v7_active());
+}
+
+#[test]
+fn v7_profile_tampering_and_model_mismatch_are_rejected_by_the_filter_parser() {
+    let json = v7_profile_json(Some(BandGains::neutral()));
+    assert!(StoredProfile::from_json(&json).is_ok());
+    let value: serde_json::Value = serde_json::from_str(&json).expect("json");
+    let tokens = value["speaker_tokens_b64"]
+        .as_str()
+        .expect("tokens")
+        .to_owned();
+    let mut altered = tokens.clone().into_bytes();
+    altered[10] = if altered[10] == b'A' { b'B' } else { b'A' };
+    let tampered = json.replace(&tokens, std::str::from_utf8(&altered).expect("utf8"));
+    assert!(StoredProfile::from_json(&tampered).is_err());
+    let stripped = json.replace(&format!("\"speaker_tokens_b64\": \"{tokens}\","), "");
+    assert_ne!(stripped, json);
+    assert!(StoredProfile::from_json(&stripped).is_err());
 }

@@ -15,9 +15,17 @@
 //!   "embedding_dim": 192,
 //!   "speaker_embedding_b64": "<192 x f32 little-endian, standard base64 with padding>",
 //!   "eq": { "gains_db": [32 floats] } | null,
+//!   "speaker_tokens_b64": "<48 x 128 f32 LE, base64>",   // pDFNet3 Pro v7 only
 //!   "integrity_hash": "<sha256 hex of the canonical JSON of every field above>"
 //! }
 //! ```
+//!
+//! Two model ids are accepted by the schema: `pdfnet3-pro-v7-a2-300k` (model version 7, the
+//! profiles built since the v7 isolation model, with the `enroll_tokens` output of the
+//! enrollment audio in `speaker_tokens_b64`) and `pdfnet3-pro-v3-full` (version 3, no tokens,
+//! written by earlier releases). The field is omitted from the JSON and from the canonical hash
+//! when absent, so a v3 file keeps its hash. A v3 profile is readable but the v7 runtime refuses
+//! it (no tokens): the user enrolls again.
 //!
 //! A v1 file is never applied: [`StoredProfile::from_json`] reports it as
 //! [`StoredProfile::Outdated`] so the service can ask the user to regenerate it from the samples
@@ -40,6 +48,12 @@ pub const PDFNET3_PRO_V3_MODEL_ID: &str = "pdfnet3-pro-v3-full";
 /// Human-readable name shown in the UI and the status.
 pub const PDFNET3_PRO_V3_MODEL_LABEL: &str = "pDFNet3 Pro v3";
 pub const PDFNET3_PRO_V3_MODEL_VERSION: u32 = 3;
+/// Model id of the profiles built for the pDFNet3 Pro v7 (A2-300k) isolation model.
+pub const PDFNET3_PRO_V7_MODEL_ID: &str = "pdfnet3-pro-v7-a2-300k";
+pub const PDFNET3_PRO_V7_MODEL_LABEL: &str = "pDFNet3 Pro v7";
+pub const PDFNET3_PRO_V7_MODEL_VERSION: u32 = 7;
+/// `enroll_tokens` output stored in a v7 profile (`[1, 48, 128]`).
+pub const SPEAKER_TOKENS_LEN: usize = 48 * 128;
 /// Length of the ECAPA speaker embedding.
 pub const SPEAKER_EMBEDDING_DIM: usize = 192;
 /// Largest deviation of the embedding L2 norm from 1.0 accepted in a stored profile.
@@ -174,7 +188,54 @@ pub struct VoiceProfileV2 {
     pub embedding_dim: u32,
     pub speaker_embedding_b64: String,
     pub eq: Option<BandGains>,
+    /// pDFNet3 Pro v7 speaker tokens (`48 x 128` `f32` LE, base64); absent in a v3 profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_tokens_b64: Option<String>,
     pub integrity_hash: String,
+}
+
+/// Encodes the v7 speaker tokens (finite, [`SPEAKER_TOKENS_LEN`] values) as base64 `f32` LE.
+pub fn tokens_to_base64(tokens: &[f32]) -> Result<String, VoiceProfileError> {
+    check_tokens(tokens)?;
+    let bytes: Vec<u8> = tokens.iter().flat_map(|v| v.to_le_bytes()).collect();
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+fn check_tokens(tokens: &[f32]) -> Result<(), VoiceProfileError> {
+    if tokens.len() != SPEAKER_TOKENS_LEN {
+        return Err(VoiceProfileError::DimensionMismatch {
+            field: "speaker_tokens",
+            expected: SPEAKER_TOKENS_LEN,
+            actual: tokens.len(),
+        });
+    }
+    if let Some(index) = tokens.iter().position(|v| !v.is_finite()) {
+        return Err(VoiceProfileError::NonFiniteValue {
+            field: "speaker_tokens",
+            index,
+        });
+    }
+    Ok(())
+}
+
+/// Inverse of [`tokens_to_base64`].
+pub fn tokens_from_base64(text: &str) -> Result<Vec<f32>, VoiceProfileError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(text.trim())
+        .map_err(|e| VoiceProfileError::Deserialization(e.to_string()))?;
+    if bytes.len() != SPEAKER_TOKENS_LEN * 4 {
+        return Err(VoiceProfileError::DimensionMismatch {
+            field: "speaker_tokens_b64",
+            expected: SPEAKER_TOKENS_LEN * 4,
+            actual: bytes.len(),
+        });
+    }
+    let tokens: Vec<f32> = bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+    check_tokens(&tokens)?;
+    Ok(tokens)
 }
 
 #[derive(Serialize)]
@@ -188,6 +249,8 @@ struct CanonicalV2<'a> {
     embedding_dim: u32,
     speaker_embedding_b64: &'a str,
     eq: &'a Option<BandGains>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speaker_tokens_b64: Option<&'a str>,
 }
 
 impl VoiceProfileV2 {
@@ -212,10 +275,43 @@ impl VoiceProfileV2 {
             embedding_dim: u32::try_from(SPEAKER_EMBEDDING_DIM).unwrap_or(u32::MAX),
             speaker_embedding_b64: embedding.to_base64(),
             eq,
+            speaker_tokens_b64: None,
             integrity_hash: String::new(),
         };
         profile.integrity_hash = profile.compute_integrity_hash()?;
         Ok(profile)
+    }
+
+    /// Creates and seals a profile for the pDFNet3 Pro v7: the embedding plus the speaker tokens
+    /// (`enroll_tokens` of the enrollment audio, 48 x 128).
+    pub fn new_v7(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        created_at_utc: impl Into<String>,
+        embedding: &SpeakerEmbedding,
+        tokens: &[f32],
+        eq: Option<BandGains>,
+    ) -> Result<Self, VoiceProfileError> {
+        let mut profile = Self::new(id, name, created_at_utc, embedding, eq)?;
+        PDFNET3_PRO_V7_MODEL_ID.clone_into(&mut profile.model_id);
+        profile.model_version = PDFNET3_PRO_V7_MODEL_VERSION;
+        profile.speaker_tokens_b64 = Some(tokens_to_base64(tokens)?);
+        profile.integrity_hash = profile.compute_integrity_hash()?;
+        Ok(profile)
+    }
+
+    /// The v7 speaker tokens, or `None` for a profile built for the v3 model.
+    pub fn speaker_tokens(&self) -> Result<Option<Vec<f32>>, VoiceProfileError> {
+        self.speaker_tokens_b64
+            .as_deref()
+            .map(tokens_from_base64)
+            .transpose()
+    }
+
+    /// Whether the profile carries what the pDFNet3 Pro v7 needs (the speaker tokens).
+    #[must_use]
+    pub fn is_v7(&self) -> bool {
+        self.model_id == PDFNET3_PRO_V7_MODEL_ID && self.speaker_tokens_b64.is_some()
     }
 
     /// The decoded, validated embedding.
@@ -234,6 +330,7 @@ impl VoiceProfileV2 {
             embedding_dim: self.embedding_dim,
             speaker_embedding_b64: &self.speaker_embedding_b64,
             eq: &self.eq,
+            speaker_tokens_b64: self.speaker_tokens_b64.as_deref(),
         };
         let bytes = serde_json::to_vec(&payload)
             .map_err(|e| VoiceProfileError::Serialization(e.to_string()))?;
@@ -245,13 +342,18 @@ impl VoiceProfileV2 {
         if self.version != PROFILE_V2_SCHEMA_VERSION {
             return Err(VoiceProfileError::UnsupportedVersion(self.version));
         }
-        if self.model_id != PDFNET3_PRO_V3_MODEL_ID
-            || self.model_version != PDFNET3_PRO_V3_MODEL_VERSION
-        {
+        let v3 = self.model_id == PDFNET3_PRO_V3_MODEL_ID
+            && self.model_version == PDFNET3_PRO_V3_MODEL_VERSION
+            && self.speaker_tokens_b64.is_none();
+        let v7 = self.model_id == PDFNET3_PRO_V7_MODEL_ID
+            && self.model_version == PDFNET3_PRO_V7_MODEL_VERSION
+            && self.speaker_tokens_b64.is_some();
+        if !(v3 || v7) {
             return Err(VoiceProfileError::Deserialization(
                 "profile belongs to another model".to_owned(),
             ));
         }
+        self.speaker_tokens()?;
         if usize::try_from(self.embedding_dim) != Ok(SPEAKER_EMBEDDING_DIM) {
             return Err(VoiceProfileError::DimensionMismatch {
                 field: "embedding_dim",
@@ -435,6 +537,44 @@ mod tests {
             StoredProfile::load_from_file_secure(&path).expect("any"),
             StoredProfile::Current(c) if *c == p
         ));
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn v7_profile_carries_tokens_and_keeps_v3_hashes_stable() {
+        let tokens: Vec<f32> = (0..SPEAKER_TOKENS_LEN)
+            .map(|i| (i as f32 * 0.01).sin())
+            .collect();
+        let v7 = VoiceProfileV2::new_v7(
+            "p-7",
+            "Voz",
+            "2026-11-15T12:00:00Z",
+            &unit_embedding(0.21),
+            &tokens,
+            None,
+        )
+        .expect("v7");
+        assert!(v7.is_v7());
+        assert_eq!(v7.model_id, PDFNET3_PRO_V7_MODEL_ID);
+        let json = v7.to_json().expect("json");
+        assert!(json.contains("speaker_tokens_b64"));
+        let back = VoiceProfileV2::from_json(&json).expect("back");
+        assert_eq!(back.speaker_tokens().expect("tokens"), Some(tokens));
+        // Tokens are covered by the hash.
+        let mut tampered = back;
+        tampered.speaker_tokens_b64 =
+            Some(tokens_to_base64(&vec![0.0; SPEAKER_TOKENS_LEN]).unwrap());
+        assert!(tampered.verify_integrity().is_err());
+        // A v7 id without tokens, or a v3 id with tokens, is refused.
+        let mut no_tokens = v7;
+        no_tokens.speaker_tokens_b64 = None;
+        no_tokens.integrity_hash = no_tokens.compute_integrity_hash().unwrap();
+        assert!(no_tokens.verify_integrity().is_err());
+        // A v3 profile (earlier releases) still parses, has no tokens and its JSON has no field.
+        let v3 = profile();
+        assert!(!v3.is_v7());
+        assert!(!v3.to_json().unwrap().contains("speaker_tokens_b64"));
+        assert_eq!(v3.speaker_tokens().unwrap(), None);
     }
 
     #[test]

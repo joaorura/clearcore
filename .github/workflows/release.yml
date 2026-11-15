@@ -87,6 +87,8 @@ jobs:
             "Clearcore-linux-x64/resources/models/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz" \
             "Clearcore-linux-x64/resources/models/enrollment/enrollment.onnx" \
             "Clearcore-linux-x64/models/pdfnet3/pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz" \
+            "Clearcore-linux-x64/resources/models/pdfnet3/pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz" \
+            "Clearcore-linux-x64/models/pdfnet3/pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz" \
             "Clearcore-linux-x64/models/enrollment/enrollment.onnx"; do
             if ! grep -qx "./${entry}\|${entry}" "${RUNNER_TEMP}/linux-package-listing.txt"; then
               echo "::error::${entry} ausente em ${TARBALL}"
@@ -120,6 +122,7 @@ jobs:
           # Pins mirrored from crates/model/src/pdfnet3_bundle.rs (Pro v3 full and enrollment v3).
           (cd "${EXTRACT_DIR}/Clearcore-linux-x64/models/pdfnet3" && printf '%s\n' \
             "c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee  pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz" \
+            "b0f125d71d8764e3b73e91b667b2cb7aba1ef1e4b6987c53e9019958f5369608  pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz" \
             | sha256sum -c -)
           (cd "${EXTRACT_DIR}/Clearcore-linux-x64/models/enrollment" && printf '%s\n' \
             "82a292b95121dd7d7e82a2f4515497512693d499f06bafa0d3d627bed34ad3c1  enrollment.onnx" \

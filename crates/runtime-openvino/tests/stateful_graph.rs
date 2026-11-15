@@ -66,6 +66,7 @@ fn conditioning() -> SpeakerConditioning {
         speaker_embedding,
         eq: Some(BandGains::from_array(gains).unwrap()),
         intensity_percent: 100,
+        speaker_tokens: None,
     }
 }
 

@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 #![forbid(unsafe_code)]
 #![allow(
     clippy::missing_errors_doc,
@@ -144,6 +145,14 @@ impl ServiceDaemon {
             pdfnet3_dev_config::PdfNet3DevConfig::from_env(),
             realtime_noise_model::pdfnet3_bundle::load_isolation_archive,
         );
+        // pDFNet3 Pro v7: the isolation model while a voice profile is applied.
+        match realtime_noise_model::pdfnet3_bundle::load_v7_asset() {
+            Ok(asset) => supervisor.set_v7_asset(Some(asset)),
+            Err(error) => eprintln!(
+                "pDFNet3 Pro v7 not loaded ({}); voice profiles run on the base isolation model",
+                error.code()
+            ),
+        }
         let _ = supervisor.select_backend("auto", model_dir.as_deref(), repo_root.as_deref());
         let default_dir = VoiceSampleManager::default_dir();
         let voice_samples = VoiceSampleManager::load(&default_dir)
@@ -533,7 +542,11 @@ impl ServiceDaemon {
                         // is `none`, `active`, `stored` (valid, not applied) or `outdated` (a v1
                         // FiLM profile: regenerate it from the saved samples, no re-recording).
                         "voice_profile_model_id": VoiceState::model_id(),
-                        "voice_profile_model_label": realtime_noise_model::PDFNET3_PRO_V3_MODEL_LABEL,
+                        "voice_profile_model_label":
+                            realtime_noise_model::voice_profile_v2::PDFNET3_PRO_V7_MODEL_LABEL,
+                        // Additive: the model processing the audio now ("pdfnet3-pro-v7" while a
+                        // v7 voice profile is applied, 240 ms of latency; else "pdfnet3-pro-v3").
+                        "isolation_model_variant": self.supervisor.active_isolation_variant(),
                         "voice_profile_state": self
                             .voice
                             .status_name(self.supervisor.active_conditioning_id()),

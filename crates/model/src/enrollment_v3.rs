@@ -41,6 +41,41 @@ const SAFE_PEAK: f32 = 0.97;
 /// Speaker embedding extraction: 16 kHz mono audio in, the raw 192 floats out.
 pub trait EmbeddingExtractor {
     fn extract_embedding(&mut self, samples_16khz: &[f32]) -> Result<Vec<f32>, EnrollmentError>;
+
+    /// pDFNet3 Pro v7 speaker tokens (48 x 128) of the enrollment audio (48 kHz, aggregated by
+    /// [`aggregate_samples_48k`]) and its normalized embedding. `Ok(None)` (the default): the
+    /// extractor has no v7 `enroll_tokens` model and the profile is built for the v3 model.
+    fn extract_speaker_tokens(
+        &mut self,
+        enrollment_48k: &[f32],
+        embedding: &[f32],
+    ) -> Result<Option<Vec<f32>>, EnrollmentError> {
+        let _ = (enrollment_48k, embedding);
+        Ok(None)
+    }
+}
+
+/// Zeros between two samples at 48 kHz (250 ms).
+pub const SAMPLE_GAP_SAMPLES_48K: usize = 3 * SAMPLE_GAP_SAMPLES_16K;
+/// Longest enrollment audio at 48 kHz (12 s).
+pub const MAX_ENROLLMENT_SAMPLES_48K: usize = 3 * MAX_ENROLLMENT_SAMPLES_16K;
+
+/// [`aggregate_samples`] at 48 kHz: the same audio, before decimation, that the pDFNet3 Pro v7
+/// `enroll_tokens` features are computed on (SPEC v7 §6.1).
+#[must_use]
+pub fn aggregate_samples_48k(samples_48k: &[Vec<f32>]) -> Vec<f32> {
+    let mut out: Vec<f32> = Vec::new();
+    for (index, sample) in samples_48k.iter().enumerate() {
+        if index > 0 {
+            out.resize(out.len() + SAMPLE_GAP_SAMPLES_48K, 0.0);
+        }
+        out.extend_from_slice(sample);
+        if out.len() >= MAX_ENROLLMENT_SAMPLES_48K {
+            break;
+        }
+    }
+    out.truncate(MAX_ENROLLMENT_SAMPLES_48K);
+    out
 }
 
 /// THE aggregation rule: samples (16 kHz, recording order) joined with 250 ms of zeros between
@@ -113,14 +148,27 @@ pub fn build_profile_v2<M: EmbeddingExtractor>(
     let outcome = embed(model, &mut audio);
     wipe(&mut audio);
     let embedding = outcome.map_err(BuildError::Enroll)?;
-    VoiceProfileV2::new(
-        metadata.id.clone(),
-        metadata.name.clone(),
-        metadata.created_at_utc.clone(),
-        &embedding,
-        Some(eq),
-    )
-    .map_err(|e| BuildError::Enroll(EnrollmentError::InvalidConditioning(e)))
+    let mut audio_48k = aggregate_samples_48k(stored_48k);
+    let tokens = model.extract_speaker_tokens(&audio_48k, embedding.as_slice());
+    wipe(&mut audio_48k);
+    let profile = match tokens.map_err(BuildError::Enroll)? {
+        Some(tokens) => VoiceProfileV2::new_v7(
+            metadata.id.clone(),
+            metadata.name.clone(),
+            metadata.created_at_utc.clone(),
+            &embedding,
+            &tokens,
+            Some(eq),
+        ),
+        None => VoiceProfileV2::new(
+            metadata.id.clone(),
+            metadata.name.clone(),
+            metadata.created_at_utc.clone(),
+            &embedding,
+            Some(eq),
+        ),
+    };
+    profile.map_err(|e| BuildError::Enroll(EnrollmentError::InvalidConditioning(e)))
 }
 
 fn embed<M: EmbeddingExtractor>(

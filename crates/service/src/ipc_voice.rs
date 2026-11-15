@@ -121,6 +121,14 @@ impl EmbeddingExtractor for BoxedModel {
     fn extract_embedding(&mut self, samples_16khz: &[f32]) -> Result<Vec<f32>, EnrollmentError> {
         self.0.extract_embedding(samples_16khz)
     }
+
+    fn extract_speaker_tokens(
+        &mut self,
+        enrollment_48k: &[f32],
+        embedding: &[f32],
+    ) -> Result<Option<Vec<f32>>, EnrollmentError> {
+        self.0.extract_speaker_tokens(enrollment_48k, embedding)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -264,7 +272,7 @@ fn load_dev_model(
         }
         let model = OnnxEnrollmentModel::from_onnx_bytes(bytes)
             .map_err(|_| EnrollError::ModelNotConfigured)?;
-        return Ok(Box::new(v3(model)?));
+        return Ok(with_v7_tokens(v3(model)?));
     }
 
     let Some(ref sha) = config.expected_sha256 else {
@@ -277,7 +285,34 @@ fn load_dev_model(
     let model = OnnxEnrollmentModel::from_dev_archive(&bytes, sha)
         .map_err(|_| EnrollError::ModelNotConfigured);
     bytes.fill(0);
-    Ok(Box::new(v3(model?)?))
+    Ok(with_v7_tokens(v3(model?)?))
+}
+
+/// Adds the pDFNet3 Pro v7 `enroll_tokens` (bundled v7 archive, tract) to the embedding model, so
+/// the profile is a v7 profile. Without a usable v7 archive the profile is built for the v3 model
+/// (the daemon then has no v7 either) and the reason is logged.
+fn with_v7_tokens(
+    model: realtime_noise_model::enrollment_v3::OnnxEmbeddingModel,
+) -> Box<dyn EmbeddingExtractor + Send> {
+    use realtime_noise_model::pdfnet3_v7::WithV7Tokens;
+    use realtime_noise_model::tract_graph::TractGraphSession;
+    let tokens = realtime_noise_model::pdfnet3_bundle::load_v7_asset()
+        .map_err(|e| e.code().to_owned())
+        .and_then(|asset| {
+            asset
+                .enroll_model(|name: &str, bytes: &[u8]| {
+                    TractGraphSession::load(name, bytes)
+                        .map(|s| Box::new(s) as Box<dyn realtime_noise_model::GraphSession>)
+                })
+                .map_err(|e| e.to_string())
+        });
+    match tokens {
+        Ok(tokens) => Box::new(WithV7Tokens::new(model, tokens)),
+        Err(reason) => {
+            eprintln!("[voice] pDFNet3 Pro v7 enroll_tokens unavailable ({reason}); v3 profile");
+            Box::new(model)
+        }
+    }
 }
 
 /// Reads a regular file of at most `max` bytes; symlinks and anything else are refused.

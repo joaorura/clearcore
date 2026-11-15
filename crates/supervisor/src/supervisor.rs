@@ -8,6 +8,9 @@ use crate::backoff::{BackoffTracker, MAX_CRASHES_PER_15_MINUTES};
 use realtime_noise_accelerators::OpenVINOBackend;
 use realtime_noise_contracts::{AudioFrame, HOP_SAMPLES};
 use realtime_noise_engine::DenoiseMode;
+use realtime_noise_model::pdfnet3_bundle::{PDFNET3_PRO_V7_ASSET_ID, PDFNET3_PRO_V7_SHA256};
+use realtime_noise_model::pdfnet3_v7::{V7Asset, V7IsolationBackend};
+use realtime_noise_model::tract_graph::TractGraphSession;
 use realtime_noise_model::{
     BackendDescriptor, CpuProfile, InferenceBackend, InferenceError, PDFNET3_DEV_ASSET_ID,
     PDFNET3_PRO_ASSET_ID, PdfNet3DevArchive, SpeakerConditioning, StudioBackend, StudioResetHandle,
@@ -95,6 +98,9 @@ pub struct EngineSupervisor {
     stateful_archive: Option<Result<PdfNet3DevArchive, &'static str>>,
     /// Resolution of the last [`Self::select_backend`] (`GetStatus` reports its fallback reason).
     last_resolution: Option<BackendResolutionInfo>,
+    /// The pDFNet3 Pro v7 (isolation with a voice profile), wrapped around every isolation
+    /// backend the archive builds; `None` = no v7 (the base isolation model only).
+    v7_asset: Option<Arc<V7Asset>>,
 }
 
 /// Loader of the pDFNet3 stateful export, injectable for tests.
@@ -143,6 +149,64 @@ impl EngineSupervisor {
             stateful_source: None,
             stateful_archive: None,
             last_resolution: None,
+            v7_asset: None,
+        }
+    }
+
+    /// Installs (or removes) the pDFNet3 Pro v7 asset; it applies from the next backend selection.
+    pub fn set_v7_asset(&mut self, asset: Option<V7Asset>) {
+        self.v7_asset = asset.map(Arc::new);
+    }
+
+    /// Whether a pDFNet3 Pro v7 asset is installed.
+    #[must_use]
+    pub const fn v7_available(&self) -> bool {
+        self.v7_asset.is_some()
+    }
+
+    /// Which isolation model processes the audio now: `pdfnet3-pro-v7` while a v7 profile is
+    /// applied (intensity > 0) on a backend with the v7, else the base isolation model.
+    #[must_use]
+    pub fn active_isolation_variant(&self) -> &'static str {
+        let v7 = self.v7_asset.is_some()
+            && self
+                .active_conditioning
+                .as_ref()
+                .is_some_and(|c| c.speaker_tokens.is_some() && c.intensity_percent > 0);
+        if v7 {
+            "pdfnet3-pro-v7"
+        } else {
+            "pdfnet3-pro-v3"
+        }
+    }
+
+    /// Wraps an isolation backend with the v7 stream (compiled on tract) when the asset is set.
+    /// A v7 that fails to compile leaves the base backend alone (logged).
+    fn with_v7(&self, base: Box<dyn InferenceBackend>) -> Box<dyn InferenceBackend> {
+        let Some(asset) = &self.v7_asset else {
+            return base;
+        };
+        let stream = asset.stream(|name: &str, bytes: &[u8]| {
+            TractGraphSession::load(name, bytes)
+                .map(|s| Box::new(s) as Box<dyn realtime_noise_model::GraphSession>)
+        });
+        match stream {
+            Ok(stream) => {
+                let descriptor = BackendDescriptor {
+                    backend: "pdfnet3-v7",
+                    backend_version: env!("CARGO_PKG_VERSION"),
+                    runtime: "tract",
+                    runtime_version: "0.19.16",
+                    asset_id: PDFNET3_PRO_V7_ASSET_ID.to_owned(),
+                    asset_sha256: PDFNET3_PRO_V7_SHA256.to_owned(),
+                    cpu_profile: CpuProfile::Avx2Minimum.name(),
+                };
+                Box::new(V7IsolationBackend::new(base, stream, descriptor))
+            }
+            Err(error) => {
+                eprintln!("pDFNet3 Pro v7 failed to compile ({error}); voice profiles stay off");
+                base
+            }
         }
     }
 
@@ -270,7 +334,12 @@ impl EngineSupervisor {
     pub fn isolation_model(&self) -> &'static str {
         match self.active_backend_descriptor() {
             None => ISOLATION_MODEL_NONE,
-            Some(desc) if desc.asset_id == PDFNET3_PRO_ASSET_ID => ISOLATION_MODEL_PDFNET3_PRO,
+            Some(desc)
+                if desc.asset_id == PDFNET3_PRO_ASSET_ID
+                    || desc.asset_id == PDFNET3_PRO_V7_ASSET_ID =>
+            {
+                ISOLATION_MODEL_PDFNET3_PRO
+            }
             Some(desc) if desc.asset_id == PDFNET3_DEV_ASSET_ID => ISOLATION_MODEL_PDFNET3_DEV,
             Some(_) => ISOLATION_MODEL_BASE,
         }
@@ -563,6 +632,7 @@ impl EngineSupervisor {
                         Ok((backend, info)) => {
                             self.dev_base_model_error = None;
                             self.isolation_model_error = None;
+                            let backend = self.with_v7(backend);
                             self.set_backend(backend, &info.name);
                             self.last_resolution = Some(info.clone());
                             return info;
@@ -615,7 +685,8 @@ impl EngineSupervisor {
                         is_fallback: accelerator,
                         fallback_reason,
                     };
-                    self.set_backend(Box::new(backend), &info.name);
+                    let backend = self.with_v7(Box::new(backend));
+                    self.set_backend(backend, &info.name);
                     self.last_resolution = Some(info.clone());
                     return info;
                 }

@@ -113,6 +113,20 @@ pub trait GraphSession: Send {
     fn run(&mut self, inputs: &[&[f32]], outputs: &mut [Vec<f32>]) -> Result<(), InferenceError>;
 }
 
+impl GraphSession for Box<dyn GraphSession> {
+    fn inputs(&self) -> &[TensorSpec] {
+        (**self).inputs()
+    }
+
+    fn outputs(&self) -> &[TensorSpec] {
+        (**self).outputs()
+    }
+
+    fn run(&mut self, inputs: &[&[f32]], outputs: &mut [Vec<f32>]) -> Result<(), InferenceError> {
+        (**self).run(inputs, outputs)
+    }
+}
+
 /// What conditions the loaded graphs on a voice profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConditioningKind {

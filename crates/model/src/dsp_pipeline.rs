@@ -375,6 +375,7 @@ impl DspPipeline {
         }
 
         // Output gain (silence gate); exactly 1.0 leaves the spectrum bit-identical.
+        #[allow(clippy::float_cmp)] // exactly 1.0 means "no gate"
         if gain != 1.0 {
             for bin in &mut self.spec_buf {
                 *bin *= gain;

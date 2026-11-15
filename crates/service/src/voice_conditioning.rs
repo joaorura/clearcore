@@ -26,7 +26,7 @@
 //! supervisor derives `speaker_present` (binary) from the intensity.
 
 use realtime_noise_model::voice_profile_v2::{
-    OutdatedProfile, PDFNET3_PRO_V3_MODEL_ID, SPEAKER_EMBEDDING_DIM, VoiceProfileV2,
+    OutdatedProfile, PDFNET3_PRO_V7_MODEL_ID, SPEAKER_EMBEDDING_DIM, VoiceProfileV2,
 };
 use realtime_noise_model::{
     BandGains, ProfileStore, SpeakerConditioning, StoredProfile, VoiceProfileError,
@@ -53,6 +53,8 @@ pub struct VoiceConditioning {
     pub speaker_embedding: [f32; SPEAKER_EMBEDDING_DIM],
     pub eq: Option<BandGains>,
     pub intensity_percent: u8,
+    /// pDFNet3 Pro v7 speaker tokens of a v7 profile (`None`: a v3 profile, refused by the v7).
+    pub speaker_tokens: Option<std::sync::Arc<[f32]>>,
 }
 
 impl std::fmt::Debug for VoiceConditioning {
@@ -63,6 +65,7 @@ impl std::fmt::Debug for VoiceConditioning {
             .field("model_id", &self.model_id)
             .field("has_eq", &self.eq.is_some())
             .field("intensity_percent", &self.intensity_percent)
+            .field("has_tokens", &self.speaker_tokens.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -80,6 +83,7 @@ impl VoiceConditioning {
             speaker_embedding: *embedding.as_slice(),
             eq: profile.eq.clone(),
             intensity_percent: intensity_percent.min(100),
+            speaker_tokens: profile.speaker_tokens()?.map(std::sync::Arc::from),
         })
     }
 }
@@ -112,6 +116,7 @@ impl VoiceConditioning {
             speaker_embedding: self.speaker_embedding,
             eq: self.eq.clone(),
             intensity_percent: self.intensity_percent,
+            speaker_tokens: self.speaker_tokens.clone(),
         }
     }
 }
@@ -221,12 +226,20 @@ impl VoiceState {
                 target.apply_voice_conditioning(Some(&conditioning))?;
                 Ok(conditioning)
             });
-        match result {
-            Ok(conditioning) => {
-                self.applied = Some(conditioning);
-                self.error = None;
-            }
-            Err(ConditioningRejected) => {
+        if let Ok(conditioning) = result {
+            self.applied = Some(conditioning);
+            self.error = None;
+        } else {
+            {
+                if profile.is_v7() {
+                    eprintln!("[voice] the backend refused the stored voice profile");
+                } else {
+                    eprintln!(
+                        "[voice] stored voice profile was built for {} and has no pDFNet3 Pro v7 \
+                         data (speaker tokens): it is not applied; record a new voice profile",
+                        profile.model_id
+                    );
+                }
                 self.error = Some(NOT_APPLIED_MESSAGE.to_owned());
             }
         }
@@ -248,6 +261,6 @@ impl VoiceState {
 
     /// Identity of the backend model the profile targets (status field).
     pub const fn model_id() -> &'static str {
-        PDFNET3_PRO_V3_MODEL_ID
+        PDFNET3_PRO_V7_MODEL_ID
     }
 }

@@ -488,6 +488,7 @@ pub struct V7Stream<S> {
 }
 
 impl<S: GraphSession> V7Stream<S> {
+    #[allow(clippy::many_single_char_names)] // one letter per graph keeps the port table readable
     fn new(graphs: Graphs<S>, fir: &[f32]) -> Result<Self, InferenceError> {
         let c = &graphs.enc_conv;
         let d = &graphs.detector;
@@ -687,6 +688,7 @@ impl<S: GraphSession> V7Stream<S> {
         Ok(frames)
     }
 
+    #[allow(clippy::too_many_lines)] // the §4 sequence of one hop, kept in one place
     fn step(
         &mut self,
         feat_erb: &[f32],
@@ -997,11 +999,11 @@ impl<S: GraphSession> V7EnrollModel<S> {
         if embedding.len() != V7_EMBEDDING_LEN {
             return Err(contract("speaker embedding must hold 192 values"));
         }
-        let [erb, spec, act, emb] = self.ports;
-        self.graph.set(erb, &inputs.feat_erb)?;
-        self.graph.set(spec, &inputs.feat_spec)?;
-        self.graph.set(act, &inputs.act)?;
-        self.graph.set(emb, embedding)?;
+        let [erb_port, spec_port, act_port, embedding_port] = self.ports;
+        self.graph.set(erb_port, &inputs.feat_erb)?;
+        self.graph.set(spec_port, &inputs.feat_spec)?;
+        self.graph.set(act_port, &inputs.act)?;
+        self.graph.set(embedding_port, embedding)?;
         self.graph.run()?;
         let tokens = self.graph.out(self.tokens).to_vec();
         if tokens.len() != V7_TOKENS_LEN {
@@ -1020,16 +1022,177 @@ impl<S: GraphSession> V7EnrollModel<S> {
     }
 }
 
+/// An enrollment embedding model plus the v7 `enroll_tokens`: the profiles it builds are v7
+/// profiles (embedding + speaker tokens).
+pub struct WithV7Tokens<M> {
+    inner: M,
+    tokens: V7EnrollModel<Box<dyn GraphSession>>,
+}
+
+impl<M> WithV7Tokens<M> {
+    #[must_use]
+    pub const fn new(inner: M, tokens: V7EnrollModel<Box<dyn GraphSession>>) -> Self {
+        Self { inner, tokens }
+    }
+}
+
+impl<M: crate::enrollment_v3::EmbeddingExtractor> crate::enrollment_v3::EmbeddingExtractor
+    for WithV7Tokens<M>
+{
+    fn extract_embedding(
+        &mut self,
+        samples_16khz: &[f32],
+    ) -> Result<Vec<f32>, crate::enrollment::EnrollmentError> {
+        self.inner.extract_embedding(samples_16khz)
+    }
+
+    fn extract_speaker_tokens(
+        &mut self,
+        enrollment_48k: &[f32],
+        embedding: &[f32],
+    ) -> Result<Option<Vec<f32>>, crate::enrollment::EnrollmentError> {
+        self.tokens
+            .tokens(enrollment_48k, embedding)
+            .map(Some)
+            .map_err(|e| crate::enrollment::EnrollmentError::Model(e.to_string()))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Daemon backend: base model without a profile, v7 with one
+// ---------------------------------------------------------------------------------------------
+
+/// The isolation backend of the daemon: base model without a profile, v7 with one.
+///
+/// The bundled base isolation model (pDFNet3 Pro v3 full, neutral voice) runs while no v7
+/// profile is applied; a speaker conditioning that carries the v7 tokens (intensity > 0) switches
+/// every hop to the [`V7Stream`] (fresh stream, 240 ms of latency). A conditioning without
+/// tokens (a profile built for the v3 model) is refused.
+pub struct V7IsolationBackend {
+    base: Box<dyn crate::InferenceBackend>,
+    v7: V7Stream<Box<dyn GraphSession>>,
+    v7_active: bool,
+    descriptor: crate::BackendDescriptor,
+}
+
+impl V7IsolationBackend {
+    /// Wraps `base` and the compiled v7 stream; `descriptor` is reported while the v7 runs.
+    #[must_use]
+    pub fn new(
+        base: Box<dyn crate::InferenceBackend>,
+        v7: V7Stream<Box<dyn GraphSession>>,
+        descriptor: crate::BackendDescriptor,
+    ) -> Self {
+        Self {
+            base,
+            v7,
+            v7_active: false,
+            descriptor,
+        }
+    }
+
+    /// Whether the v7 stream processes the hops (a v7 profile is applied).
+    #[must_use]
+    pub const fn v7_active(&self) -> bool {
+        self.v7_active
+    }
+}
+
+impl crate::InferenceBackend for V7IsolationBackend {
+    fn descriptor(&self) -> crate::BackendDescriptor {
+        if self.v7_active {
+            self.descriptor.clone()
+        } else {
+            self.base.descriptor()
+        }
+    }
+
+    fn process(&mut self, input: &AudioFrame) -> Result<crate::ProcessedFrame, InferenceError> {
+        if self.v7_active {
+            let samples = self.v7.process(input)?;
+            crate::ProcessedFrame::checked(samples, V7_LATENCY_SAMPLES, self.descriptor.clone())
+        } else {
+            self.base.process(input)
+        }
+    }
+
+    fn algorithmic_latency_samples(&self) -> u32 {
+        if self.v7_active {
+            V7_LATENCY_SAMPLES
+        } else {
+            self.base.algorithmic_latency_samples()
+        }
+    }
+
+    fn set_voice_profile(
+        &mut self,
+        profile: Option<&crate::VoiceProfile>,
+    ) -> Result<(), InferenceError> {
+        self.base.set_voice_profile(profile)?;
+        self.v7_active = false;
+        Ok(())
+    }
+
+    fn supports_voice_profile(&self) -> bool {
+        self.base.supports_voice_profile()
+    }
+
+    fn set_speaker_conditioning(
+        &mut self,
+        conditioning: Option<&crate::SpeakerConditioning>,
+    ) -> Result<(), InferenceError> {
+        let Some(conditioning) = conditioning else {
+            self.base.set_speaker_conditioning(None)?;
+            self.v7_active = false;
+            return Ok(());
+        };
+        conditioning.validate()?;
+        let Some(tokens) = &conditioning.speaker_tokens else {
+            return Err(InferenceError::UnsupportedFeature(
+                "voice profile has no pDFNet3 Pro v7 speaker tokens (built for an earlier model); \
+                 enroll again"
+                    .to_owned(),
+            ));
+        };
+        if conditioning.intensity_percent == 0 {
+            // Isolation at 0 %: the base model, neutral voice, with the profile EQ (as before).
+            self.base.set_speaker_conditioning(Some(conditioning))?;
+            self.v7_active = false;
+            return Ok(());
+        }
+        let eq = match &conditioning.eq {
+            Some(gains) if !gains.is_neutral() => Some(crate::spectral_eq::bin_factors(
+                gains,
+                self.v7.erb_band_widths(),
+            )?),
+            _ => None,
+        };
+        self.v7
+            .set_profile(&conditioning.speaker_embedding, tokens)?;
+        self.v7.set_spectral_eq_factors(eq)?;
+        if !self.v7_active {
+            self.v7.reset();
+        }
+        self.v7_active = true;
+        Ok(())
+    }
+
+    fn supports_speaker_embedding(&self) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::float_cmp)]
 mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::suboptimal_flops)]
     fn f16_rounding_matches_ieee_half() {
         assert_eq!(round_f16(1.0), 1.0);
         assert_eq!(round_f16(0.1), 0.099_975_586);
-        assert_eq!(round_f16(-3.141_592_7), -3.140_625);
+        assert_eq!(round_f16(-2.718_281_7), -2.71875);
         // Tie to even: 1 + 2^-11 is exactly between 1 and 1 + 2^-10.
         assert_eq!(round_f16(1.0 + 2f32.powi(-11)), 1.0);
         assert_eq!(
@@ -1057,9 +1220,11 @@ mod tests {
     fn gate_c_rises_at_once_holds_200_ms_then_releases_to_the_floor() {
         let mut gate = GateC::default();
         assert_eq!(gate.step(0.9, -20.0), 1.0);
-        for _ in 0..20 {
+        // hang = 20 on speech, then 19 .. 1 keep the gain at 1; the 20th silent frame releases.
+        for _ in 0..19 {
             assert_eq!(gate.step(0.0, -20.0), 1.0);
         }
+        assert!(gate.step(0.0, -20.0) < 1.0);
         let mut last = 1.0;
         for _ in 0..200 {
             last = gate.step(0.0, -20.0);

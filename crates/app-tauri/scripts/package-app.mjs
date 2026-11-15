@@ -216,9 +216,13 @@ if (embedsOpenVino(platform, arch)) {
 // shipped: it stays in the repository for tests and development only.
 console.log('🧠 Bundling the pDFNet3 Pro isolation model and the enrollment model...');
 
-// Mirrors PDFNET3_PRO_V3_FULL_SHA256 and ENROLLMENT_V3_SHA256 in crates/model/src/pdfnet3_bundle.rs.
+// Mirrors PDFNET3_PRO_V3_FULL_SHA256, PDFNET3_PRO_V7_SHA256 and ENROLLMENT_V3_SHA256 in
+// crates/model/src/pdfnet3_bundle.rs.
 const PDFNET3_BUNDLE = {
   'pdfnet3-pro-v3-full-stateful-asset-v1.tar.gz': 'c1bee5593870bc326913e805803dbcfb19632236f0f42163635a5cc502d256ee',
+  // pDFNet3 Pro v7 (A2-300k, gate C): the isolation model while a voice profile is active
+  // (PDFNET3_PRO_V7_SHA256).
+  'pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz': 'b0f125d71d8764e3b73e91b667b2cb7aba1ef1e4b6987c53e9019958f5369608',
 };
 const ENROLLMENT_V3_SHA256 = '82a292b95121dd7d7e82a2f4515497512693d499f06bafa0d3d627bed34ad3c1';
 const pdfnet3Src = path.join(repoRoot, 'models', 'pdfnet3');
@@ -241,7 +245,7 @@ for (const dest of [path.join(resourcesDir, 'models', 'pdfnet3'), path.join(bund
     if (fs.existsSync(source)) fs.copyFileSync(source, path.join(dest, file));
   }
 }
-console.log('✓ Bundled models/pdfnet3 (pDFNet3 Pro v3 full, SHA-256 verified) into resources/models/pdfnet3 and bundle root');
+console.log('✓ Bundled models/pdfnet3 (pDFNet3 Pro v3 full + v7, SHA-256 verified) into resources/models/pdfnet3 and bundle root');
 
 const modelsEnrollmentSrc = path.join(repoRoot, 'models', 'enrollment');
 const enrollmentModel = path.join(modelsEnrollmentSrc, 'enrollment.onnx');

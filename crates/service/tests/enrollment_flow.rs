@@ -1704,8 +1704,10 @@ fn a_built_profile_is_persisted_as_v2_with_the_embedding_eq_and_model_id() {
     }
 
     let status = send(&mut daemon, IpcCommand::GetStatus).payload;
-    assert_eq!(status["voice_profile_model_id"], "pdfnet3-pro-v3-full");
-    assert_eq!(status["voice_profile_model_label"], "pDFNet3 Pro v3");
+    // The model new profiles are built for (the test extractor has no v7 tokens, so the stored
+    // profile itself is a v3 one; production profiles carry the v7 tokens).
+    assert_eq!(status["voice_profile_model_id"], "pdfnet3-pro-v7-a2-300k");
+    assert_eq!(status["voice_profile_model_label"], "pDFNet3 Pro v7");
     assert_eq!(status["voice_profile_state"], "active");
     assert_eq!(status["voice_profile_outdated"], false);
     assert_eq!(status["has_voice_profile"], true);
