@@ -1,7 +1,7 @@
-%global tag_version v0.1.0-beta.1
+%global tag_version v0.1.0-beta.2
 
 Name:           clearcore
-Version:        0.1.0_beta.1
+Version:        0.1.0_beta.2
 Release:        1%{?dist}
 Summary:        Realtime AI Noise Suppression Virtual Microphone (DeepFilterNet3)
 License:        PolyForm Noncommercial 1.0.0
@@ -107,6 +107,14 @@ gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database /usr/share/applications 2>/dev/null || true
 
 %changelog
+* Sun Nov 15 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.2-1
+- Beta 2: the virtual microphone resets the model state when it resumes from the idle
+  pause, so audio from before the pause is no longer replayed.
+- Level meters (pavucontrol and other monitor/passive links) no longer keep the model
+  running.
+- CI runs on GitHub-hosted runners; releases are published to WinGet automatically.
+- Isolation model unchanged: pDFNet3 Pro v7, same as beta 1.
+
 * Sun Nov 15 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.1-1
 - Republished beta 1 with the pDFNet3 Pro v7 (A2-300k, silence gate C) as the voice
   isolation model when a voice profile is applied (240 ms total latency with a profile);

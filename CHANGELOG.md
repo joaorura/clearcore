@@ -9,6 +9,17 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-11-15
+
+### Fixed
+- **Virtual microphone resume after the idle pause (Linux)**: new optional C ABI `clearcore_filter_reset` zeroes all streaming state (v7 FIFOs, graph states, gate C, level FIR; v3 STFT and recurrent state of the active and standby engines; studio chain), keeping profile, tokens and models. The PipeWire helper requests it when capture is reactivated, so the first ~240 ms after a resume no longer replay pre-pause audio.
+- **Monitor links no longer keep the model running (Linux)**: links reading the virtual mic with `link.passive`, `node.passive`, `stream.monitor` (pavucontrol level meters), `stream.capture.sink` or `media.category=Monitor` no longer count as consumers nor resume capture. The fixed 64-entry link table is gone.
+
+### Changed
+- CI (`ci.yml`) runs on GitHub-hosted `ubuntu-24.04` runners with Rust 1.90.0 pinned, keeping `--locked --offline` builds; clippy `-D warnings` is blocking again.
+- The release workflow publishes `joaorura.Clearcore` to WinGet after the GitHub release (non-blocking job).
+- Isolation model unchanged: pDFNet3 Pro v7 (A2-300k), same archive and SHA-256 as 0.1.0-beta.1.
+
 ## [0.1.0-beta.1] - 2026-11-15 (republished with pDFNet3 Pro v7)
 
 ### Added
@@ -49,4 +60,5 @@ First beta release.
 - Requires an x86-64 CPU with AVX2 for the isolation model; on ARM64 builds it reports `MODEL_LOAD_FAILED` (known limitation of this beta).
 - Licensing: PolyForm Noncommercial License 1.0.0 (source code) and CC BY-NC 4.0 (models and documentation).
 
+[0.1.0-beta.2]: https://github.com/joaorura/clearcore/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/joaorura/clearcore/releases/tag/v0.1.0-beta.1

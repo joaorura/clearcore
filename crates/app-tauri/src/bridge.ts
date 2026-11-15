@@ -351,7 +351,7 @@ export async function invokeBridge<T>(cmd: string, args?: Record<string, unknown
     return { success: true, id: String(args?.id ?? '') } as unknown as T;
   }
   if (cmd === 'export_diagnostics') {
-    return JSON.stringify({ app: 'ClearCore', version: '0.1.0-beta.1' }) as unknown as T;
+    return JSON.stringify({ app: 'ClearCore', version: '0.1.0-beta.2' }) as unknown as T;
   }
 
   return {} as T;
