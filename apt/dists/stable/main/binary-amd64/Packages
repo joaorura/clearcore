@@ -6,10 +6,10 @@ Depends: pipewire (>= 0.3.0)
 Recommends: ocl-icd-libopencl1
 Suggests: intel-opencl-icd, libze1
 Filename: pool/main/Clearcore-0.1.0-beta.1_amd64.deb
-Size: 334425586
-MD5sum: 75dc417ef0ef620fb913f00e88322b79
-SHA1: daf0d17a3d78bb636b9677ffc45cdf4801fe6a02
-SHA256: 73a47adc161a80092b7d76aaa7b5580a7553cdeab55a3924038a98132c956062
+Size: 362826488
+MD5sum: cbded574ee29cfe224768d4d7490ed37
+SHA1: afc2828ff53395a705c4c7872a7ed5859c42dbc9
+SHA256: 22318c24b58a6827ff2d7d8de134033ea31262fc587e6f99f69f80da574cbd75
 Section: sound
 Priority: optional
 Homepage: https://github.com/joaorura/clearcore
