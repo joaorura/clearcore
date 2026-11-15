@@ -35,6 +35,8 @@ jobs:
           cache-directories: ~/.cache/ort.pyke.io
       - name: Fetch locked dependencies
         run: cargo fetch --locked
+      - name: Fetch ONNX Runtime binaries
+        run: cargo build -p realtime-noise-model --features ort --locked --offline
       - name: Verify pinned toolchain
         run: |
           rustc --version | grep -Eq '^rustc 1\.90\.0 '
