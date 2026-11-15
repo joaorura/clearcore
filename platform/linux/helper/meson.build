@@ -64,3 +64,12 @@ test_shared_state = executable(
 )
 
 test('shared_state_layout', test_shared_state)
+
+test_consumer_classifier = executable(
+    'test_consumer_classifier',
+    'tests/test_consumer_classifier.c',
+    include_directories: inc_dir,
+    dependencies: [pipewire_dep]
+)
+
+test('consumer_classifier', test_consumer_classifier)

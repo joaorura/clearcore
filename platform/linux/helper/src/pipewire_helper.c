@@ -105,11 +105,15 @@ static void apply_studio_preset(pipewire_helper_context_t *ctx) {
 }
 
 /* Core Events Listener for Synchronous Discovery */
+static void consumers_sync_done(pipewire_helper_context_t *ctx, int seq);
+
 static void core_event_done(void *data, uint32_t id, int seq) {
     pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)data;
-    if (ctx && id == PW_ID_CORE && seq == ctx->sync_seq) {
+    if (!ctx || id != PW_ID_CORE) return;
+    if (seq == ctx->sync_seq) {
         ctx->sync_done = true;
     }
+    consumers_sync_done(ctx, seq);
 }
 
 static const struct pw_core_events core_events = {
@@ -118,6 +122,257 @@ static const struct pw_core_events core_events = {
 };
 
 static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable_headset);
+
+/* ------------------------------------------------------------------------------------------
+ * Physical capture lifecycle (main thread only)
+ * ------------------------------------------------------------------------------------------ */
+
+static void release_timer_set(pipewire_helper_context_t *ctx, bool arm) {
+    if (!ctx->bt_release_timer || !ctx->loop) return;
+    struct timespec value = {0, 0};
+    if (arm) {
+        value.tv_sec = 3;
+        value.tv_nsec = 500000000; /* 3.5 seconds */
+    }
+    pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+}
+
+/* Paused -> active: the filter, the accumulator and the transport ring still hold audio from
+ * before the pause (up to ~240 ms with the v7), possibly minutes old. Request the reset BEFORE
+ * activating the stream so it is consumed by the very first on_capture_process after the resume,
+ * on the realtime thread, never concurrently with a hop. */
+static void capture_resume(pipewire_helper_context_t *ctx, const char *why) {
+    release_timer_set(ctx, false);
+    if (ctx->capture_stream && !ctx->capture_active) {
+        atomic_store_explicit(&ctx->reset_pending, true, memory_order_release);
+        pw_stream_set_active(ctx->capture_stream, true);
+        ctx->capture_active = true;
+        fprintf(stderr, "[pipewire_helper] [CAPTURE] Resuming physical capture (%s); streaming state "
+                        "reset requested (resets so far: %llu)\n",
+                why, (unsigned long long)atomic_load_explicit(&ctx->stream_resets, memory_order_relaxed));
+    }
+    bluetooth_switch_profile(ctx, true);
+}
+
+static void capture_pause(pipewire_helper_context_t *ctx, const char *why) {
+    if (ctx->capture_stream && ctx->capture_active) {
+        pw_stream_set_active(ctx->capture_stream, false);
+        ctx->capture_active = false;
+        fprintf(stderr, "[pipewire_helper] [CAPTURE] Pausing physical capture (%s)\n", why);
+    }
+    bluetooth_switch_profile(ctx, false);
+}
+
+/* ------------------------------------------------------------------------------------------
+ * Consumer links of the virtual microphone (main thread only)
+ * ------------------------------------------------------------------------------------------ */
+
+static consumer_link_t *consumer_link_find(pipewire_helper_context_t *ctx, uint32_t id, size_t *index) {
+    for (size_t i = 0; i < ctx->links_len; i++) {
+        if (ctx->links[i]->id == id) {
+            if (index) *index = i;
+            return ctx->links[i];
+        }
+    }
+    return NULL;
+}
+
+static bool grow(void **array, size_t *cap, size_t len) {
+    if (len < *cap) return true;
+    size_t new_cap = *cap ? *cap * 2 : 32;
+    void *grown = realloc(*array, new_cap * sizeof(void *));
+    if (!grown) return false;
+    *array = grown;
+    *cap = new_cap;
+    return true;
+}
+
+/* Number of links currently read from the virtual microphone (any class). */
+static size_t consumer_links_tracked(const pipewire_helper_context_t *ctx) {
+    size_t n = 0;
+    for (size_t i = 0; i < ctx->links_len; i++) {
+        if (ctx->links[i]->tracked) n++;
+    }
+    return n;
+}
+
+static void consumer_link_reevaluate(consumer_link_t *l) {
+    pipewire_helper_context_t *ctx = l->ctx;
+    consumer_class_t node_class = l->node ? l->node->node_class : CONSUMER_UNKNOWN;
+    consumer_class_t cls = consumer_combine(l->link_class, node_class);
+
+    if (cls == CONSUMER_ACTIVE && !l->counted) {
+        l->counted = true;
+        ctx->active_consumer_links++;
+        fprintf(stderr, "[pipewire_helper] [LINK] Consumer attached to virtual mic (Link ID: %u, input node %u, "
+                        "Total active: %u)\n", l->id, l->in_node, ctx->active_consumer_links);
+        capture_resume(ctx, "consumer link");
+    } else if (cls == CONSUMER_PASSIVE) {
+        if (l->counted) {
+            l->counted = false;
+            if (ctx->active_consumer_links > 0) ctx->active_consumer_links--;
+        }
+        if (!l->reported_passive) {
+            l->reported_passive = true;
+            fprintf(stderr, "[pipewire_helper] [LINK] Ignoring monitor/passive link on virtual mic (Link ID: %u, "
+                            "input node %u, link %s, node %s); active consumers: %u\n",
+                    l->id, l->in_node, l->link_class == CONSUMER_PASSIVE ? "passive" : "active",
+                    node_class == CONSUMER_PASSIVE ? "monitor/passive" : "regular",
+                    ctx->active_consumer_links);
+        }
+        /* A monitor alone must not keep the model running (e.g. the stream went STREAMING for
+         * the meter before this link was classified). */
+        if (ctx->active_consumer_links == 0 && ctx->capture_active) {
+            release_timer_set(ctx, true);
+        }
+    }
+}
+
+static void on_consumer_link_info(void *data, const struct pw_link_info *info) {
+    consumer_link_t *l = (consumer_link_t *)data;
+    if (!l || !info || !info->props) return;
+    l->link_class = consumer_classify_link_props(info->props);
+    consumer_link_reevaluate(l);
+}
+
+static const struct pw_link_events consumer_link_events = {
+    .version = PW_VERSION_LINK_EVENTS,
+    .info = on_consumer_link_info,
+};
+
+static void on_consumer_node_info(void *data, const struct pw_node_info *info) {
+    consumer_node_t *n = (consumer_node_t *)data;
+    if (!n || !info || !info->props || !(info->change_mask & PW_NODE_CHANGE_MASK_PROPS)) return;
+    n->node_class = consumer_classify_node_props(info->props);
+    pipewire_helper_context_t *ctx = n->ctx;
+    for (size_t i = 0; i < ctx->links_len; i++) {
+        if (ctx->links[i]->node == n) {
+            consumer_link_reevaluate(ctx->links[i]);
+        }
+    }
+}
+
+static const struct pw_node_events consumer_node_events = {
+    .version = PW_VERSION_NODE_EVENTS,
+    .info = on_consumer_node_info,
+};
+
+static consumer_node_t *consumer_node_acquire(pipewire_helper_context_t *ctx, uint32_t id) {
+    for (size_t i = 0; i < ctx->consumer_nodes_len; i++) {
+        if (ctx->consumer_nodes[i]->id == id) {
+            ctx->consumer_nodes[i]->refs++;
+            return ctx->consumer_nodes[i];
+        }
+    }
+    if (!grow((void **)&ctx->consumer_nodes, &ctx->consumer_nodes_cap, ctx->consumer_nodes_len)) return NULL;
+    consumer_node_t *n = calloc(1, sizeof(*n));
+    if (!n) return NULL;
+    n->ctx = ctx;
+    n->id = id;
+    n->refs = 1;
+    n->node_class = CONSUMER_UNKNOWN;
+    if (ctx->registry) {
+        n->proxy = pw_registry_bind(ctx->registry, id, PW_TYPE_INTERFACE_Node, PW_VERSION_NODE, 0);
+        if (n->proxy) {
+            pw_node_add_listener((struct pw_node *)n->proxy, &n->proxy_listener, &consumer_node_events, n);
+        }
+    }
+    ctx->consumer_nodes[ctx->consumer_nodes_len++] = n;
+    return n;
+}
+
+static void consumer_node_release(pipewire_helper_context_t *ctx, consumer_node_t *n) {
+    if (!n || --n->refs > 0) return;
+    for (size_t i = 0; i < ctx->consumer_nodes_len; i++) {
+        if (ctx->consumer_nodes[i] == n) {
+            ctx->consumer_nodes[i] = ctx->consumer_nodes[--ctx->consumer_nodes_len];
+            break;
+        }
+    }
+    if (n->proxy) {
+        spa_hook_remove(&n->proxy_listener);
+        pw_proxy_destroy(n->proxy);
+    }
+    free(n);
+}
+
+/* The link reads from the virtual mic: bind it and its input node for their info props. The
+ * props may arrive in any order (and the link before the node); the link is counted only once
+ * both are known. A core sync closes the window: if a bind produced no props by then, the side
+ * is treated as active (fail-open: never leave a real recorder without audio). */
+static void consumer_link_track(pipewire_helper_context_t *ctx, consumer_link_t *l) {
+    if (l->tracked) return;
+    l->tracked = true;
+    l->link_class = CONSUMER_UNKNOWN;
+    l->node = consumer_node_acquire(ctx, l->in_node);
+    if (ctx->registry) {
+        l->proxy = pw_registry_bind(ctx->registry, l->id, PW_TYPE_INTERFACE_Link, PW_VERSION_LINK, 0);
+        if (l->proxy) {
+            pw_link_add_listener((struct pw_link *)l->proxy, &l->proxy_listener, &consumer_link_events, l);
+        }
+    }
+    if (ctx->core) {
+        l->sync_seq = pw_core_sync(ctx->core, PW_ID_CORE, 0);
+        l->sync_pending = true;
+    }
+    consumer_link_reevaluate(l);
+}
+
+static void consumers_sync_done(pipewire_helper_context_t *ctx, int seq) {
+    for (size_t i = 0; i < ctx->links_len; i++) {
+        consumer_link_t *l = ctx->links[i];
+        if (!l->sync_pending || l->sync_seq != seq) continue;
+        l->sync_pending = false;
+        bool fallback = false;
+        if (l->link_class == CONSUMER_UNKNOWN) {
+            l->link_class = CONSUMER_ACTIVE;
+            fallback = true;
+        }
+        if (l->node && l->node->node_class == CONSUMER_UNKNOWN) {
+            l->node->node_class = CONSUMER_ACTIVE;
+            fallback = true;
+        }
+        if (fallback) {
+            fprintf(stderr, "[pipewire_helper] [LINK] No props for link %u / node %u: counting it as a consumer\n",
+                    l->id, l->in_node);
+        }
+        consumer_link_reevaluate(l);
+    }
+}
+
+/* The virtual mic node id became known (or changed): classify the links seen before it. */
+static void consumers_rescan(pipewire_helper_context_t *ctx) {
+    if (ctx->node_id == 0) return;
+    for (size_t i = 0; i < ctx->links_len; i++) {
+        consumer_link_t *l = ctx->links[i];
+        if (!l->tracked && l->out_node == ctx->node_id) {
+            fprintf(stderr, "[pipewire_helper] [LINK] Link %u predates the virtual mic node id: tracking it now\n", l->id);
+            consumer_link_track(ctx, l);
+        }
+    }
+}
+
+static void consumer_link_free(pipewire_helper_context_t *ctx, consumer_link_t *l) {
+    if (l->proxy) {
+        spa_hook_remove(&l->proxy_listener);
+        pw_proxy_destroy(l->proxy);
+        l->proxy = NULL;
+    }
+    consumer_node_release(ctx, l->node);
+    free(l);
+}
+
+static void consumers_free(pipewire_helper_context_t *ctx) {
+    for (size_t i = 0; i < ctx->links_len; i++) {
+        consumer_link_free(ctx, ctx->links[i]);
+    }
+    free(ctx->links);
+    ctx->links = NULL;
+    ctx->links_len = ctx->links_cap = 0;
+    free(ctx->consumer_nodes);
+    ctx->consumer_nodes = NULL;
+    ctx->consumer_nodes_len = ctx->consumer_nodes_cap = 0;
+}
 
 /* Registry Listener for Auto-detecting Physical Microphone and Severing Self-Loops */
 static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
@@ -157,51 +412,33 @@ static void registry_event_global(void *data, uint32_t id, uint32_t permissions,
     } else if (strcmp(type, PW_TYPE_INTERFACE_Link) == 0) {
         const char *out_node = spa_dict_lookup(props, PW_KEY_LINK_OUTPUT_NODE);
         const char *in_node = spa_dict_lookup(props, PW_KEY_LINK_INPUT_NODE);
+        if (!out_node || !in_node) return;
+        uint32_t out_id = (uint32_t)strtoul(out_node, NULL, 10);
+        uint32_t in_id = (uint32_t)strtoul(in_node, NULL, 10);
 
         /* Fail-safe: Detect and sever any self-referential loop created by WirePlumber */
-        if (out_node && in_node && ctx->node_id > 0 && ctx->capture_node_id > 0) {
-            uint32_t out_id = (uint32_t)strtoul(out_node, NULL, 10);
-            uint32_t in_id = (uint32_t)strtoul(in_node, NULL, 10);
-            if (out_id == ctx->node_id && in_id == ctx->capture_node_id) {
-                fprintf(stderr, "[pipewire_helper] Severed self-loop link %u -> %u (Link ID: %u)\n", out_id, in_id, id);
-                if (ctx->registry) {
-                    pw_registry_destroy(ctx->registry, id);
-                }
-                return;
+        if (ctx->node_id > 0 && ctx->capture_node_id > 0 &&
+            out_id == ctx->node_id && in_id == ctx->capture_node_id) {
+            fprintf(stderr, "[pipewire_helper] Severed self-loop link %u -> %u (Link ID: %u)\n", out_id, in_id, id);
+            if (ctx->registry) {
+                pw_registry_destroy(ctx->registry, id);
             }
+            return;
         }
 
-        /* Track active consumer links reading from the virtual microphone */
-        if (out_node && ctx->node_id > 0) {
-            uint32_t out_id = (uint32_t)strtoul(out_node, NULL, 10);
-            if (out_id == ctx->node_id) {
-                /* New consumer connected to virtual microphone */
-                bool exists = false;
-                for (size_t i = 0; i < ctx->consumer_link_count; i++) {
-                    if (ctx->consumer_link_ids[i] == id) {
-                        exists = true;
-                        break;
-                    }
-                }
-                if (!exists && ctx->consumer_link_count < sizeof(ctx->consumer_link_ids) / sizeof(ctx->consumer_link_ids[0])) {
-                    ctx->consumer_link_ids[ctx->consumer_link_count++] = id;
-                    ctx->active_consumer_links++;
-                    fprintf(stderr, "[pipewire_helper] [LINK] Consumer attached to virtual mic (Link ID: %u, Total active: %u)\n",
-                            id, ctx->active_consumer_links);
-
-                    /* Disarm idle timer */
-                    if (ctx->bt_release_timer && ctx->loop) {
-                        struct timespec value = {0, 0};
-                        pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
-                    }
-
-                    /* Ensure physical capture stream is active */
-                    if (ctx->capture_stream) {
-                        pw_stream_set_active(ctx->capture_stream, true);
-                    }
-                    bluetooth_switch_profile(ctx, true);
-                }
-            }
+        /* Remember every link (the virtual mic node id may not be known yet); classify the ones
+         * reading from the virtual mic. */
+        if (consumer_link_find(ctx, id, NULL)) return;
+        if (!grow((void **)&ctx->links, &ctx->links_cap, ctx->links_len)) return;
+        consumer_link_t *l = calloc(1, sizeof(*l));
+        if (!l) return;
+        l->ctx = ctx;
+        l->id = id;
+        l->out_node = out_id;
+        l->in_node = in_id;
+        ctx->links[ctx->links_len++] = l;
+        if (ctx->node_id > 0 && out_id == ctx->node_id) {
+            consumer_link_track(ctx, l);
         }
     }
 }
@@ -215,27 +452,28 @@ static void registry_event_global_remove(void *data, uint32_t id) {
         fprintf(stderr, "[pipewire_helper] Bluetooth Audio Card removed (ID: %u)\n", id);
     }
 
-    /* Check if a tracked consumer link was removed */
-    for (size_t i = 0; i < ctx->consumer_link_count; i++) {
-        if (ctx->consumer_link_ids[i] == id) {
-            ctx->consumer_link_ids[i] = ctx->consumer_link_ids[ctx->consumer_link_count - 1];
-            ctx->consumer_link_count--;
-            if (ctx->active_consumer_links > 0) {
-                ctx->active_consumer_links--;
-            }
-            fprintf(stderr, "[pipewire_helper] [LINK] Consumer disconnected from virtual mic (Link ID: %u, Remaining active: %u)\n",
-                    id, ctx->active_consumer_links);
+    size_t index = 0;
+    consumer_link_t *l = consumer_link_find(ctx, id, &index);
+    if (!l) return;
+    ctx->links[index] = ctx->links[--ctx->links_len];
+    bool was_counted = l->counted;
+    if (was_counted && ctx->active_consumer_links > 0) {
+        ctx->active_consumer_links--;
+    }
+    if (was_counted) {
+        fprintf(stderr, "[pipewire_helper] [LINK] Consumer disconnected from virtual mic (Link ID: %u, Remaining active: %u)\n",
+                id, ctx->active_consumer_links);
+    } else if (l->tracked) {
+        fprintf(stderr, "[pipewire_helper] [LINK] Monitor/passive link removed from virtual mic (Link ID: %u)\n", id);
+    }
+    consumer_link_free(ctx, l);
 
-            if (ctx->active_consumer_links == 0) {
-                fprintf(stderr, "[pipewire_helper] [LINK] No active consumers left on virtual mic. Arming 3.5s release timer.\n");
-                if (ctx->bt_release_timer && ctx->loop) {
-                    struct timespec value = {3, 500000000}; /* 3.5 seconds */
-                    pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
-                } else {
-                    bluetooth_switch_profile(ctx, false);
-                }
-            }
-            break;
+    if (was_counted && ctx->active_consumer_links == 0) {
+        fprintf(stderr, "[pipewire_helper] [LINK] No active consumers left on virtual mic. Arming 3.5s release timer.\n");
+        if (ctx->bt_release_timer && ctx->loop) {
+            release_timer_set(ctx, true);
+        } else {
+            capture_pause(ctx, "no consumers");
         }
     }
 }
@@ -262,6 +500,20 @@ static const struct pw_registry_events registry_events = {
 void on_capture_process(void *userdata) {
     pipewire_helper_context_t *ctx = (pipewire_helper_context_t *)userdata;
     if (!ctx || !ctx->capture_stream) return;
+
+    /* First hop after a resume (see capture_resume): forget everything captured before the
+     * pause. Runs here, on the realtime thread, so the filter is never reset during a hop. */
+    if (atomic_exchange_explicit(&ctx->reset_pending, false, memory_order_acq_rel)) {
+        accumulator_init(&ctx->accumulator);
+        noise_suppressor_reset(&ctx->suppressor);
+        if (ctx->neural_filter && ctx->neural_reset_fn) {
+            (void)ctx->neural_reset_fn(ctx->neural_filter);
+        }
+        /* Frames still queued for the virtual mic carry the old generation: the output callback
+         * drops them instead of playing pre-pause audio. */
+        transport_bridge_set_generation(&ctx->transport, transport_bridge_get_generation(&ctx->transport) + 1);
+        atomic_fetch_add_explicit(&ctx->stream_resets, 1, memory_order_relaxed);
+    }
 
     struct pw_buffer *b = pw_stream_dequeue_buffer(ctx->capture_stream);
     if (!b) return;
@@ -393,6 +645,11 @@ void transfer_bounded_buffers(void *userdata) {
     wire_frame_envelope_v1_t frame;
     bool has_frame = transport_bridge_pop(&ctx->transport, &frame);
     uint64_t active_gen = transport_bridge_get_generation(&ctx->transport);
+    /* Frames from before a capture reset (older generation) are dropped all at once, bounded by
+     * the ring capacity, so the first fresh frame is not queued behind them. */
+    for (size_t stale = 0; has_frame && frame.generation_le != active_gen && stale < ctx->transport.capacity; stale++) {
+        has_frame = transport_bridge_pop(&ctx->transport, &frame);
+    }
 
     if (has_frame && (frame.generation_le == active_gen)) {
         /* Valid frame received: sanitize against IEEE 754 clipping */
@@ -419,20 +676,12 @@ static void bluetooth_switch_profile(pipewire_helper_context_t *ctx, bool enable
         ctx->bluetooth_is_headset = true;
         fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Microphone in use: activating headset capture on Card %u (%s)\n",
                 ctx->bluetooth_card_id, ctx->bluetooth_card_name);
-
-        /* Connect and activate capture stream */
-        if (ctx->capture_stream) {
-            pw_stream_set_active(ctx->capture_stream, true);
-        }
+        /* The capture stream itself is activated by capture_resume (with the resume reset). */
     } else {
         if (!ctx->bluetooth_is_headset) return;
         ctx->bluetooth_is_headset = false;
         fprintf(stderr, "[pipewire_helper] [BT-SWITCH] Microphone idle: releasing Bluetooth capture stream. OS / WirePlumber will restore high-fidelity A2DP automatically.\n");
-
-        /* Deactivate capture stream completely so BlueZ knows microphone is not in use */
-        if (ctx->capture_stream) {
-            pw_stream_set_active(ctx->capture_stream, false);
-        }
+        /* The capture stream itself is paused by capture_pause, so BlueZ sees the mic unused. */
     }
 }
 
@@ -443,19 +692,11 @@ static void on_bt_release_timer(void *data, uint64_t expirations) {
 
     fprintf(stderr, "[pipewire_helper] [BT-TIMER] Idle timer expired (3.5s without mic usage). Triggering release.\n");
 
-    // Disarm timer
-    if (ctx->bt_release_timer && ctx->loop) {
-        struct timespec value = {0, 0};
-        pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
-    }
+    release_timer_set(ctx, false);
 
     /* Pause physical capture stream so PipeWire knows the mic is completely dormant */
-    if (ctx->capture_stream) {
-        fprintf(stderr, "[pipewire_helper] [BT-TIMER] Pausing physical capture stream\n");
-        pw_stream_set_active(ctx->capture_stream, false);
-    }
-
-    bluetooth_switch_profile(ctx, false);
+    fprintf(stderr, "[pipewire_helper] [BT-TIMER] Pausing physical capture stream\n");
+    capture_pause(ctx, "idle timer");
 }
 
 static void on_process(void *userdata) {
@@ -472,48 +713,48 @@ static void on_stream_state_changed(void *data, enum pw_stream_state old,
             fprintf(stderr, "[pipewire_helper] Stream error: %s\n", error ? error : "unspecified");
             atomic_store_explicit(&ctx->node_ready, false, memory_order_release);
             break;
-        case PW_STREAM_STATE_STREAMING:
+        case PW_STREAM_STATE_STREAMING: {
+            uint32_t previous_id = ctx->node_id;
             ctx->node_id = pw_stream_get_node_id(ctx->stream);
             atomic_store_explicit(&ctx->node_ready, true, memory_order_release);
             fprintf(stderr, "[pipewire_helper] Stream streaming (Node ID: %u)\n", ctx->node_id);
-
-            // Disarm idle release timer if active
-            if (ctx->bt_release_timer && ctx->loop) {
-                struct timespec value = {0, 0};
-                pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+            if (ctx->node_id != previous_id) {
+                consumers_rescan(ctx);
             }
 
-            // Reactivate physical microphone capture stream
-            if (ctx->capture_stream) {
-                pw_stream_set_active(ctx->capture_stream, true);
+            /* Resume only for a recording consumer. A monitor (peak meter) alone also makes the
+             * virtual mic stream; then the capture stays paused and the meter reads silence.
+             * Fail-open when no link is visible at all (registry behind the stream state). */
+            if (ctx->active_consumer_links > 0 || consumer_links_tracked(ctx) == 0) {
+                capture_resume(ctx, "virtual mic streaming");
+            } else {
+                fprintf(stderr, "[pipewire_helper] [LINK] Virtual mic streaming for monitor/passive links only "
+                                "(%zu tracked, 0 active): physical capture stays paused\n",
+                        consumer_links_tracked(ctx));
             }
-
-            // Stream is actively recording: acquire Bluetooth headset profile
-            bluetooth_switch_profile(ctx, true);
             break;
-        case PW_STREAM_STATE_PAUSED:
+        }
+        case PW_STREAM_STATE_PAUSED: {
+            uint32_t previous_id = ctx->node_id;
             ctx->node_id = pw_stream_get_node_id(ctx->stream);
             atomic_store_explicit(&ctx->node_ready, true, memory_order_release);
             fprintf(stderr, "[pipewire_helper] Stream paused (Node ID: %u)\n", ctx->node_id);
+            if (ctx->node_id != previous_id) {
+                consumers_rescan(ctx);
+            }
 
             // Arm 3.5s release timer to return to A2DP cleanly without thrashing
             if (ctx->bt_release_timer && ctx->loop) {
-                struct timespec value = {3, 500000000}; // 3.5 seconds
-                pw_loop_update_timer(pw_main_loop_get_loop(ctx->loop), ctx->bt_release_timer, &value, NULL, false);
+                release_timer_set(ctx, true);
             } else {
-                if (ctx->capture_stream) {
-                    pw_stream_set_active(ctx->capture_stream, false);
-                }
-                bluetooth_switch_profile(ctx, false);
+                capture_pause(ctx, "virtual mic paused");
             }
             break;
+        }
         case PW_STREAM_STATE_UNCONNECTED:
             atomic_store_explicit(&ctx->node_ready, false, memory_order_release);
             fprintf(stderr, "[pipewire_helper] Stream unconnected\n");
-            if (ctx->capture_stream) {
-                pw_stream_set_active(ctx->capture_stream, false);
-            }
-            bluetooth_switch_profile(ctx, false);
+            capture_pause(ctx, "virtual mic unconnected");
             break;
         default:
             break;
@@ -617,6 +858,7 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_supports_voice_profile_fn = NULL;
     ctx->neural_is_voice_profile_active_fn = NULL;
     ctx->neural_status_json_fn = NULL;
+    ctx->neural_reset_fn = NULL;
     atomic_store_explicit(&ctx->applied_generation, 0, memory_order_relaxed);
 
     char exe_buf[PATH_MAX] = {0};
@@ -719,6 +961,10 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
         (clearcore_is_voice_profile_active_fn_t)dlsym(lib, "clearcore_filter_is_voice_profile_active");
     clearcore_status_json_fn_t status_json_fn =
         (clearcore_status_json_fn_t)dlsym(lib, "clearcore_filter_status_json");
+    clearcore_reset_fn_t reset_fn = (clearcore_reset_fn_t)dlsym(lib, "clearcore_filter_reset");
+    if (!reset_fn) {
+        fprintf(stderr, "[pipewire_helper] clearcore_filter_reset not found; the filter keeps its state across idle pauses.\n");
+    }
     if (!reload_active_profile_fn || !supports_voice_profile_fn || !is_voice_profile_active_fn) {
         fprintf(stderr, "[pipewire_helper] Voice-profile C-ABI absent; running unconditioned denoiser.\n");
     }
@@ -773,6 +1019,7 @@ static void neural_filter_init(pipewire_helper_context_t *ctx) {
     ctx->neural_supports_voice_profile_fn = supports_voice_profile_fn;
     ctx->neural_is_voice_profile_active_fn = is_voice_profile_active_fn;
     ctx->neural_status_json_fn = status_json_fn;
+    ctx->neural_reset_fn = reset_fn;
 
     /* Reload persisted active profile from disk BEFORE warmup so the warmup hops exercise the
      * personalized conditioning path (rc: 1 loaded, 0 none/neutral, <0 error). Never on the audio
@@ -839,6 +1086,7 @@ static void neural_filter_free(pipewire_helper_context_t *ctx) {
     ctx->neural_supports_voice_profile_fn = NULL;
     ctx->neural_is_voice_profile_active_fn = NULL;
     ctx->neural_status_json_fn = NULL;
+    ctx->neural_reset_fn = NULL;
     ctx->applied_preset = CLEARCORE_PRESET_OFF;
 }
 
@@ -900,6 +1148,8 @@ int pipewire_helper_init(pipewire_helper_context_t *ctx) {
     atomic_init(&ctx->process_count, 0);
     atomic_init(&ctx->alloc_violations, 0);
     atomic_init(&ctx->blocking_violations, 0);
+    atomic_init(&ctx->reset_pending, false);
+    atomic_init(&ctx->stream_resets, 0);
 
     accumulator_init(&ctx->accumulator);
     noise_suppressor_init(&ctx->suppressor);
@@ -1095,6 +1345,8 @@ int pipewire_helper_start(pipewire_helper_context_t *ctx) {
             fprintf(stderr, "[pipewire_helper] Warning: Failed to connect capture stream: %s\n", spa_strerror(cap_res));
             pw_stream_destroy(ctx->capture_stream);
             ctx->capture_stream = NULL;
+        } else {
+            ctx->capture_active = true; /* connected without PW_STREAM_FLAG_INACTIVE */
         }
     }
 
@@ -1132,6 +1384,7 @@ void pipewire_helper_destroy(pipewire_helper_context_t *ctx) {
         pw_loop_destroy_source(pw_main_loop_get_loop(ctx->loop), ctx->profile_signal_source);
         ctx->profile_signal_source = NULL;
     }
+    consumers_free(ctx);
     if (ctx->registry) {
         spa_hook_remove(&ctx->core_listener);
         pw_proxy_destroy((struct pw_proxy *)ctx->registry);
