@@ -1,20 +1,19 @@
-# ClearCore v0.1.0-beta.1 — First Beta Release
+# ClearCore v0.1.0-beta.1 — modo isolamento com o pDFNet3 Pro v7
 
-The first beta of **ClearCore (`v0.1.0-beta.1`)**: a cross-platform, realtime AI noise-suppression virtual microphone with voice isolation by speaker profile.
-
-ClearCore runs entirely offline on your machine: no cloud, no account, no audio leaves the computer. Every package ships the **pDFNet3 Pro** isolation model built in, ready to use with no configuration.
+Esta é a **v0.1.0-beta.1 republicada**: o mesmo nome de versão, agora com o novo modelo de isolamento de voz. O ClearCore continua rodando inteiramente offline: sem nuvem, sem conta, nenhum áudio sai do computador.
 
 ---
 
-## 🚀 Release Highlights
+## Novidades
 
-- **pDFNet3 Pro built in**: the isolation model (DeepFilterNet3 with FiLM speaker conditioning) ships inside every package, under `models/pdfnet3/`, and loads by default with no path or environment variable. Its SHA-256 is pinned in the code and checked before loading; if the file is missing or altered, the app says so instead of silently switching to another model. It is the only isolation model shipped.
-- **Voice profile (enrollment)**: record a few samples with your microphone, build your voice profile and the virtual microphone isolates your voice from other speakers and background noise. The profile is applied to the same pDFNet3 Pro model the virtual microphone runs.
-- **Reliable enrollment**: the noisy-environment check measures the signal-to-noise ratio on the raw recording; the level check measures only active speech (the same rule for samples and for the profile build); stored samples keep weak speech (denoiser attenuation capped at about 12 dB); clear messages for each rejection (noisy environment, too quiet, not enough speech).
-- **Build progress you can follow**: a loading state while the profile is built, and a build already running is resumed instead of reported as busy (`GetStatus` exposes `active_enrollment_jobs`).
-- **Recording feedback**: smoothed dBFS level meter, low-speech-level warning and the name of the microphone in use (falling back to the system default microphone).
-- **Studio DSP chain**: `Natural`, `Podcast`, `Broadcast` and `Off` presets (high-pass, gate/expander, EQ, de-esser, leveler, true-peak limiter).
-- **Native virtual microphone**: PipeWire bridge on Linux, WaveRT driver on Windows, CoreAudio HAL on macOS.
+- **Modo isolamento com o modelo v7**: com um perfil de voz aplicado (intensidade > 0), o daemon e o microfone virtual passam a usar o **pDFNet3 Pro v7** (A2-300k, com gate de silêncio C), que preserva a voz do usuário no headset e remove as outras vozes e o ruído de fundo. Sem perfil, ou com intensidade 0, segue rodando o Pro v3 full em modo neutro.
+- **Latência**: com perfil, a latência total é de **240 ms**; sem perfil, 30 ms.
+- **Integridade**: o arquivo do modelo v7 (`models/pdfnet3/pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz`) vai em todos os pacotes com SHA-256 fixado no código e conferido antes de carregar (`b0f125d71d8764e3b73e91b667b2cb7aba1ef1e4b6987c53e9019958f5369608`).
+
+## Atenção ao atualizar
+
+- **Perfis antigos precisam ser recadastrados.** Um perfil gravado numa versão anterior não é aplicado pelo v7: a voz fica neutra e o app pede um novo cadastro. Grave as amostras e gere o perfil de novo.
+- **Quem tinha a beta.2 instalada deve desinstalar e instalar de novo.** A versão `0.1.0-beta.1` é numericamente menor que a `0.1.0-beta.2`, então o gerenciador de pacotes não a trata como atualização. No Fedora: `sudo dnf remove clearcore && sudo dnf install clearcore`; nos demais sistemas, desinstale e instale o pacote desta release.
 
 ---
 
@@ -120,20 +119,14 @@ To ensure your downloaded binaries have not been corrupted or tampered with, ver
 
 ---
 
-## 📋 Full Changelog for v0.1.0-beta.1
+## 📋 Mudanças desta republicação
 
-### Added
-- pDFNet3 Pro (FiLM voice-profile conditioning) bundled as the only isolation model: `pdfnet3-release-asset-v1.tar.gz` (daemon, tract) and `pdfnet3-stateful-asset-v1.tar.gz` (virtual microphone, ONNX Runtime), SHA-256 pinned in the code, found automatically in the installation (`/opt/clearcore/models`, `/usr/share/clearcore/models`, next to the executable, `CLEARCORE_MODELS_DIR`). The enrollment model paired with it ships in `models/enrollment/`.
-- `GetStatus` reports `isolation_model` (`pdfnet3-pro`, or `none` when unavailable) and `isolation_model_error` (fixed `MODEL_*` code); the profile tab shows the code when the model cannot be loaded.
-- Voice enrollment: guided sample recording, profile build with microphone EQ, profile storage with owner-only permissions, voice isolation on/off and intensity.
-- Desktop app (Electron/React) with tray controls, level meters, A/B recording test and status telemetry.
+### Adicionado
+- pDFNet3 Pro v7 (A2-300k, gate de silêncio C) como modelo do modo isolamento quando há perfil de voz: daemon em tract e microfone virtual em ONNX Runtime (1 thread). Contrato em `docs/pdfnet3-pro-v7-stream.md`.
+- Perfis de voz gerados a partir desta versão são perfis v7 (`model_id` `pdfnet3-pro-v7-a2-300k`); `GetStatus` informa `isolation_model_variant` (`pdfnet3-pro-v7` / `pdfnet3-pro-v3`).
 
-### Behavior
-- With the pDFNet3 Pro loaded, every backend request runs it on the CPU (tract); requesting an accelerator (OpenVINO, TensorRT) reports a CPU fallback with the reason, since those backends cannot apply a voice profile.
-- `voice_profile_supported` is true exactly when the active model can apply a profile; when it is false, "build profile" is refused immediately with a clear message instead of failing at the end.
-- Enrollment samples are denoised with the same pDFNet3 Pro in neutral conditioning.
-- The base DeepFilterNet3 graphs and TensorRT engines are no longer shipped.
-
+### Mantido
+- Pro v3 full sem perfil, cadastro de voz guiado, cadeia DSP de estúdio, microfone virtual nativo (PipeWire, WaveRT, CoreAudio) e runtime OpenVINO embutido nos pacotes Linux x64 e Windows x64.
 
 ## 💬 Feedback & Bug Reports
 

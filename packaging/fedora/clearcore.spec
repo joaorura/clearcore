@@ -107,6 +107,12 @@ gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database /usr/share/applications 2>/dev/null || true
 
 %changelog
+* Sun Nov 15 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.1-1
+- Republished beta 1 with the pDFNet3 Pro v7 (A2-300k, silence gate C) as the voice
+  isolation model when a voice profile is applied (240 ms total latency with a profile);
+  the Pro v3 full keeps running without a profile. The v7 archive is SHA-256 pinned.
+- Voice profiles from earlier builds must be enrolled again.
+
 * Tue Nov 10 2026 João Rura <joaorura@users.noreply.github.com> - 0.1.0_beta.1-1
 - Republished beta 1: pDFNet3 Pro v3 full (speaker embedding conditioning) is the only
   isolation model, with the enrollment v3 model (both SHA-256 pinned); the voice profile is

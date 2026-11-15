@@ -9,6 +9,8 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 
 ## [Unreleased]
 
+## [0.1.0-beta.1] - 2026-11-15 (republished with pDFNet3 Pro v7)
+
 ### Added
 - **pDFNet3 Pro v7 (A2-300k) with silence gate C for voice isolation**: with a voice profile applied (intensity > 0) the daemon (tract) and the virtual microphone (ONNX Runtime, 1 thread) run the v7 instead of the Pro v3 full; without a profile, or at intensity 0, the Pro v3 full keeps running in neutral mode. Contract in `docs/pdfnet3-pro-v7-stream.md`: six graphs, 22-frame encoder FIFO, 21-frame spectrum FIFO, 16 kHz level feature on the training FIR v1, gate C (-25 dB floor, 200 ms hangover). Total latency **240 ms** with a profile (30 ms without). Cost measured hop by hop on one thread: 79.9 ms (tract) and 41.8 ms (ORT) per second of audio. New archive `models/pdfnet3/pdfnet3-pro-v7-a2-300k-stateful-asset-v1.tar.gz` (14 175 123 bytes, SHA-256 pinned, +14 MB in every package).
 - Voice profiles built from now on are v7 profiles (`model_id` `pdfnet3-pro-v7-a2-300k`, `speaker_tokens_b64` with the `enroll_tokens` output of the enrollment audio). A profile from an earlier release (no tokens) is not applied: the voice stays neutral and the daemon/filter log asks for a new enrollment. `GetStatus` adds `isolation_model_variant` (`pdfnet3-pro-v7` / `pdfnet3-pro-v3`).
@@ -21,7 +23,7 @@ ClearCore is a first-party, cross-platform realtime AI noise-suppression virtual
 - The OpenVINO loader accepts the 2025 and 2026 series (C ABI checked against the 2025.4 and 2026.4 headers and the exported symbols of 2025.4, 2026.0 and 2026.4) and finds `libopenvino_c.so*` by glob in `OPENVINO_LIB_PATH`, the embedded runtime, `/usr/lib64`, `/lib64` and `/usr/local/lib64`.
 - `scripts/install-openvino.sh` only diagnoses and lists the NPU/GPU driver packages that exist on each distribution; `detect-hardware` recognizes the embedded runtime.
 
-## [0.1.0-beta.1] - 2026-11-09
+## [0.1.0-beta.1] - 2026-11-09 (first publication)
 
 First beta release.
 
