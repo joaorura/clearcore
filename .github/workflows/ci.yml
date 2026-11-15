@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 env:
-  CARGO_NET_OFFLINE: "true"
+  # Not CARGO_NET_OFFLINE=true: ort-sys reads it as "skip the ONNX Runtime download" and then
+  # fails to link. Registry access is blocked by --offline on every cargo command below instead.
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -29,17 +30,11 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          # ort-sys links against ONNX Runtime downloaded here by its build script; keep it
-          # next to the cached target dir so a cache hit never points at a missing library.
+          # ort-sys downloads a hash-pinned ONNX Runtime at build time; keep it next to the
+          # cached target dir so a cache hit never points at a missing library.
           cache-directories: ~/.cache/ort.pyke.io
-      - name: Fetch locked dependencies (only step allowed network access)
-        env:
-          CARGO_NET_OFFLINE: "false"
+      - name: Fetch locked dependencies
         run: cargo fetch --locked
-      - name: Fetch ONNX Runtime binaries (ort-sys refuses to download while offline)
-        env:
-          CARGO_NET_OFFLINE: "false"
-        run: cargo build -p realtime-noise-model --features ort --locked --offline
       - name: Verify pinned toolchain
         run: |
           rustc --version | grep -Eq '^rustc 1\.90\.0 '
