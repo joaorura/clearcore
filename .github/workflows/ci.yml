@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
 
 permissions:
@@ -11,15 +11,27 @@ permissions:
 env:
   CARGO_NET_OFFLINE: "true"
   CARGO_TERM_COLOR: always
-  RUSTUP_DIST_SERVER: http://127.0.0.1:9
-  RUSTUP_UPDATE_ROOT: http://127.0.0.1:9
 
 jobs:
   rust:
-    runs-on: [self-hosted, linux, x64, rust-1.90.0-offline]
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.90.0
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpipewire-0.3-dev libclang-dev meson ninja-build
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Fetch locked dependencies (only step allowed network access)
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: cargo fetch --locked
       - name: Verify pinned toolchain
         run: |
           rustc --version | grep -Eq '^rustc 1\.90\.0 '
@@ -30,6 +42,10 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
+      - name: Build PipeWire helper
+        run: |
+          meson setup platform/linux/helper/build platform/linux/helper
+          ninja -C platform/linux/helper/build
       - name: Build workspace
         run: cargo build --workspace --locked --offline
       - name: Test workspace
