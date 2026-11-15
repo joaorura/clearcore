@@ -15,6 +15,7 @@
 #include "noise_suppressor.h"
 #include "clearcore_state.h"
 #include "target_resolver.h"
+#include "consumer_classifier.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -102,6 +103,44 @@ typedef int (*clearcore_is_voice_profile_active_fn_t)(const void *filter);
  * model, runtime (ort:CPU / openvino:NPU|GPU|CPU), fallback reason, profile and latency. Writes a
  * NUL-terminated, possibly truncated string; returns the full length or -1. */
 typedef int (*clearcore_status_json_fn_t)(void *filter, char *buf, size_t len);
+/* Optional (libraries with the resume reset): zeroes the streaming state of the filter (STFT,
+ * recurrent states, v7 FIFOs/gate/level, studio chain), keeping profile and models. Same thread as
+ * clearcore_filter_process: the helper calls it from on_capture_process. 0 ok, <0 error. */
+typedef int (*clearcore_reset_fn_t)(void *filter);
+
+struct pipewire_helper_context;
+struct consumer_node;
+
+/**
+ * A link whose output is the virtual microphone, tracked to decide whether someone is recording.
+ * Main (control) thread only. Every link global is remembered (out/in node), so links that
+ * appeared before the virtual mic node id was known are classified once it is.
+ */
+typedef struct consumer_link {
+    struct pipewire_helper_context *ctx;
+    uint32_t id;
+    uint32_t out_node;
+    uint32_t in_node;
+    bool tracked;                  /* out_node is the virtual mic: bound and classified */
+    consumer_class_t link_class;   /* from the link info props (link.passive) */
+    struct consumer_node *node;    /* input node (shared by its links) */
+    struct pw_proxy *proxy;
+    struct spa_hook proxy_listener;
+    int sync_seq;                  /* core sync sent after binding: fail-open on timeout */
+    bool sync_pending;
+    bool counted;                  /* counted in active_consumer_links */
+    bool reported_passive;
+} consumer_link_t;
+
+/** Input node of one or more tracked links, bound for its info props (stream.monitor, ...). */
+typedef struct consumer_node {
+    struct pipewire_helper_context *ctx;
+    uint32_t id;
+    consumer_class_t node_class;
+    struct pw_proxy *proxy;
+    struct spa_hook proxy_listener;
+    unsigned refs;
+} consumer_node_t;
 
 /**
  * PipeWire Native Helper Context.
@@ -137,6 +176,15 @@ typedef struct pipewire_helper_context {
     clearcore_supports_voice_profile_fn_t neural_supports_voice_profile_fn;
     clearcore_is_voice_profile_active_fn_t neural_is_voice_profile_active_fn;
     clearcore_status_json_fn_t neural_status_json_fn; /* optional: NULL on an old library */
+    clearcore_reset_fn_t neural_reset_fn;             /* optional: NULL on an old library */
+
+    /* Resume reset: set by the main thread right before pw_stream_set_active(capture, true),
+     * consumed (atomic exchange) at the start of the next on_capture_process, which then clears
+     * the accumulator, the DSP suppressor and the filter and bumps the transport generation. No
+     * lock on the realtime thread; the filter is never touched concurrently with a hop. */
+    _Atomic bool reset_pending;
+    _Atomic uint64_t stream_resets;
+    bool capture_active;                       /* main thread: last pw_stream_set_active(capture) */
 
     /* Profile reload synchronization.
      * `applied_generation` is the shared-state `generation` value the last reload was driven by;
@@ -155,9 +203,13 @@ typedef struct pipewire_helper_context {
     char bluetooth_card_name[128];
     bool bluetooth_is_headset;
     struct spa_source *bt_release_timer;
-    uint32_t active_consumer_links;            /* Count of active consumer links attached to virtual mic */
-    uint32_t consumer_link_ids[64];            /* Registered Link IDs originating from ctx->node_id */
-    size_t consumer_link_count;
+    uint32_t active_consumer_links;            /* Links counted as recording consumers (not monitors) */
+    consumer_link_t **links;                   /* Every link global seen (grows on demand) */
+    size_t links_len;
+    size_t links_cap;
+    consumer_node_t **consumer_nodes;          /* Bound input nodes of tracked links */
+    size_t consumer_nodes_len;
+    size_t consumer_nodes_cap;
     _Atomic bool running;
     _Atomic bool node_ready;
     _Atomic bool capture_ready;
