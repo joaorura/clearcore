@@ -1,13 +1,13 @@
 Package: clearcore
-Version: 0.1.0-beta.1
+Version: 0.1.0-beta.2
 Architecture: arm64
 Maintainer: João Messias Lima Pereira <jmessiaslp856@gmail.com>
 Depends: pipewire (>= 0.3.0)
-Filename: pool/main/Clearcore-0.1.0-beta.1_arm64.deb
-Size: 329611494
-MD5sum: d561d96da5cd3d1266c1448430cf9472
-SHA1: 4716792acca1e874c1c7e9b9569b41b0c7b0d81d
-SHA256: 2bbb63f832661a34609e6dc06952e90b21dd8b9909eb62d4409db897db6627f3
+Filename: pool/main/Clearcore-0.1.0-beta.2_arm64.deb
+Size: 329689588
+MD5sum: 460a5e85d900140ff353f423ada34c4b
+SHA1: 2c1438f55689340a4fcc2268487fe2172a25f503
+SHA256: a0d31f5c6453b6b1748b4c8a60b6433a42eb27c64bba852a004b4af7306dc158
 Section: sound
 Priority: optional
 Homepage: https://github.com/joaorura/clearcore

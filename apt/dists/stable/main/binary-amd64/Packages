@@ -1,15 +1,15 @@
 Package: clearcore
-Version: 0.1.0-beta.1
+Version: 0.1.0-beta.2
 Architecture: amd64
 Maintainer: João Messias Lima Pereira <jmessiaslp856@gmail.com>
 Depends: pipewire (>= 0.3.0)
 Recommends: ocl-icd-libopencl1
 Suggests: intel-opencl-icd, libze1
-Filename: pool/main/Clearcore-0.1.0-beta.1_amd64.deb
-Size: 362826488
-MD5sum: cbded574ee29cfe224768d4d7490ed37
-SHA1: afc2828ff53395a705c4c7872a7ed5859c42dbc9
-SHA256: 22318c24b58a6827ff2d7d8de134033ea31262fc587e6f99f69f80da574cbd75
+Filename: pool/main/Clearcore-0.1.0-beta.2_amd64.deb
+Size: 362863644
+MD5sum: d140cf210802ba8a9deeb87a3d9e021f
+SHA1: 6dbe8f19f6d5772694dbc228e5b1b46adb2c9396
+SHA256: ec59dbd3d37a5e9664307544289f3c727e68dbc77b1bb75de340539f846db30b
 Section: sound
 Priority: optional
 Homepage: https://github.com/joaorura/clearcore
