@@ -187,6 +187,29 @@ impl ClearcoreFilter {
         }
     }
 
+    /// Back to the start of a stream, as if the filter had just been created: zeroes the STFT
+    /// memories, the recurrent state of the v3/v2 engine (active and standby), the v7 stream
+    /// (FIFOs, the states of its graphs, gate C, level FIR) and the studio chain (filters,
+    /// envelopes, limiter look-ahead). The voice profile, the speaker tokens, the EQ, the preset,
+    /// the leveler intensity and the loaded models are kept.
+    ///
+    /// Called when capture resumes after an idle pause: without it the first hops would replay
+    /// audio buffered before the pause (up to ~240 ms with the v7).
+    pub fn reset_stream(&mut self) -> Result<(), String> {
+        self.core.reset().map_err(|e| format!("{e:?}"))?;
+        if let Some(v7) = &mut self.v7 {
+            v7.reset();
+        }
+        let preset = self.control.preset();
+        let leveler = self.control.leveler_intensity();
+        let mut chain = StudioChain::new(preset);
+        chain.set_leveler_intensity(leveler);
+        self.chain = chain;
+        self.applied_preset = preset;
+        self.applied_leveler = leveler;
+        Ok(())
+    }
+
     #[must_use]
     pub fn algorithmic_latency_samples(&self) -> u32 {
         let model = if self.v7_active {
@@ -426,6 +449,25 @@ pub unsafe extern "C" fn clearcore_filter_process(
             unsafe { std::slice::from_raw_parts_mut(out_samples, 480) }.copy_from_slice(&out);
             0
         }
+        Err(_) => -2,
+    }
+}
+
+/// Reset the streaming state (see [`ClearcoreFilter::reset_stream`]): the next hop behaves as the
+/// first hop of a freshly created filter with the same profile, preset and models. Returns `0`,
+/// `-1` for NULL, `-2` when an engine failed to reset (the filter stays usable).
+///
+/// # Safety
+/// `filter` must be a valid pointer from `clearcore_filter_create`, or NULL. Same thread as
+/// `clearcore_filter_process` (never concurrently with it): the helper calls it from the capture
+/// callback, right before the first hop after a resume.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clearcore_filter_reset(filter: *mut ClearcoreFilter) -> i32 {
+    if filter.is_null() {
+        return -1;
+    }
+    match unsafe { &mut *filter }.reset_stream() {
+        Ok(()) => 0,
         Err(_) => -2,
     }
 }

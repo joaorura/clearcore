@@ -118,6 +118,18 @@ Inalterada para o helper (`create`, `process`, `free`, `set_preset`, `set_levele
 `speaker_conditioning`, `eq`, `silent_hops` e `latency_us` (`hops`, `p50`, `p99`, `max`). O helper a
 resolve por `dlsym` e registra o status na partida e a cada recarga de perfil.
 
+Nova e opcional: `clearcore_filter_reset(filter)` zera o estado de streaming (STFT, estados recorrentes
+do motor ativo e do standby, FIFOs/estados/gate C/FIR de nível do v7 e a cadeia de estúdio), mantendo
+perfil, tokens, EQ, preset e modelos. O helper a chama no primeiro `on_capture_process` depois que a
+captura volta de uma pausa por ociosidade (flag atômica armada antes do `pw_stream_set_active`), junto
+com o acumulador, o supressor DSP e a geração do anel de transporte, para que nenhum áudio de antes da
+pausa saia no microfone virtual.
+
+Só conta como consumidor do microfone virtual o link cujo link e nó de entrada não são de monitoramento:
+`link.passive`, `node.passive` (`true`/`in`), `stream.monitor` (o que o pipewire-pulse põe nos streams de
+peak detect, como o medidor do pavucontrol), `stream.capture.sink` e `media.category=Monitor` são
+ignorados (`platform/linux/helper/src/consumer_classifier.h`).
+
 ## Medições (2026-11-09)
 
 Intel Core Ultra 7 265H, OpenVINO 2026.4.1 do pip, asset real v3 (`c1bee559…56ee`), quadro completo

@@ -219,6 +219,7 @@ fn null_handles_are_rejected() {
             clearcore_filter_status_json(std::ptr::null_mut(), std::ptr::null_mut(), 0),
             -1
         );
+        assert_eq!(clearcore_filter_reset(std::ptr::null_mut()), -1);
     }
 }
 
@@ -990,4 +991,233 @@ fn v7_profile_tampering_and_model_mismatch_are_rejected_by_the_filter_parser() {
     let stripped = json.replace(&format!("\"speaker_tokens_b64\": \"{tokens}\","), "");
     assert_ne!(stripped, json);
     assert!(StoredProfile::from_json(&stripped).is_err());
+}
+
+// ------------------------------------------------------------------ reset on resume -----
+
+/// Room-tone-like noise at about -80 dBFS: well above the digital-silence shortcut (RMS 1e-7),
+/// so the STFT, the graphs, the FIFOs and the gate all run on it.
+fn quiet_frame(index: u32) -> [f32; 480] {
+    let mut frame = [0.0_f32; 480];
+    let mut state = index.wrapping_mul(2_654_435_761).wrapping_add(0x9E37_79B9);
+    for sample in &mut frame {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        *sample = (2e-4 * (f64::from(state) / f64::from(u32::MAX) - 0.5)) as f32;
+    }
+    frame
+}
+
+fn run_quiet(filter: &mut ClearcoreFilter, hops: std::ops::Range<u32>) -> Vec<f32> {
+    hops.flat_map(|i| filter.process(&quiet_frame(i)).expect("quiet hop"))
+        .collect()
+}
+
+fn energy(samples: &[f32]) -> f64 {
+    samples.iter().map(|v| f64::from(*v).powi(2)).sum()
+}
+
+fn max_abs_diff(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len());
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0f32, f32::max)
+}
+
+/// The v7 vector's input (target speaker in noise), as 480-sample hops.
+fn v7_input_hops(count: usize) -> Vec<[f32; 480]> {
+    let bytes = std::fs::read(
+        repo_root().join("crates/model/tests/fixtures/pdfnet3_v7/alvo_snr0/input.wav"),
+    )
+    .expect("input.wav");
+    let data = bytes
+        .windows(4)
+        .position(|w| w == b"data")
+        .expect("data chunk");
+    let input: Vec<f32> = bytes[data + 8..]
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+    input
+        .chunks_exact(480)
+        .take(count)
+        .map(|c| c.try_into().expect("hop"))
+        .collect()
+}
+
+fn v7_filter(profile: &StoredProfile) -> ClearcoreFilter {
+    let mut filter = ClearcoreFilter::new(&repo_root(), None).expect("filter");
+    assert!(filter.v7_loaded(), "bundled v7 archive");
+    assert_eq!(
+        filter.apply_profile(profile, 100),
+        Ok(ProfileOutcome::Applied)
+    );
+    assert!(filter.v7_active());
+    filter
+}
+
+/// Audio A (the v7 vector), then `clearcore_filter_reset`, then quiet noise: the output must be
+/// the one of a freshly created filter fed the same quiet noise (no trace of A), while without
+/// the reset the 21-frame FIFO replays A for ~210 ms.
+#[test]
+fn reset_makes_the_v7_stream_forget_the_audio_before_the_pause() {
+    let _env = EnvGuard::new();
+    let profile = StoredProfile::from_json(&v7_profile_json(None)).expect("v7 profile");
+    let speech = v7_input_hops(150);
+
+    let mut fresh = v7_filter(&profile);
+    let reference = run_quiet(&mut fresh, 0..60);
+
+    let mut stale = v7_filter(&profile);
+    for hop in &speech {
+        stale.process(hop).expect("hop");
+    }
+    let leaked = run_quiet(&mut stale, 0..60);
+
+    let mut resumed = v7_filter(&profile);
+    for hop in &speech {
+        resumed.process(hop).expect("hop");
+    }
+    assert_eq!(unsafe { clearcore_filter_reset(&raw mut resumed) }, 0);
+    assert!(resumed.v7_active(), "the profile survives the reset");
+    let after = run_quiet(&mut resumed, 0..60);
+
+    let (e_ref, e_leak, e_after) = (energy(&reference), energy(&leaked), energy(&after));
+    eprintln!(
+        "v7 quiet-output energy: fresh {e_ref:.3e}, no reset {e_leak:.3e}, reset {e_after:.3e}; \
+         max |reset - fresh| {}",
+        max_abs_diff(&after, &reference)
+    );
+    assert!(
+        e_leak > 100.0 * e_ref.max(1e-12),
+        "control: without the reset the FIFOs replay A ({e_leak:.3e} vs {e_ref:.3e})"
+    );
+    assert!(
+        max_abs_diff(&after, &reference) <= 1e-6,
+        "after the reset the v7 output equals a fresh filter's"
+    );
+    assert!(e_after <= e_ref + 1e-9, "no energy of A after the reset");
+}
+
+/// Same contract on the v3 path (the bundled pDFNet3 Pro v3 on ONNX Runtime, no v7).
+#[test]
+fn reset_makes_the_v3_path_forget_the_audio_before_the_pause() {
+    let _env = EnvGuard::new();
+    let mut fresh = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
+    let reference = run_quiet(&mut fresh, 0..40);
+
+    let mut stale = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
+    run(&mut stale, 0..80);
+    let leaked = run_quiet(&mut stale, 0..40);
+
+    let mut resumed = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
+    run(&mut resumed, 0..80);
+    assert!(
+        resumed
+            .core
+            .engine_state()
+            .is_some_and(|s| s.iter().flatten().any(|v| *v != 0.0)),
+        "the recurrent state advanced on A"
+    );
+    assert_eq!(unsafe { clearcore_filter_reset(&raw mut resumed) }, 0);
+    assert!(
+        resumed
+            .core
+            .engine_state()
+            .is_some_and(|s| s.iter().flatten().all(|v| *v == 0.0)),
+        "the recurrent state is zero after the reset"
+    );
+    let after = run_quiet(&mut resumed, 0..40);
+
+    eprintln!(
+        "v3 quiet-output energy: fresh {:.3e}, no reset {:.3e}, reset {:.3e}; max |reset - fresh| {}",
+        energy(&reference),
+        energy(&leaked),
+        energy(&after),
+        max_abs_diff(&after, &reference)
+    );
+    assert!(
+        max_abs_diff(&leaked, &reference) > 1e-4,
+        "control: without the reset the output still carries A"
+    );
+    assert!(
+        max_abs_diff(&after, &reference) <= 1e-6,
+        "after the reset the v3 output equals a fresh filter's"
+    );
+}
+
+/// The studio chain (filters, compressor and AGC envelopes, limiter look-ahead) is rebuilt too:
+/// with a preset on, a used filter after the reset matches a fresh filter after the reset.
+#[test]
+fn reset_also_clears_the_studio_chain_and_keeps_the_preset() {
+    let _env = EnvGuard::new();
+    let make = || {
+        let filter = v3_only(ClearcoreFilter::new(&repo_root(), None).expect("filter"));
+        filter.control.set_preset(Preset::Podcast);
+        filter
+    };
+    let mut fresh = make();
+    fresh.reset_stream().expect("reset");
+    let reference = run(&mut fresh, 0..30);
+
+    let mut used = make();
+    run(&mut used, 0..80);
+    used.reset_stream().expect("reset");
+    assert_eq!(used.applied_preset, Preset::Podcast);
+    let after = run(&mut used, 0..30);
+    assert!(
+        max_abs_diff(&after, &reference) <= 1e-6,
+        "studio chain state survived the reset ({})",
+        max_abs_diff(&after, &reference)
+    );
+}
+
+/// The ORT standby is zeroed too, so a later swap cannot import pre-pause state.
+#[test]
+fn reset_zeroes_the_standby_engine_as_well() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    struct Counting(Arc<AtomicU32>);
+    impl Engine for Counting {
+        fn label(&self) -> String {
+            "counting".to_owned()
+        }
+        fn run(
+            &mut self,
+            _: &realtime_noise_model::ExtractedFeatures,
+        ) -> Result<realtime_noise_model::ModelFrameOutput, String> {
+            Err("unused".to_owned())
+        }
+        fn reset(&mut self) -> Result<(), String> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+        fn set_conditioning(&mut self, _: &Conditioning) -> Result<(), String> {
+            Ok(())
+        }
+        fn supports_speaker(&self) -> bool {
+            true
+        }
+    }
+    let (active, standby) = (Arc::new(AtomicU32::new(0)), Arc::new(AtomicU32::new(0)));
+    let descriptor = realtime_noise_model::BackendDescriptor {
+        backend: "t",
+        backend_version: "1",
+        runtime: "t",
+        runtime_version: "1",
+        asset_id: "t".to_owned(),
+        asset_sha256: String::new(),
+        cpu_profile: "any",
+    };
+    let mut engine = FallbackEngine::new(
+        descriptor,
+        Box::new(Counting(active.clone())),
+        Some(Box::new(Counting(standby.clone()))),
+        LatencyPolicy::from_env(),
+    );
+    SpectralModelBackend::reset(&mut engine).expect("reset");
+    assert_eq!(active.load(Ordering::Relaxed), 1);
+    assert_eq!(standby.load(Ordering::Relaxed), 1);
 }
