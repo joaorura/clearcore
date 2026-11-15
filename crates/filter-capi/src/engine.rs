@@ -399,7 +399,14 @@ impl SpectralModelBackend for FallbackEngine {
         }
     }
 
+    /// Zeroes the recurrent state of the active engine and of the standby, so a later swap
+    /// cannot carry audio from before the reset either.
     fn reset(&mut self) -> Result<(), InferenceError> {
+        if let Some(standby) = self.standby.as_mut() {
+            standby
+                .reset()
+                .map_err(InferenceError::InferenceExecution)?;
+        }
         self.active
             .reset()
             .map_err(InferenceError::InferenceExecution)
